@@ -1,0 +1,25 @@
+name: live-smoke
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'   # Mondays at 09:00 UTC
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+      - name: Live integration tests
+        run: pytest tests/integration -v
+        continue-on-error: true
