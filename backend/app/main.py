@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.auth import require_api_key
 from app.models import PriceResponse
 from app.orchestrator import run
+from app.scrapers.base import DEFAULT_HEADERS
 from app.scrapers.registry import ALL_SCRAPERS
 
 app = FastAPI(title="Gold Bar Price Tracker")
@@ -42,7 +43,7 @@ async def health(_: None = Depends(require_api_key)) -> dict[str, object]:
     """Run all scrapers against 5g and return per-dealer pass/fail summary."""
     async def _check(s) -> dict[str, object]:
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(headers=DEFAULT_HEADERS) as client:
                 listing = await s.fetch(5.0, client)
             return {
                 "dealer": s.name,

@@ -5,7 +5,7 @@ import httpx
 
 from app.fx import fetch_usd_to
 from app.models import Listing, PerCurrency, PriceResponse, SpotPrice
-from app.scrapers.base import now_utc
+from app.scrapers.base import DEFAULT_HEADERS, now_utc
 from app.scrapers.registry import ALL_SCRAPERS
 from app.spot import fetch_spot_usd_per_gram
 
@@ -36,7 +36,7 @@ def _sort_key(li: Listing) -> tuple[int, float]:
 
 
 async def run(size_g: float) -> PriceResponse:
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(headers=DEFAULT_HEADERS) as client:
         scraper_tasks = [_safe_fetch(s, size_g, client) for s in ALL_SCRAPERS]
         spot_task = fetch_spot_usd_per_gram(client)
         fx_task = fetch_usd_to(client)
