@@ -132,6 +132,12 @@ tr.error td { color: var(--error); }
 tr.unavailable td { color: var(--muted); }
 tr.out_of_stock td { color: var(--muted); }
 .brand-cell { color: var(--fg-soft); }
+.loading-msg {
+  text-align: center;
+  color: var(--muted);
+  padding: 1.25rem 0 0.75rem;
+  font-size: 0.95rem;
+}
 .dealer-link {
   color: var(--accent);
   text-decoration: none;

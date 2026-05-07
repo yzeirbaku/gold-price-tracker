@@ -62,13 +62,14 @@ async function fetchSpot() {
 async function fetchPrices(size) {
   const apiKey = loadApiKey();
   if (!apiKey) {
-    showStatus('Open Settings to configure your API key.');
+    showMessage('Open Settings to configure your API key.');
     return;
   }
   lastSize = size;
-  showStatus(`Loading… first request after idle can take ~60 s.`);
+  showMessage('Loading…');
   $('#listings').hidden = true;
   $('#refresh').hidden = true;
+  $('#status').textContent = '';
   setActiveSize(size);
 
   let resp;
@@ -77,11 +78,11 @@ async function fetchPrices(size) {
       headers: { 'X-API-Key': apiKey },
     });
   } catch (e) {
-    showStatus(`Network error: ${e.message}`);
+    showMessage(`Network error: ${e.message}`);
     return;
   }
-  if (resp.status === 401) { showStatus('Bad API key — open Settings.'); return; }
-  if (!resp.ok) { showStatus(`Server error: ${resp.status}`); return; }
+  if (resp.status === 401) { showMessage('Bad API key — open Settings.'); return; }
+  if (!resp.ok) { showMessage(`Server error: ${resp.status}`); return; }
   const data = await resp.json();
   renderPrices(data);
   // Reuse the spot block from the prices response — it's fresher than the cached one.
@@ -111,13 +112,15 @@ function renderPrices(data) {
     }
     tbody.appendChild(tr);
   }
+  $('#loading').hidden = true;
   $('#listings').hidden = false;
   $('#refresh').hidden = false;
   $('#status').textContent = `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`;
 }
 
-function showStatus(msg) {
-  $('#status').textContent = msg;
+function showMessage(msg) {
+  $('#loading').textContent = msg;
+  $('#loading').hidden = false;
 }
 function setActiveSize(size) {
   document.querySelectorAll('#size-picker button').forEach(b => {
@@ -145,6 +148,8 @@ $('#settings-dialog').addEventListener('close', () => {
 
 // Spot price: load on page open, then auto-refresh while visible.
 fetchSpot();
+// Default size selection: load 10 g listings as soon as the page opens.
+fetchPrices(10);
 setInterval(() => {
   if (document.visibilityState === 'visible') fetchSpot();
 }, SPOT_REFRESH_MS);
