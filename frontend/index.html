@@ -18,9 +18,11 @@
   </header>
 
   <section id="spot" class="card">
-    <h2>Spot price</h2>
+    <div class="card-head">
+      <h2>Spot price</h2>
+      <div id="spot-updated" class="muted-tiny"></div>
+    </div>
     <div id="spot-content">Loading…</div>
-    <div id="spot-updated" class="muted-tiny"></div>
   </section>
 
   <section id="size-picker" class="card">
@@ -34,7 +36,7 @@
   </section>
 
   <section id="results" class="card">
-    <div class="results-head">
+    <div class="results-corner">
       <div id="status"></div>
       <button id="refresh" class="icon-btn" aria-label="Refresh prices" title="Refresh" hidden>↻</button>
     </div>

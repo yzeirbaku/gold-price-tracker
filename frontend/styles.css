@@ -64,12 +64,18 @@ main { max-width: 720px; margin: 0 auto; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+  position: relative;
 }
 .card h2 {
   margin: 0 0 0.65rem 0;
   font-size: 0.72rem; font-weight: 600;
   color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;
 }
+.card-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 0.75rem;
+}
+.card-head h2 { margin: 0 0 0.65rem 0; }
 
 .buttons { display: flex; gap: 0.5rem; }
 .buttons button {
@@ -87,10 +93,12 @@ main { max-width: 720px; margin: 0 auto; }
   box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 6px 16px rgba(184,147,42,0.18);
 }
 
-.results-head {
-  display: flex; align-items: center; justify-content: flex-end;
-  gap: 0.6rem;
-  min-height: 32px;
+.results-corner {
+  position: absolute;
+  top: 0.6rem; right: 0.7rem;
+  display: flex; align-items: center;
+  gap: 0.4rem;
+  z-index: 1;
 }
 #status {
   color: var(--muted);
@@ -98,7 +106,9 @@ main { max-width: 720px; margin: 0 auto; }
   text-align: right;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.muted-tiny { font-size: 0.7rem; text-align: right; }
+#results table { padding-right: 0; }
+#results thead th:last-child { min-width: 7rem; }
+.muted-tiny { font-size: 0.7rem; }
 #refresh {
   flex: 0 0 auto;
 }
@@ -107,9 +117,10 @@ main { max-width: 720px; margin: 0 auto; }
 table {
   width: 100%;
   border-collapse: separate; border-spacing: 0;
-  margin-top: 0.15rem;
+  margin-top: 0;
   font-variant-numeric: tabular-nums;
 }
+#results.card { padding-top: 0.6rem; }
 th, td { padding: 0.7rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.92rem; }
 th { color: var(--muted); font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
 tbody tr:last-child td { border-bottom: 0; }

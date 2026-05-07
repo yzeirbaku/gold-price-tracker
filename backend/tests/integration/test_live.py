@@ -8,7 +8,7 @@ from app.scrapers.registry import ALL_SCRAPERS
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scraper", ALL_SCRAPERS, ids=lambda s: s.name)
 async def test_dealer_returns_a_price_live(scraper) -> None:
-    """Hit the real dealer site and assert we extract a numeric price for at least one of 2.5/5/10/20g.
+    """Live-fetch the dealer and assert a parseable price for one of 2.5/5/10/20 g.
 
     The canary is parser correctness, not dealer inventory: a price found on an
     out-of-stock card still proves the selectors work. If every size returns
