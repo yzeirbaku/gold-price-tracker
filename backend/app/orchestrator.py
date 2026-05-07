@@ -45,7 +45,7 @@ async def run(size_g: float) -> PriceResponse:
                 fetch_spot_usd_per_gram(client),
                 fetch_usd_to(client),
             ),
-            timeout=12.0,
+            timeout=15.0,
         )
 
     spot: SpotPrice | None = None

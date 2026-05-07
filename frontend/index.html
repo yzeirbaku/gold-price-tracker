@@ -14,7 +14,7 @@
 <body>
   <header>
     <h1>Denmark Gold Bar Price Tracker</h1>
-    <button id="settings-btn" aria-label="Settings">⚙️</button>
+    <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
   </header>
 
   <section id="spot" class="card">
@@ -33,14 +33,16 @@
   </section>
 
   <section id="results" class="card">
-    <div id="status"></div>
+    <div class="results-head">
+      <div id="status"></div>
+      <button id="refresh" class="icon-btn" aria-label="Refresh prices" title="Refresh" hidden>↻</button>
+    </div>
     <table id="listings" hidden>
       <thead>
         <tr><th>Dealer</th><th>Price</th><th>Premium</th><th></th></tr>
       </thead>
       <tbody></tbody>
     </table>
-    <button id="refresh" hidden>Refresh</button>
   </section>
 
   <dialog id="settings-dialog">

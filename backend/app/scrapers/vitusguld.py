@@ -12,48 +12,77 @@ logger = logging.getLogger(__name__)
 class VitusGuldScraper:
     name = "Vitus Guld"
     base_url = "https://vitusguld.dk"
+    listing_url = (
+        "https://vitusguld.dk/produkt-kategori/"
+        "guldbarre-guldmoenter-guldsmykker/guldbarre/"
+    )
 
     async def fetch(self, size_g: float, client: httpx.AsyncClient) -> Listing | None:
-        url = f"{self.base_url}/produkt-kategori/guldbarre-guldmoenter-guldsmykker/guldbarre/"
+        # Vitus's category listing is cached for several minutes, so its prices
+        # drift behind the live spot. The product detail pages render fresh,
+        # so we use the listing only to pick a candidate URL and read the price
+        # from the product page.
         try:
-            resp = await client.get(url, timeout=8.0, follow_redirects=True)
-            resp.raise_for_status()
+            listing_resp = await client.get(self.listing_url, timeout=6.0, follow_redirects=True)
+            listing_resp.raise_for_status()
         except httpx.HTTPError as e:
-            logger.warning("Vitus Guld fetch failed: %s", e)
+            logger.warning("Vitus Guld listing fetch failed: %s", e)
             return Listing(
                 dealer=self.name, status="error",
                 error=f"http: {e.__class__.__name__}", fetched_at=now_utc(),
             )
-        return self.parse(resp.text, size_g)
 
-    def parse(self, html: str, size_g: float) -> Listing | None:
+        product_url = self.parse_listing(listing_resp.text, size_g)
+        if product_url is None:
+            return None
+
+        try:
+            product_resp = await client.get(product_url, timeout=6.0, follow_redirects=True)
+            product_resp.raise_for_status()
+        except httpx.HTTPError as e:
+            logger.warning("Vitus Guld product fetch failed: %s", e)
+            return Listing(
+                dealer=self.name, status="error",
+                error=f"http: {e.__class__.__name__}", fetched_at=now_utc(),
+            )
+
+        return self.parse_product(product_resp.text, product_url)
+
+    def parse_listing(self, html: str, size_g: float) -> str | None:
+        """Pick the cheapest valid in-stock variant on the category page and return its URL."""
         tree = make_html_parser(html)
         product = self._find_product_for_size(tree, size_g)
         if product is None:
             return None
-
-        # Price: first .woocommerce-Price-amount.amount bdi inside the card
-        price_node = product.css_first(".woocommerce-Price-amount.amount bdi")
-        # Link: anchor with class uael-loop-product__link
         link_node = product.css_first("a.uael-loop-product__link")
-        # In-stock: <p class="stock in-stock"> present when in stock
-        in_stock_node = product.css_first(".stock.in-stock")
+        if link_node is None:
+            return None
+        href = link_node.attributes.get("href") or ""
+        if not href:
+            return None
+        return href if href.startswith("http") else f"{self.base_url}{href}"
 
-        if price_node is None or link_node is None:
+    def parse_product(self, html: str, url: str) -> Listing:
+        """Read the live price + availability from a Vitus product page's OpenGraph meta."""
+        tree = make_html_parser(html)
+        price_meta = tree.css_first('meta[property="product:price:amount"]')
+        avail_meta = (
+            tree.css_first('meta[property="product:availability"]')
+            or tree.css_first('meta[property="og:availability"]')
+        )
+        if price_meta is None:
             return Listing(
                 dealer=self.name, status="error",
-                error="parse_failed: missing price/link node", fetched_at=now_utc(),
+                error="parse_failed: missing og:price meta", fetched_at=now_utc(),
             )
-        price = parse_dkk_price(price_node.text(strip=True))
+        price = parse_dkk_price(price_meta.attributes.get("content") or "")
         if price is None:
             return Listing(
                 dealer=self.name, status="unavailable",
-                error="non-numeric price text", fetched_at=now_utc(),
+                error="non-numeric og:price", fetched_at=now_utc(),
             )
-        in_stock = in_stock_node is not None
-        href = link_node.attributes.get("href") or ""
-        url = href if href.startswith("http") else f"{self.base_url}{href}"
-
+        availability = ((avail_meta.attributes.get("content") if avail_meta else "") or "").lower()
+        in_stock = availability in {"instock", "in stock"}
         return Listing(
             dealer=self.name,
             status="ok" if in_stock else "out_of_stock",
