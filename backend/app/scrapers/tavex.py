@@ -1,7 +1,7 @@
 import logging
 
 import httpx
-from selectolax.parser import HTMLParser
+from selectolax.parser import HTMLParser, Node
 
 from app.models import Listing
 from app.scrapers.base import make_html_parser, now_utc, parse_dkk_price
@@ -51,7 +51,7 @@ class TavexScraper:
                 error="non-numeric price text", fetched_at=now_utc(),
             )
         in_stock = in_stock_node is not None
-        href = link_node.attributes.get("href", "")
+        href = link_node.attributes.get("href") or ""
         url = href if href.startswith("http") else f"{self.base_url}{href}"
 
         return Listing(
@@ -59,18 +59,18 @@ class TavexScraper:
             status="ok" if in_stock else "out_of_stock",
             price_dkk=price,
             in_stock=in_stock,
-            url=url,
+            url=url,  # type: ignore[arg-type]
             fetched_at=now_utc(),
         )
 
-    def _find_product_for_size(self, tree: HTMLParser, size_g: float) -> object:
+    def _find_product_for_size(self, tree: HTMLParser, size_g: float) -> Node | None:
         # Product grid cards have class "not-listing js-product".
         # Skip "product--listing" cards (carousel/sidebar items without prices).
         # Match by title text: Tavex uses "5 gram", "10 gram", etc.
         size_int = int(size_g) if size_g.is_integer() else size_g
         needle = f"{size_int} gram"
         for card in tree.css(".js-product"):
-            cls = card.attributes.get("class", "")
+            cls = card.attributes.get("class") or ""
             if "not-listing" not in cls:
                 continue
             title_node = card.css_first(".product__title-inner")

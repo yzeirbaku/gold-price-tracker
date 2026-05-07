@@ -5,14 +5,16 @@ import httpx
 
 from app.fx import fetch_usd_to
 from app.models import Listing, PerCurrency, PriceResponse, SpotPrice
-from app.scrapers.base import DEFAULT_HEADERS, now_utc
+from app.scrapers.base import DEFAULT_HEADERS, DealerScraper, now_utc
 from app.scrapers.registry import ALL_SCRAPERS
 from app.spot import fetch_spot_usd_per_gram
 
 logger = logging.getLogger(__name__)
 
 
-async def _safe_fetch(scraper, size_g: float, client: httpx.AsyncClient) -> Listing:
+async def _safe_fetch(
+    scraper: "DealerScraper", size_g: float, client: httpx.AsyncClient
+) -> Listing:
     try:
         result = await scraper.fetch(size_g, client)
         if result is None:
@@ -37,18 +39,14 @@ def _sort_key(li: Listing) -> tuple[int, float]:
 
 async def run(size_g: float) -> PriceResponse:
     async with httpx.AsyncClient(headers=DEFAULT_HEADERS) as client:
-        scraper_tasks = [_safe_fetch(s, size_g, client) for s in ALL_SCRAPERS]
-        spot_task = fetch_spot_usd_per_gram(client)
-        fx_task = fetch_usd_to(client)
-
-        results = await asyncio.wait_for(
-            asyncio.gather(*scraper_tasks, spot_task, fx_task, return_exceptions=False),
+        listings, spot_per_g_usd, (fx_rates, fx_stale) = await asyncio.wait_for(
+            asyncio.gather(
+                asyncio.gather(*[_safe_fetch(s, size_g, client) for s in ALL_SCRAPERS]),
+                fetch_spot_usd_per_gram(client),
+                fetch_usd_to(client),
+            ),
             timeout=12.0,
         )
-
-    listings: list[Listing] = list(results[: len(scraper_tasks)])
-    spot_per_g_usd = results[len(scraper_tasks)]
-    fx_rates, fx_stale = results[len(scraper_tasks) + 1]
 
     spot: SpotPrice | None = None
     if spot_per_g_usd is not None:

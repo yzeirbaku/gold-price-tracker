@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
@@ -7,14 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.auth import require_api_key
 from app.models import PriceResponse
 from app.orchestrator import run
-from app.scrapers.base import DEFAULT_HEADERS
+from app.scrapers.base import DEFAULT_HEADERS, DealerScraper
 from app.scrapers.registry import ALL_SCRAPERS
 
 app = FastAPI(title="Gold Bar Price Tracker")
 
 # CORS — only the deployed Cloudflare Pages frontend may call us.
 # (Set FRONTEND_ORIGIN env var on Render to your *.pages.dev URL.)
-import os
 _origin = os.environ.get("FRONTEND_ORIGIN", "*")
 app.add_middleware(
     CORSMiddleware,
@@ -41,7 +41,7 @@ async def get_prices(size: float, _: None = Depends(require_api_key)) -> PriceRe
 @app.get("/health")
 async def health(_: None = Depends(require_api_key)) -> dict[str, object]:
     """Run all scrapers against 5g and return per-dealer pass/fail summary."""
-    async def _check(s) -> dict[str, object]:
+    async def _check(s: DealerScraper) -> dict[str, object]:
         try:
             async with httpx.AsyncClient(headers=DEFAULT_HEADERS) as client:
                 listing = await s.fetch(5.0, client)
