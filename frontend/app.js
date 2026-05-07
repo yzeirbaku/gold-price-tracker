@@ -1,11 +1,9 @@
-const STORAGE_KEY = 'gold-tracker-config';
+const API_KEY_STORAGE = 'gold-tracker-api-key';
+const BACKEND_URL = (window.BACKEND_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const $ = (s) => document.querySelector(s);
 
-function loadConfig() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
-  catch { return {}; }
-}
-function saveConfig(c) { localStorage.setItem(STORAGE_KEY, JSON.stringify(c)); }
+function loadApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ''; }
+function saveApiKey(k) { localStorage.setItem(API_KEY_STORAGE, k); }
 
 function fmtDKK(n) { return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', maximumFractionDigits: 0 }).format(n); }
 function fmtEUR(n) { return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 }).format(n); }
@@ -14,9 +12,9 @@ function fmtPct(n) { return n == null ? '—' : (n > 0 ? '+' : '') + n.toFixed(1
 let lastSize = null;
 
 async function fetchPrices(size) {
-  const cfg = loadConfig();
-  if (!cfg.backendUrl || !cfg.apiKey) {
-    showStatus('Open Settings to configure backend URL and API key.');
+  const apiKey = loadApiKey();
+  if (!apiKey) {
+    showStatus('Open Settings to configure your API key.');
     return;
   }
   lastSize = size;
@@ -27,8 +25,8 @@ async function fetchPrices(size) {
 
   let resp;
   try {
-    resp = await fetch(`${cfg.backendUrl.replace(/\/$/, '')}/prices/${size}`, {
-      headers: { 'X-API-Key': cfg.apiKey },
+    resp = await fetch(`${BACKEND_URL}/prices/${size}`, {
+      headers: { 'X-API-Key': apiKey },
     });
   } catch (e) {
     showStatus(`Network error: ${e.message}`);
@@ -94,19 +92,17 @@ $('#refresh').addEventListener('click', () => { if (lastSize != null) fetchPrice
 
 // Settings dialog
 $('#settings-btn').addEventListener('click', () => {
-  const cfg = loadConfig();
-  $('#backend-url').value = cfg.backendUrl || '';
-  $('#api-key').value = cfg.apiKey || '';
+  $('#api-key').value = loadApiKey();
   $('#settings-dialog').showModal();
 });
 $('#settings-dialog').addEventListener('close', () => {
   if ($('#settings-dialog').returnValue === 'save') {
-    saveConfig({ backendUrl: $('#backend-url').value, apiKey: $('#api-key').value });
+    saveApiKey($('#api-key').value);
     showStatus('Settings saved.');
   }
 });
 
-// Service worker registration (Task 24)
+// Service worker registration
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('service-worker.js').catch(() => {});
 }

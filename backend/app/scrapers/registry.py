@@ -1,6 +1,5 @@
 from app.scrapers.base import DealerScraper
 from app.scrapers.janjorgensen import JanJorgensenScraper
-from app.scrapers.monthuset import MonthusetScraper
 from app.scrapers.nordiskguld import NordiskGuldScraper
 from app.scrapers.nyfortuna import NyfortunaScraper
 from app.scrapers.plaza import PlazaScraper
@@ -16,5 +15,4 @@ ALL_SCRAPERS: list[DealerScraper] = [
     SeroGuldScraper(),
     NyfortunaScraper(),
     JanJorgensenScraper(),
-    MonthusetScraper(),
 ]
