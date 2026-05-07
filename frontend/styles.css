@@ -48,9 +48,9 @@ header h1 {
 }
 .icon-btn {
   background: transparent; border: 1px solid transparent;
-  color: var(--fg-soft); width: 50px; height: 50px;
+  color: var(--fg-soft); width: 46px; height: 46px;
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 999px; font-size: 1.6rem; cursor: pointer;
+  border-radius: 999px; font-size: 1.45rem; cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
 .icon-btn:hover { background: var(--surface-2); color: var(--fg); border-color: var(--border); }
@@ -88,17 +88,17 @@ main { max-width: 720px; margin: 0 auto; }
 }
 
 .results-head {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 0.75rem;
-  min-height: 36px;
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 0.6rem;
+  min-height: 32px;
 }
 #status {
   color: var(--muted);
   font-size: 0.7rem;
-  flex: 1; min-width: 0;
+  text-align: right;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.muted-tiny { font-size: 0.7rem; }
+.muted-tiny { font-size: 0.7rem; text-align: right; }
 #refresh {
   flex: 0 0 auto;
 }
@@ -107,7 +107,7 @@ main { max-width: 720px; margin: 0 auto; }
 table {
   width: 100%;
   border-collapse: separate; border-spacing: 0;
-  margin-top: 0.75rem;
+  margin-top: 0.15rem;
   font-variant-numeric: tabular-nums;
 }
 th, td { padding: 0.7rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.92rem; }
@@ -166,12 +166,12 @@ dialog menu button[value="save"] {
 }
 @keyframes spotFlash {
   0%   { color: inherit; text-shadow: none; }
-  15%  { color: var(--accent); text-shadow: 0 0 14px rgba(226,192,84,0.55); }
-  60%  { color: var(--accent); text-shadow: 0 0 12px rgba(226,192,84,0.35); }
+  10%  { color: var(--accent); text-shadow: 0 0 16px rgba(226,192,84,0.65); }
+  70%  { color: var(--accent); text-shadow: 0 0 12px rgba(226,192,84,0.4); }
   100% { color: inherit; text-shadow: none; }
 }
 .spot-value.flash {
-  animation: spotFlash 1.6s ease;
+  animation: spotFlash 2.8s ease;
 }
 
 .muted-tiny { color: var(--muted); margin-top: 0.6rem; }

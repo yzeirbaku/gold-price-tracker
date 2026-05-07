@@ -1,6 +1,6 @@
 # Gold Bar Tracker
 
-Personal tool to compare 2.5 g, 5 g, and 10 g gold-bar prices across Danish online dealers, plus live spot prices for gold and silver. Accessed as a PWA from iPhone.
+Personal tool to compare 2.5 g, 5 g, 10 g, and 20 g gold-bar prices across Danish online dealers, plus live spot prices for gold and silver. Accessed as a PWA from iPhone.
 
 ## Architecture
 
@@ -18,7 +18,7 @@ Personal tool to compare 2.5 g, 5 g, and 10 g gold-bar prices across Danish onli
 | Plaza | ✓ live |
 | Nordisk Guld | ✓ live (needed Sec-Ch-Ua / Sec-Fetch-* headers to bypass Simply.com WAF) |
 | Sero Guld | ✓ live (same WAF as Nordisk; stock varies) |
-| Nyfortuna | ✓ live (carries 1g/10g/20g/50g — no 2.5g or 5g) |
+| Nyfortuna | ✓ live |
 | Jan Jørgensen Smykker | ✓ live |
 | Mønthuset | dropped — live guldbarrer category empty since early 2025 |
 | Silver Gold Bull DK | skipped — JS-rendered React SPA + Algolia + dynamic pricing |

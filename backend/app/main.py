@@ -25,7 +25,7 @@ app.add_middleware(
     allow_headers=["X-API-Key", "Content-Type"],
 )
 
-ALLOWED_SIZES = {2.5, 5.0, 10.0}
+ALLOWED_SIZES = {2.5, 5.0, 10.0, 20.0}
 
 
 @app.get("/")
