@@ -95,14 +95,13 @@ main { max-width: 720px; margin: 0 auto; }
   box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 6px 16px rgba(184,147,42,0.18);
 }
 
-.results-corner {
-  position: absolute;
-  top: 0.25rem; right: 0.7rem;
-  display: flex; align-items: center;
-  gap: 0.4rem;
-  z-index: 1;
+.results-head {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 0.5rem;
+  min-height: 32px;
+  margin-bottom: 0.15rem;
 }
-.results-corner .icon-btn { width: 34px; height: 34px; font-size: 1.15rem; }
+.results-head .icon-btn { width: 34px; height: 34px; font-size: 1.15rem; }
 #status {
   color: var(--muted);
   font-size: 0.7rem;
@@ -121,7 +120,7 @@ table {
   margin-top: 0;
   font-variant-numeric: tabular-nums;
 }
-#results.card { padding-top: 0.6rem; }
+#results.card { padding-top: 0.55rem; }
 th, td { padding: 0.55rem 0.3rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
 th:first-child, td:first-child { padding-left: 0; }
 th:last-child, td:last-child { padding-right: 0; text-align: right; }
@@ -132,7 +131,7 @@ tbody tr:hover { background: rgba(255,255,255,0.02); }
 tr.error td { color: var(--error); }
 tr.unavailable td { color: var(--muted); }
 tr.out_of_stock td { color: var(--muted); }
-.brand-cell { color: var(--fg-soft); font-size: 0.82rem; }
+.brand-cell { color: var(--fg-soft); }
 .visit-link {
   display: inline-flex; align-items: center; justify-content: center;
   width: 30px; height: 30px;

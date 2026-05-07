@@ -86,7 +86,9 @@ async function fetchPrices(size) {
 function renderPrices(data) {
   const tbody = $('#listings tbody');
   tbody.innerHTML = '';
-  for (const li of data.listings) {
+  // Hide out-of-stock listings — they're noise; only surface ok rows + scraper errors.
+  const visible = data.listings.filter(li => li.status !== 'out_of_stock');
+  for (const li of visible) {
     const tr = document.createElement('tr');
     tr.className = li.status;
     const brand = li.brand ? escapeHtml(li.brand) : '—';
