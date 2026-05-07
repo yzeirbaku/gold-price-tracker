@@ -6,12 +6,13 @@ const $ = (s) => document.querySelector(s);
 function loadApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ''; }
 function saveApiKey(k) { localStorage.setItem(API_KEY_STORAGE, k); }
 
-function fmtNum(n, decimals) {
-  // en-US locale: '.' as decimal separator, ',' as thousands — keeps spot
-  // values and table prices using the same convention across the page.
-  return new Intl.NumberFormat('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n);
+function fmtNum(n, decimals, locale = 'en-US') {
+  return new Intl.NumberFormat(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n);
 }
-function fmtDKK(n) { return `${fmtNum(n, 0)} dkk`; }
+// Whole-number table prices use Danish thousand-grouping ('.') so the page
+// shows dots only — no commas anywhere. Spot uses en-US so its '.' is the
+// decimal separator. Both yield dots-only output.
+function fmtDKK(n) { return `${fmtNum(n, 0, 'da-DK')} dkk`; }
 function fmtEUR(n) { return `${fmtNum(n, 2)} eur`; }
 function fmtSpotDKK(n) { return `${fmtNum(n, 2)} dkk`; }
 function fmtSpotEUR(n) { return `${fmtNum(n, 2)} eur`; }
