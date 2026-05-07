@@ -132,13 +132,14 @@ tr.error td { color: var(--error); }
 tr.unavailable td { color: var(--muted); }
 tr.out_of_stock td { color: var(--muted); }
 .brand-cell { color: var(--fg-soft); }
-.visit-link {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px;
-  font-size: 1.1rem; font-weight: 500;
-  border-radius: 8px; border: 1px solid transparent;
+.dealer-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+  border-bottom: 1px dotted rgba(226,192,84,0.35);
+  transition: color 120ms ease, border-color 120ms ease;
 }
-.visit-link:hover { background: var(--surface-2); }
+.dealer-link:hover { color: #f5e2a4; border-bottom-color: var(--accent); }
 
 dialog {
   background: var(--surface); color: var(--fg);
@@ -196,5 +197,3 @@ dialog menu button[value="save"] {
 
 .muted-tiny { color: var(--muted); margin-top: 0.6rem; }
 
-a.visit-link { color: var(--accent); text-decoration: none; transition: color 120ms ease, background 120ms ease; }
-a.visit-link:hover { color: #f5e2a4; }

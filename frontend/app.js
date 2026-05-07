@@ -8,6 +8,8 @@ function saveApiKey(k) { localStorage.setItem(API_KEY_STORAGE, k); }
 
 function fmtDKK(n) { return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', maximumFractionDigits: 0 }).format(n); }
 function fmtEUR(n) { return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 }).format(n); }
+function fmtSpotDKK(n) { return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n); }
+function fmtSpotEUR(n) { return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n); }
 function fmtPct(n) { return n == null ? '—' : (n > 0 ? '+' : '') + n.toFixed(1) + '%'; }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 
@@ -21,14 +23,14 @@ function renderSpot(data) {
     return;
   }
   const g = data.spot.gold, s = data.spot.silver;
-  const goldText = `${fmtEUR(g.per_gram_eur)}/g · ${fmtDKK(g.per_gram_dkk)}/g`;
-  const silverText = `${fmtEUR(s.per_gram_eur)}/g · ${fmtDKK(s.per_gram_dkk)}/g`;
+  const goldText = `${fmtSpotEUR(g.per_gram_eur)} · ${fmtSpotDKK(g.per_gram_dkk)}`;
+  const silverText = `${fmtSpotEUR(s.per_gram_eur)} · ${fmtSpotDKK(s.per_gram_dkk)}`;
   // Flash on every refresh after the very first render — the animation triggers
   // when the .flash class is present on the freshly-inserted node.
   const flashClass = hasRenderedSpot ? ' flash' : '';
   $('#spot-content').innerHTML = `
-    <div class="spot-row"><span>Gold</span><span class="spot-value${flashClass}" data-spot="gold">${goldText}</span></div>
-    <div class="spot-row"><span>Silver</span><span class="spot-value${flashClass}" data-spot="silver">${silverText}</span></div>
+    <div class="spot-row"><span>Gold/g</span><span class="spot-value${flashClass}" data-spot="gold">${goldText}</span></div>
+    <div class="spot-row"><span>Silver/g</span><span class="spot-value${flashClass}" data-spot="silver">${silverText}</span></div>
     ${data.fx_stale ? '<div class="spot-row" style="color:var(--error)">⚠ FX rates stale (fallback in use)</div>' : ''}
   `;
   $('#spot-updated').textContent = `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`;
@@ -94,17 +96,15 @@ function renderPrices(data) {
     const brand = li.brand ? escapeHtml(li.brand) : '—';
     if (li.status === 'ok') {
       tr.innerHTML = `
-        <td>${escapeHtml(li.dealer)}</td>
+        <td><a class="dealer-link" href="${li.url}" target="_blank" rel="noopener">${escapeHtml(li.dealer)}</a></td>
         <td class="brand-cell">${brand}</td>
         <td>${fmtDKK(li.price_dkk)}</td>
         <td>${fmtPct(li.premium_pct)}</td>
-        <td><a class="visit-link" href="${li.url}" target="_blank" rel="noopener" aria-label="Visit ${escapeHtml(li.dealer)}" title="Visit ${escapeHtml(li.dealer)}">↗</a></td>
       `;
     } else {
-      const note = li.status === 'out_of_stock' ? 'out of stock'
-                : li.status === 'unavailable' ? (li.error || 'unavailable')
+      const note = li.status === 'unavailable' ? (li.error || 'unavailable')
                 : `error (${li.error || 'unknown'})`;
-      tr.innerHTML = `<td>${escapeHtml(li.dealer)}</td><td class="brand-cell">${brand}</td><td colspan="3">${note}</td>`;
+      tr.innerHTML = `<td>${escapeHtml(li.dealer)}</td><td class="brand-cell">${brand}</td><td colspan="2">${note}</td>`;
     }
     tbody.appendChild(tr);
   }
