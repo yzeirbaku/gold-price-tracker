@@ -20,7 +20,7 @@ Personal tool to compare 2.5 g, 5 g, and 10 g gold-bar prices across Danish onli
 | Sero Guld | ✓ live (same WAF as Nordisk; stock varies) |
 | Nyfortuna | ✓ live (carries 1g/10g/20g/50g — no 2.5g or 5g) |
 | Jan Jørgensen Smykker | ✓ live |
-| Mønthuset | ✓ code (live guldbarrer category currently empty) |
+| Mønthuset | dropped — live guldbarrer category empty since early 2025 |
 | Silver Gold Bull DK | skipped — JS-rendered React SPA + Algolia + dynamic pricing |
 
 ## Local dev
@@ -49,7 +49,7 @@ cd frontend
 python -m http.server 5500
 ```
 
-Open `http://127.0.0.1:5500/`, click ⚙️, set backend URL and API key.
+Open `http://127.0.0.1:5500/`, click ⚙️, paste your API key. The backend URL is set in `frontend/config.js` (defaults to `http://127.0.0.1:8000` for local dev; Cloudflare Pages overwrites it at build time via the `BACKEND_URL` env var).
 
 ## Environment variables (Render)
 
