@@ -1,9 +1,13 @@
+import asyncio
+
+import httpx
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth import require_api_key
 from app.models import PriceResponse
 from app.orchestrator import run
+from app.scrapers.registry import ALL_SCRAPERS
 
 app = FastAPI(title="Gold Bar Price Tracker")
 
@@ -31,3 +35,22 @@ async def get_prices(size: float, _: None = Depends(require_api_key)) -> PriceRe
     if size not in ALLOWED_SIZES:
         raise HTTPException(status_code=400, detail=f"size must be one of {sorted(ALLOWED_SIZES)}")
     return await run(size_g=size)
+
+
+@app.get("/health")
+async def health(_: None = Depends(require_api_key)) -> dict[str, object]:
+    """Run all scrapers against 5g and return per-dealer pass/fail summary."""
+    async def _check(s) -> dict[str, object]:
+        try:
+            async with httpx.AsyncClient() as client:
+                listing = await s.fetch(5.0, client)
+            return {
+                "dealer": s.name,
+                "ok": listing is not None and listing.status == "ok",
+                "status": listing.status if listing else "no_listing",
+            }
+        except Exception as e:
+            return {"dealer": s.name, "ok": False, "status": "exception", "error": str(e)}
+
+    results = await asyncio.gather(*[_check(s) for s in ALL_SCRAPERS])
+    return {"ok": all(r["ok"] for r in results), "scrapers": results}
