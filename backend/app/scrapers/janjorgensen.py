@@ -1,5 +1,4 @@
 import logging
-import re
 
 import httpx
 from selectolax.parser import HTMLParser, Node
@@ -8,9 +7,6 @@ from app.models import Listing
 from app.scrapers.base import DEFAULT_HEADERS, make_html_parser, now_utc, parse_dkk_price
 
 logger = logging.getLogger(__name__)
-
-# Matches Danish whole-number prices like "6.252 kr." or "109.220 kr."
-_DANISH_WHOLE_PRICE_RE = re.compile(r"^(\d{1,3}(?:\.\d{3})+)\s*kr", re.IGNORECASE)
 
 
 class JanJorgensenScraper:
@@ -90,10 +86,7 @@ class JanJorgensenScraper:
             price_text = (card.attributes.get("data-price") or "").strip()
             if not price_text:
                 continue
-            normalized = price_text
-            if _DANISH_WHOLE_PRICE_RE.match(normalized):
-                normalized = normalized.replace(".", "")
-            price = parse_dkk_price(normalized)
+            price = parse_dkk_price(price_text)
             if price is None:
                 continue
             in_stock = card.css_first("span.color-green") is not None

@@ -48,9 +48,9 @@ header h1 {
 }
 .icon-btn {
   background: transparent; border: 1px solid transparent;
-  color: var(--fg-soft); width: 42px; height: 42px;
+  color: var(--fg-soft); width: 50px; height: 50px;
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 999px; font-size: 1.3rem; cursor: pointer;
+  border-radius: 999px; font-size: 1.6rem; cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
 .icon-btn:hover { background: var(--surface-2); color: var(--fg); border-color: var(--border); }
@@ -94,10 +94,11 @@ main { max-width: 720px; margin: 0 auto; }
 }
 #status {
   color: var(--muted);
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.muted-tiny { font-size: 0.7rem; }
 #refresh {
   flex: 0 0 auto;
 }
@@ -162,14 +163,18 @@ dialog menu button[value="save"] {
 .spot-row span:first-child { color: var(--muted); font-size: 0.85rem; }
 .spot-value {
   font-variant-numeric: tabular-nums;
-  transition: color 600ms ease, text-shadow 600ms ease;
+}
+@keyframes spotFlash {
+  0%   { color: inherit; text-shadow: none; }
+  15%  { color: var(--accent); text-shadow: 0 0 14px rgba(226,192,84,0.55); }
+  60%  { color: var(--accent); text-shadow: 0 0 12px rgba(226,192,84,0.35); }
+  100% { color: inherit; text-shadow: none; }
 }
 .spot-value.flash {
-  color: var(--accent);
-  text-shadow: 0 0 14px rgba(226,192,84,0.45);
+  animation: spotFlash 1.6s ease;
 }
 
-.muted-tiny { font-size: 0.75rem; color: var(--muted); margin-top: 0.6rem; }
+.muted-tiny { color: var(--muted); margin-top: 0.6rem; }
 
 .visit-link {
   color: var(--accent);

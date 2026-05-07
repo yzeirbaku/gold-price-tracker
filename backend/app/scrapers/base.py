@@ -43,32 +43,41 @@ def now_utc() -> datetime:
 
 
 def parse_dkk_price(text: str) -> float | None:
-    """Extract a DKK price from text like '2.940,00 kr.' or '2940 DKK' or '2,940.00 kr'.
+    """Extract a DKK price from text like '2.940,00 kr.' / '6.252 kr.' / '5345.47'.
 
-    Danish formatting uses '.' as thousand separator and ',' as decimal.
-    Returns None if no number can be extracted.
+    Danish formatting uses '.' as thousand separator and ',' as decimal. The
+    edge case worth flagging: '6.252' (no comma) is a Danish whole-number
+    6,252 — NOT 6.252 — which we detect by looking at how the dot-separated
+    parts are sized. Pure US-style decimals like '5345.47' (used by Vitus's
+    OpenGraph meta) keep parsing correctly because their tail is 1–2 digits.
     """
     import re
 
-    # Strip currency markers and whitespace
     cleaned = re.sub(r"[^\d.,]", "", text)
     cleaned = cleaned.strip(".,")
     if not cleaned:
         return None
 
-    # Heuristic: if both '.' and ',' appear and ',' is later, treat ',' as decimal
     if "," in cleaned and "." in cleaned:
+        # Both present: whichever comes last is the decimal mark.
         if cleaned.rfind(",") > cleaned.rfind("."):
             cleaned = cleaned.replace(".", "").replace(",", ".")
         else:
             cleaned = cleaned.replace(",", "")
     elif "," in cleaned:
-        # Treat ',' as decimal if it has 1-2 digits after it; else thousand sep
         parts = cleaned.split(",")
         if len(parts[-1]) in (1, 2):
             cleaned = cleaned.replace(",", ".")
         else:
             cleaned = cleaned.replace(",", "")
+    elif "." in cleaned:
+        # Only dots present. Treat as Danish thousands separator if every
+        # dot-separated chunk after the first is exactly 3 digits — covers
+        # '1.825', '108.582', '5.366.123'. Leave US-style decimals alone.
+        parts = cleaned.split(".")
+        if len(parts) >= 2 and all(len(p) == 3 and p.isdigit() for p in parts[1:]):
+            cleaned = cleaned.replace(".", "")
+
     try:
         return float(cleaned)
     except ValueError:
