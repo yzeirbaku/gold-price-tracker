@@ -1,5 +1,6 @@
 from app.scrapers.base import DealerScraper
 from app.scrapers.nordiskguld import NordiskGuldScraper
+from app.scrapers.nyfortuna import NyfortunaScraper
 from app.scrapers.plaza import PlazaScraper
 from app.scrapers.seroguld import SeroGuldScraper
 from app.scrapers.tavex import TavexScraper
@@ -11,4 +12,5 @@ ALL_SCRAPERS: list[DealerScraper] = [
     PlazaScraper(),
     NordiskGuldScraper(),
     SeroGuldScraper(),
+    NyfortunaScraper(),
 ]
