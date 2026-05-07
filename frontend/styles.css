@@ -146,6 +146,12 @@ tr.out_of_stock td { color: var(--muted); }
   transition: color 120ms ease, border-color 120ms ease;
 }
 .dealer-link:hover { color: #f5e2a4; border-bottom-color: var(--accent); }
+.visit-arrow {
+  display: inline-block;
+  margin-left: 0.25rem;
+  font-size: 0.85em;
+  opacity: 0.8;
+}
 
 dialog {
   background: var(--surface); color: var(--fg);

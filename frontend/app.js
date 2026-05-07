@@ -102,7 +102,7 @@ function renderPrices(data) {
     const brand = li.brand ? escapeHtml(li.brand) : '—';
     if (li.status === 'ok') {
       tr.innerHTML = `
-        <td><a class="dealer-link" href="${li.url}" target="_blank" rel="noopener">${escapeHtml(li.dealer)}</a></td>
+        <td><a class="dealer-link" href="${li.url}" target="_blank" rel="noopener">${escapeHtml(li.dealer)}<span class="visit-arrow" aria-hidden="true">↗</span></a></td>
         <td class="brand-cell">${brand}</td>
         <td>${fmtDKK(li.price_dkk)}</td>
         <td>${fmtPct(li.premium_pct)}</td>
