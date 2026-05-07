@@ -66,9 +66,11 @@ class TavexScraper:
     def _find_product_for_size(self, tree: HTMLParser, size_g: float) -> Node | None:
         # Product grid cards have class "not-listing js-product".
         # Skip "product--listing" cards (carousel/sidebar items without prices).
-        # Match by title text: Tavex uses "5 gram", "10 gram", etc.
-        size_int = int(size_g) if size_g.is_integer() else size_g
-        needle = f"{size_int} gram"
+        # Tavex uses Danish decimal: "2,5 gram", "5 gram", "10 gram".
+        if size_g.is_integer():
+            needle = f"{int(size_g)} gram"
+        else:
+            needle = f"{size_g:g}".replace(".", ",") + " gram"
         for card in tree.css(".js-product"):
             cls = card.attributes.get("class") or ""
             if "not-listing" not in cls:
