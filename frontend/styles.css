@@ -95,7 +95,7 @@ main { max-width: 720px; margin: 0 auto; }
 
 .results-corner {
   position: absolute;
-  top: 0.6rem; right: 0.7rem;
+  top: 0.15rem; right: 0.7rem;
   display: flex; align-items: center;
   gap: 0.4rem;
   z-index: 1;
