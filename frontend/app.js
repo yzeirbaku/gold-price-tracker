@@ -6,10 +6,13 @@ const $ = (s) => document.querySelector(s);
 function loadApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ''; }
 function saveApiKey(k) { localStorage.setItem(API_KEY_STORAGE, k); }
 
-function fmtDKK(n) { return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', maximumFractionDigits: 0 }).format(n); }
-function fmtEUR(n) { return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 }).format(n); }
-function fmtSpotDKK(n) { return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n); }
-function fmtSpotEUR(n) { return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n); }
+function fmtNum(n, decimals) {
+  return new Intl.NumberFormat('da-DK', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n);
+}
+function fmtDKK(n) { return `${fmtNum(n, 0)} dkk`; }
+function fmtEUR(n) { return `${fmtNum(n, 2)} eur`; }
+function fmtSpotDKK(n) { return `${fmtNum(n, 2)} dkk`; }
+function fmtSpotEUR(n) { return `${fmtNum(n, 2)} eur`; }
 function fmtPct(n) { return n == null ? '—' : (n > 0 ? '+' : '') + n.toFixed(1) + '%'; }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 
