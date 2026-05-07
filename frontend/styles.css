@@ -16,6 +16,7 @@
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
+html { overflow-x: hidden; }
 body {
   margin: 0; padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
@@ -30,6 +31,7 @@ body {
   padding-top: env(safe-area-inset-top);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
 header {
@@ -95,19 +97,18 @@ main { max-width: 720px; margin: 0 auto; }
 
 .results-corner {
   position: absolute;
-  top: 0.15rem; right: 0.7rem;
+  top: 0.25rem; right: 0.7rem;
   display: flex; align-items: center;
   gap: 0.4rem;
   z-index: 1;
 }
+.results-corner .icon-btn { width: 34px; height: 34px; font-size: 1.15rem; }
 #status {
   color: var(--muted);
   font-size: 0.7rem;
   text-align: right;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-#results table { padding-right: 0; }
-#results thead th:last-child { min-width: 7rem; }
 .muted-tiny { font-size: 0.7rem; }
 #refresh {
   flex: 0 0 auto;
@@ -121,15 +122,24 @@ table {
   font-variant-numeric: tabular-nums;
 }
 #results.card { padding-top: 0.6rem; }
-th, td { padding: 0.7rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.92rem; }
-th { color: var(--muted); font-weight: 500; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+th, td { padding: 0.55rem 0.3rem; text-align: left; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
+th:first-child, td:first-child { padding-left: 0; }
+th:last-child, td:last-child { padding-right: 0; text-align: right; }
+th { color: var(--muted); font-weight: 500; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr { transition: background 120ms ease; }
 tbody tr:hover { background: rgba(255,255,255,0.02); }
 tr.error td { color: var(--error); }
 tr.unavailable td { color: var(--muted); }
 tr.out_of_stock td { color: var(--muted); }
-.brand-cell { color: var(--fg-soft); font-size: 0.85rem; }
+.brand-cell { color: var(--fg-soft); font-size: 0.82rem; }
+.visit-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px;
+  font-size: 1.1rem; font-weight: 500;
+  border-radius: 8px; border: 1px solid transparent;
+}
+.visit-link:hover { background: var(--surface-2); }
 
 dialog {
   background: var(--surface); color: var(--fg);
@@ -187,12 +197,5 @@ dialog menu button[value="save"] {
 
 .muted-tiny { color: var(--muted); margin-top: 0.6rem; }
 
-.visit-link {
-  color: var(--accent);
-  text-decoration: none;
-  font-weight: 500;
-  font-size: 0.88rem;
-  border-bottom: 1px dotted rgba(226,192,84,0.4);
-  transition: color 120ms ease, border-color 120ms ease;
-}
-.visit-link:hover { color: #f5e2a4; border-bottom-color: var(--accent); }
+a.visit-link { color: var(--accent); text-decoration: none; transition: color 120ms ease, background 120ms ease; }
+a.visit-link:hover { color: #f5e2a4; }

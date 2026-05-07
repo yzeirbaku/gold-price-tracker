@@ -96,7 +96,7 @@ function renderPrices(data) {
         <td class="brand-cell">${brand}</td>
         <td>${fmtDKK(li.price_dkk)}</td>
         <td>${fmtPct(li.premium_pct)}</td>
-        <td><a class="visit-link" href="${li.url}" target="_blank" rel="noopener">Visit Website</a></td>
+        <td><a class="visit-link" href="${li.url}" target="_blank" rel="noopener" aria-label="Visit ${escapeHtml(li.dealer)}" title="Visit ${escapeHtml(li.dealer)}">↗</a></td>
       `;
     } else {
       const note = li.status === 'out_of_stock' ? 'out of stock'
