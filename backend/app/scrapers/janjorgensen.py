@@ -10,7 +10,6 @@ from app.scrapers.base import DEFAULT_HEADERS, make_html_parser, now_utc, parse_
 logger = logging.getLogger(__name__)
 
 # Matches Danish whole-number prices like "6.252 kr." or "109.220 kr."
-# where dots are thousand separators with no decimal part.
 _DANISH_WHOLE_PRICE_RE = re.compile(r"^(\d{1,3}(?:\.\d{3})+)\s*kr", re.IGNORECASE)
 
 
@@ -43,35 +42,17 @@ class JanJorgensenScraper:
 
     def parse(self, html: str, size_g: float) -> Listing | None:
         tree = make_html_parser(html)
-        product = self._find_product_for_size(tree, size_g)
-        if product is None:
+        best = self._find_cheapest_for_size(tree, size_g)
+        if best is None:
             return None
+        card, price, in_stock, brand = best
 
-        # Price is in the data-price attribute: e.g. "6.252 kr." or "1.833,75 kr."
-        price_text = product.attributes.get("data-price") or ""
-        # Link: <a class="card-link" href="...">
-        link_node = product.css_first("a.card-link")
-        # In-stock: delivery text in span.color-green indicates item is available
-        in_stock = product.css_first("span.color-green") is not None
-
-        if not price_text or link_node is None:
+        link_node = card.css_first("a.card-link")
+        if link_node is None:
             return Listing(
                 dealer=self.name,
                 status="error",
-                error="parse_failed: missing price/link node",
-                fetched_at=now_utc(),
-            )
-        # Normalise whole-number Danish prices like "6.252 kr." where '.' is a
-        # thousand separator with no decimal — strip dots before parsing.
-        normalized = price_text.strip()
-        if _DANISH_WHOLE_PRICE_RE.match(normalized):
-            normalized = normalized.replace(".", "")
-        price = parse_dkk_price(normalized)
-        if price is None:
-            return Listing(
-                dealer=self.name,
-                status="unavailable",
-                error="non-numeric price text",
+                error="parse_failed: missing link node",
                 fetched_at=now_utc(),
             )
         href = link_node.attributes.get("href") or ""
@@ -82,30 +63,44 @@ class JanJorgensenScraper:
             status="ok" if in_stock else "out_of_stock",
             price_dkk=price,
             in_stock=in_stock,
+            brand=brand,
             url=url,  # type: ignore[arg-type]
             fetched_at=now_utc(),
         )
 
-    def _find_product_for_size(self, tree: HTMLParser, size_g: float) -> Node | None:
-        # Jan Jørgensen uses <div class="product-block" data-price="..."> cards.
-        # Titles follow the pattern: "1 g. invest. guldbarre (incl.moms)"
-        # or "2,5 g. invest. guldbarre (momsfri)".
-        # We match " <size> g. " (with surrounding spaces/period) to avoid
-        # partial matches (e.g. "5 g." matching "50 g.").
+    def _find_cheapest_for_size(
+        self, tree: HTMLParser, size_g: float,
+    ) -> tuple[Node, float, bool, str | None] | None:
+        # Cards are <div class="product-block" data-price="...">.
+        # Titles: "5 g. invest. guldbarre (momsfri)*" — brand not specified, so "Mixed".
         if size_g.is_integer():
             needle = f"{int(size_g)} g."
         else:
             danish_size = f"{size_g}".replace(".", ",")
             needle = f"{danish_size} g."
 
+        candidates: list[tuple[float, bool, str | None, Node]] = []
         for card in tree.css("div.product-block"):
             title_node = card.css_first("span.card-title")
             if title_node is None:
                 continue
-            # card-title contains a child span.goldfordeling with "*" — use
-            # the text of the first text node only to avoid the asterisk noise,
-            # but a simple startswith check on the full text works fine too.
             title = title_node.text(strip=True)
-            if title.startswith(needle):
-                return card
-        return None
+            if not title.startswith(needle):
+                continue
+            price_text = (card.attributes.get("data-price") or "").strip()
+            if not price_text:
+                continue
+            normalized = price_text
+            if _DANISH_WHOLE_PRICE_RE.match(normalized):
+                normalized = normalized.replace(".", "")
+            price = parse_dkk_price(normalized)
+            if price is None:
+                continue
+            in_stock = card.css_first("span.color-green") is not None
+            candidates.append((price, in_stock, "Mixed", card))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda c: (not c[1], c[0]))
+        price, in_stock, brand, card = candidates[0]
+        return card, price, in_stock, brand

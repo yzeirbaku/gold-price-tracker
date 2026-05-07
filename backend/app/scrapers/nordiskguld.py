@@ -28,29 +28,16 @@ class NordiskGuldScraper:
 
     def parse(self, html: str, size_g: float) -> Listing | None:
         tree = make_html_parser(html)
-        product = self._find_product_for_size(tree, size_g)
-        if product is None:
+        best = self._find_cheapest_for_size(tree, size_g)
+        if best is None:
             return None
+        card, price, in_stock, brand = best
 
-        # Price: the "Vi sælger" (sell) regular price bdi inside .sale .regular-price
-        price_node = product.css_first(
-            ".sale .regular-price .woocommerce-Price-amount.amount bdi"
-        )
-        # Link: <a class="thumbnail" href="..."> wraps the product image
-        link_node = product.css_first("a.thumbnail")
-        # In-stock: the container div has class "instock" when in stock
-        in_stock = "instock" in (product.attributes.get("class") or "")
-
-        if price_node is None or link_node is None:
+        link_node = card.css_first("a.thumbnail")
+        if link_node is None:
             return Listing(
                 dealer=self.name, status="error",
-                error="parse_failed: missing price/link node", fetched_at=now_utc(),
-            )
-        price = parse_dkk_price(price_node.text(strip=True))
-        if price is None:
-            return Listing(
-                dealer=self.name, status="unavailable",
-                error="non-numeric price text", fetched_at=now_utc(),
+                error="parse_failed: missing link node", fetched_at=now_utc(),
             )
         href = link_node.attributes.get("href") or ""
         url = href if href.startswith("http") else f"{self.base_url}{href}"
@@ -60,27 +47,47 @@ class NordiskGuldScraper:
             status="ok" if in_stock else "out_of_stock",
             price_dkk=price,
             in_stock=in_stock,
+            brand=brand,
             url=url,  # type: ignore[arg-type]
             fetched_at=now_utc(),
         )
 
-    def _find_product_for_size(self, tree: HTMLParser, size_g: float) -> Node | None:
-        # Nordisk Guld uses <div class="product-container [instock|outofstock]"> cards.
-        # Titles follow Danish format: "Argor-Heraeus 5 gram Kinebar",
-        # "PAMP Fortuna 2,5 gram guldbarre" (comma-decimal for non-integers).
-        # We match by " X gram " (with surrounding spaces) so "5 gram" does not
-        # match "50 gram" or "15 gram".
+    def _find_cheapest_for_size(
+        self, tree: HTMLParser, size_g: float,
+    ) -> tuple[Node, float, bool, str | None] | None:
+        # Cards are <div class="product-container [instock|outofstock]">.
+        # Titles: "Argor-Heraeus 5 gram Kinebar", "PAMP Fortuna 2,5 gram guldbarre".
+        # Match by " X gram " (space-padded) so "5 gram" doesn't hit "50 gram".
         if size_g.is_integer():
             needle = f" {int(size_g)} gram "
         else:
             danish_size = f"{size_g}".replace(".", ",")
             needle = f" {danish_size} gram "
 
+        candidates: list[tuple[float, bool, str | None, Node]] = []
         for card in tree.css("div.product-container"):
             title_node = card.css_first(".title")
             if title_node is None:
                 continue
             title = title_node.text(strip=True)
-            if needle in title:
-                return card
-        return None
+            idx = title.find(needle)
+            if idx == -1:
+                continue
+            price_node = card.css_first(
+                ".sale .regular-price .woocommerce-Price-amount.amount bdi"
+            )
+            if price_node is None:
+                continue
+            price = parse_dkk_price(price_node.text(strip=True))
+            if price is None:
+                continue
+            in_stock = "instock" in (card.attributes.get("class") or "")
+            brand = title[:idx].strip() or None
+            candidates.append((price, in_stock, brand, card))
+
+        if not candidates:
+            return None
+        # In-stock first, then cheapest.
+        candidates.sort(key=lambda c: (not c[1], c[0]))
+        price, in_stock, brand, card = candidates[0]
+        return card, price, in_stock, brand

@@ -1,4 +1,5 @@
 import logging
+import re
 
 import httpx
 from selectolax.parser import HTMLParser, Node
@@ -28,29 +29,17 @@ class TavexScraper:
 
     def parse(self, html: str, size_g: float) -> Listing | None:
         tree = make_html_parser(html)
-        product = self._find_product_for_size(tree, size_g)
-        if product is None:
+        best = self._find_cheapest_for_size(tree, size_g)
+        if best is None:
             return None
+        card, price, in_stock, brand = best
 
-        # Price: first "Vi sælger 1+" price span inside .product__price--single
-        price_node = product.css_first(".product__price--single .product__price-value")
-        # Link: overlay anchor that wraps the whole card
-        link_node = product.css_first("a.product__overlay-link")
-        # In-stock: span with class product__in-stock is present when on-stock
-        in_stock_node = product.css_first(".product__in-stock")
-
-        if price_node is None or link_node is None:
+        link_node = card.css_first("a.product__overlay-link")
+        if link_node is None:
             return Listing(
                 dealer=self.name, status="error",
-                error="parse_failed: missing price/link node", fetched_at=now_utc(),
+                error="parse_failed: missing link node", fetched_at=now_utc(),
             )
-        price = parse_dkk_price(price_node.text(strip=True))
-        if price is None:
-            return Listing(
-                dealer=self.name, status="unavailable",
-                error="non-numeric price text", fetched_at=now_utc(),
-            )
-        in_stock = in_stock_node is not None
         href = link_node.attributes.get("href") or ""
         url = href if href.startswith("http") else f"{self.base_url}{href}"
 
@@ -59,18 +48,24 @@ class TavexScraper:
             status="ok" if in_stock else "out_of_stock",
             price_dkk=price,
             in_stock=in_stock,
+            brand=brand,
             url=url,  # type: ignore[arg-type]
             fetched_at=now_utc(),
         )
 
-    def _find_product_for_size(self, tree: HTMLParser, size_g: float) -> Node | None:
+    def _find_cheapest_for_size(
+        self, tree: HTMLParser, size_g: float,
+    ) -> tuple[Node, float, bool, str | None] | None:
         # Product grid cards have class "not-listing js-product".
-        # Skip "product--listing" cards (carousel/sidebar items without prices).
-        # Tavex uses Danish decimal: "2,5 gram", "5 gram", "10 gram".
+        # Skip "product--listing" (carousel/sidebar items without prices) and combi/multipacks.
+        # Tavex titles: "5 gram Valcambi Suisse Guldbarre",
+        #               "5 gram Guldbarre (forskellige mærker)" (mixed-brand offering).
         if size_g.is_integer():
-            needle = f"{int(size_g)} gram"
+            size_token = f"{int(size_g)} gram"
         else:
-            needle = f"{size_g:g}".replace(".", ",") + " gram"
+            size_token = f"{size_g:g}".replace(".", ",") + " gram"
+
+        candidates: list[tuple[float, bool, str | None, Node]] = []
         for card in tree.css(".js-product"):
             cls = card.attributes.get("class") or ""
             if "not-listing" not in cls:
@@ -78,6 +73,40 @@ class TavexScraper:
             title_node = card.css_first(".product__title-inner")
             if title_node is None:
                 continue
-            if needle in title_node.text(strip=True).lower():
-                return card
-        return None
+            raw_title = title_node.text(strip=True)
+            tl = raw_title.lower()
+            # Tavex titles always start with the size, so use startswith to avoid
+            # "5 gram" matching "2,5 gram" / "25 gram" / "50 gram".
+            if not tl.startswith(size_token + " "):
+                continue
+            # Skip combi/multipack ("100x 1 gram", "50 x 1 gram CombiBar") — different product.
+            if "combibar" in tl or " x " in tl:
+                continue
+            price_node = card.css_first(".product__price--single .product__price-value")
+            if price_node is None:
+                continue
+            price = parse_dkk_price(price_node.text(strip=True))
+            if price is None:
+                continue
+            in_stock = card.css_first(".product__in-stock") is not None
+            brand = _extract_brand(raw_title, size_token)
+            candidates.append((price, in_stock, brand, card))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda c: (not c[1], c[0]))
+        price, in_stock, brand, card = candidates[0]
+        return card, price, in_stock, brand
+
+
+def _extract_brand(title: str, size_token: str) -> str | None:
+    # Title shape: "<size_token> <BRAND> Guldbarre" or
+    #             "<size_token> Guldbarre (forskellige mærker)" (mixed).
+    # Strip the leading "X gram " then trailing "guldbarre" (case-insensitive).
+    tl = title.lower()
+    idx = tl.find(size_token.lower())
+    rest = title[idx + len(size_token):].strip() if idx != -1 else title
+    if "forskellige mærker" in rest.lower():
+        return "Mixed"
+    rest = re.sub(r"\s*guldbarre\s*$", "", rest, flags=re.IGNORECASE).strip()
+    return rest or None

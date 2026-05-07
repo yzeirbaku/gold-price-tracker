@@ -28,29 +28,17 @@ class PlazaScraper:
 
     def parse(self, html: str, size_g: float) -> Listing | None:
         tree = make_html_parser(html)
-        product = self._find_product_for_size(tree, size_g)
-        if product is None:
+        best = self._find_cheapest_for_size(tree, size_g)
+        if best is None:
             return None
+        card, price, in_stock, brand = best
 
-        # Price: <span data-single-price> inside .price ins .amount
-        price_node = product.css_first(".price ins .amount [data-single-price]")
-        # Link: anchor with class product-card-title (also carries the title text)
-        link_node = product.css_first("a.product-card-title")
-        # In-stock: presence of .price ins indicates an active (non-struck-through) price
-        in_stock_node = product.css_first(".price ins")
-
-        if price_node is None or link_node is None:
+        link_node = card.css_first("a.product-card-title")
+        if link_node is None:
             return Listing(
                 dealer=self.name, status="error",
-                error="parse_failed: missing price/link node", fetched_at=now_utc(),
+                error="parse_failed: missing link node", fetched_at=now_utc(),
             )
-        price = parse_dkk_price(price_node.text(strip=True))
-        if price is None:
-            return Listing(
-                dealer=self.name, status="unavailable",
-                error="non-numeric price text", fetched_at=now_utc(),
-            )
-        in_stock = in_stock_node is not None
         href = link_node.attributes.get("href") or ""
         url = href if href.startswith("http") else f"{self.base_url}{href}"
 
@@ -59,27 +47,42 @@ class PlazaScraper:
             status="ok" if in_stock else "out_of_stock",
             price_dkk=price,
             in_stock=in_stock,
+            brand=brand,
             url=url,  # type: ignore[arg-type]
             fetched_at=now_utc(),
         )
 
-    def _find_product_for_size(self, tree: HTMLParser, size_g: float) -> Node | None:
-        # Plaza uses Shopify <product-card> custom elements with class "product-card".
-        # Titles follow the pattern "Guldbarre X gram Valcambi Suisse".
-        # We match by checking that the title contains " X gram " (with surrounding
-        # spaces) to prevent "5 gram" from matching "25 gram" or "50 gram".
-        # For non-integer sizes (2.5), Plaza uses Danish comma decimal: "2,5 gram".
+    def _find_cheapest_for_size(
+        self, tree: HTMLParser, size_g: float,
+    ) -> tuple[Node, float, bool, str | None] | None:
+        # Plaza uses Shopify <product-card> with class "product-card".
+        # Titles: "Guldbarre 5 gram Valcambi Suisse".
         if size_g.is_integer():
             needle = f" {int(size_g)} gram "
         else:
             danish_size = f"{size_g}".replace(".", ",")
             needle = f" {danish_size} gram "
 
+        candidates: list[tuple[float, bool, str | None, Node]] = []
         for card in tree.css(".product-card"):
             title_node = card.css_first("a.product-card-title")
             if title_node is None:
                 continue
             title = title_node.text(strip=True)
-            if needle in title:
-                return card
-        return None
+            if needle not in title:
+                continue
+            price_node = card.css_first(".price ins .amount [data-single-price]")
+            if price_node is None:
+                continue
+            price = parse_dkk_price(price_node.text(strip=True))
+            if price is None:
+                continue
+            in_stock = card.css_first(".price ins") is not None
+            brand = title.split(needle, 1)[1].strip() if needle in title else None
+            candidates.append((price, in_stock, brand or None, card))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda c: (not c[1], c[0]))
+        price, in_stock, brand, card = candidates[0]
+        return card, price, in_stock, brand

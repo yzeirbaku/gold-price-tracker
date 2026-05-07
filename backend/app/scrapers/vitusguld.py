@@ -20,8 +20,8 @@ class VitusGuldScraper:
     async def fetch(self, size_g: float, client: httpx.AsyncClient) -> Listing | None:
         # Vitus's category listing is cached for several minutes, so its prices
         # drift behind the live spot. The product detail pages render fresh,
-        # so we use the listing only to pick a candidate URL and read the price
-        # from the product page.
+        # so we use the listing only to pick a candidate URL+brand and read the
+        # price from the product page.
         try:
             listing_resp = await client.get(self.listing_url, timeout=6.0, follow_redirects=True)
             listing_resp.raise_for_status()
@@ -32,9 +32,10 @@ class VitusGuldScraper:
                 error=f"http: {e.__class__.__name__}", fetched_at=now_utc(),
             )
 
-        product_url = self.parse_listing(listing_resp.text, size_g)
-        if product_url is None:
+        picked = self.parse_listing(listing_resp.text, size_g)
+        if picked is None:
             return None
+        product_url, brand = picked
 
         try:
             product_resp = await client.get(product_url, timeout=6.0, follow_redirects=True)
@@ -46,24 +47,26 @@ class VitusGuldScraper:
                 error=f"http: {e.__class__.__name__}", fetched_at=now_utc(),
             )
 
-        return self.parse_product(product_resp.text, product_url)
+        return self.parse_product(product_resp.text, product_url, brand)
 
-    def parse_listing(self, html: str, size_g: float) -> str | None:
-        """Pick the cheapest valid in-stock variant on the category page and return its URL."""
+    def parse_listing(self, html: str, size_g: float) -> tuple[str, str | None] | None:
+        """Pick the cheapest valid in-stock variant; return (product_url, brand)."""
         tree = make_html_parser(html)
-        product = self._find_product_for_size(tree, size_g)
-        if product is None:
+        picked = self._find_product_for_size(tree, size_g)
+        if picked is None:
             return None
-        link_node = product.css_first("a.uael-loop-product__link")
+        card, brand = picked
+        link_node = card.css_first("a.uael-loop-product__link")
         if link_node is None:
             return None
         href = link_node.attributes.get("href") or ""
         if not href:
             return None
-        return href if href.startswith("http") else f"{self.base_url}{href}"
+        url = href if href.startswith("http") else f"{self.base_url}{href}"
+        return url, brand
 
-    def parse_product(self, html: str, url: str) -> Listing:
-        """Read the live price + availability from a Vitus product page's OpenGraph meta."""
+    def parse_product(self, html: str, url: str, brand: str | None) -> Listing:
+        """Read live price + availability from a Vitus product page's OpenGraph meta."""
         tree = make_html_parser(html)
         price_meta = tree.css_first('meta[property="product:price:amount"]')
         avail_meta = (
@@ -88,21 +91,25 @@ class VitusGuldScraper:
             status="ok" if in_stock else "out_of_stock",
             price_dkk=price,
             in_stock=in_stock,
+            brand=brand,
             url=url,  # type: ignore[arg-type]
             fetched_at=now_utc(),
         )
 
-    def _find_product_for_size(self, tree: HTMLParser, size_g: float) -> Node | None:
-        # Vitus has multiple branded variants per size (Valcambi, PAMP, Argor, plus
-        # special editions like Eid Mubarak, Rose, Lunar, and combi multipacks).
-        # Skip generic/used variants ("Vilkårlige", "Cirkuleret") and combi/multipacks.
-        # Pick the cheapest in-stock match.
+    def _find_product_for_size(
+        self, tree: HTMLParser, size_g: float,
+    ) -> tuple[Node, str | None] | None:
+        # Vitus has multiple variants per size (Valcambi, PAMP, Argor, plus
+        # the "Vilkårlige LBMA producenter" mixed-producer offering, special
+        # editions like Eid Mubarak/Rose/Lunar, and combi multipacks).
+        # Skip used and combi/multipack only — keep the mixed-LBMA option
+        # and label its brand "Mixed". Pick cheapest (in-stock first).
         if size_g.is_integer():
             needle = f"{int(size_g)} gr."
         else:
             needle = f"{size_g}".replace(".", ",") + " gr."
 
-        candidates: list[tuple[float, bool, Node]] = []  # (price, in_stock, card)
+        candidates: list[tuple[float, bool, str | None, Node]] = []
         for card in tree.css("li.product"):
             title_node = card.css_first(".woocommerce-loop-product__title")
             if title_node is None:
@@ -111,7 +118,7 @@ class VitusGuldScraper:
             if not title.startswith(needle):
                 continue
             tl = title.lower()
-            if "vilkårlige" in tl or "cirkuleret" in tl:
+            if "cirkuleret" in tl or "uden emballage" in tl:
                 continue
             if " x " in tl or "combi" in tl or "multigram" in tl:
                 continue
@@ -122,10 +129,23 @@ class VitusGuldScraper:
             if price is None:
                 continue
             in_stock = card.css_first(".stock.in-stock") is not None
-            candidates.append((price, in_stock, card))
+            brand = _extract_brand(title)
+            candidates.append((price, in_stock, brand, card))
 
         if not candidates:
             return None
-        # In-stock first, then cheapest.
         candidates.sort(key=lambda c: (not c[1], c[0]))
-        return candidates[0][2]
+        price, in_stock, brand, card = candidates[0]
+        return card, brand
+
+
+def _extract_brand(title: str) -> str | None:
+    # Title shape: "<size> gr. Guldbarre[, fineness], <BRAND>" (varying punctuation).
+    # The brand is the last comma-separated chunk; strip leading/trailing whitespace.
+    # "Vilkårlige LBMA producenter" → "Mixed".
+    last = title.rsplit(",", 1)[-1].strip()
+    if not last:
+        return None
+    if "vilkårlige" in last.lower():
+        return "Mixed"
+    return last or None

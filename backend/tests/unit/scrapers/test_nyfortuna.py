@@ -12,6 +12,7 @@ def test_nyfortuna_parses_5g_bar() -> None:
     assert listing.status == "ok"
     assert listing.price_dkk == 5366.02
     assert listing.in_stock is True
+    assert listing.brand == "Heimerle+Meule"
     assert listing.url is not None
     assert "guldbarre-standset-5g" in str(listing.url)
 

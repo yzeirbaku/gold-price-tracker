@@ -9,12 +9,14 @@ EXPECTED_1G_PRICE_DKK: float = 1565.14
 EXPECTED_1G_URL_FRAGMENT: str = "metalor-guldbarre-1g"
 
 
-def test_seroguld_parses_1g_bar() -> None:
+def test_seroguld_parses_cheapest_in_stock_1g_bar() -> None:
+    """Valcambi 1g is cheaper but out-of-stock; cheapest in-stock is Metalor at 1565.14."""
     html = FIXTURE.read_text(encoding="utf-8")
     listing = SeroGuldScraper().parse(html, size_g=1.0)
     assert listing is not None
     assert listing.status == "ok"
     assert listing.price_dkk == EXPECTED_1G_PRICE_DKK
+    assert listing.brand == "Metalor"
     assert EXPECTED_1G_URL_FRAGMENT in str(listing.url)
 
 

@@ -1,4 +1,5 @@
 import logging
+import re
 
 import httpx
 from selectolax.parser import HTMLParser, Node
@@ -14,7 +15,6 @@ class SeroGuldScraper:
     base_url = "https://seroguld.dk"
 
     async def fetch(self, size_g: float, client: httpx.AsyncClient) -> Listing | None:
-        # /shop/guld/ is a landing page; the actual product grid is /shop/guld/guldbarrer/
         url = f"{self.base_url}/shop/guld/guldbarrer/"
         try:
             resp = await client.get(url, timeout=8.0, follow_redirects=True)
@@ -29,27 +29,16 @@ class SeroGuldScraper:
 
     def parse(self, html: str, size_g: float) -> Listing | None:
         tree = make_html_parser(html)
-        product = self._find_product_for_size(tree, size_g)
-        if product is None:
+        best = self._find_cheapest_for_size(tree, size_g)
+        if best is None:
             return None
+        card, price, in_stock, brand = best
 
-        # Price: .woocommerce-Price-amount.amount bdi inside the card
-        price_node = product.css_first(".woocommerce-Price-amount.amount bdi")
-        # Link: first anchor in the card
-        link_node = product.css_first("a")
-        # In-stock: the li element has class "instock" when in stock
-        in_stock = "instock" in (product.attributes.get("class") or "")
-
-        if price_node is None or link_node is None:
+        link_node = card.css_first("a")
+        if link_node is None:
             return Listing(
                 dealer=self.name, status="error",
-                error="parse_failed: missing price/link node", fetched_at=now_utc(),
-            )
-        price = parse_dkk_price(price_node.text(strip=True))
-        if price is None:
-            return Listing(
-                dealer=self.name, status="unavailable",
-                error="non-numeric price text", fetched_at=now_utc(),
+                error="parse_failed: missing link node", fetched_at=now_utc(),
             )
         href = link_node.attributes.get("href") or ""
         url = href if href.startswith("http") else f"{self.base_url}{href}"
@@ -59,29 +48,55 @@ class SeroGuldScraper:
             status="ok" if in_stock else "out_of_stock",
             price_dkk=price,
             in_stock=in_stock,
+            brand=brand,
             url=url,  # type: ignore[arg-type]
             fetched_at=now_utc(),
         )
 
-    def _find_product_for_size(self, tree: HTMLParser, size_g: float) -> Node | None:
-        # Sero Guld uses WooCommerce <li class="product ..."> cards.
-        # Gold bar titles follow the pattern: "[Brand] guldbarre [size]g"
-        # where size is an integer for whole grams ("1g", "5g", "10g")
-        # or uses Danish comma-decimal for fractions ("2,5g").
-        # We match only cards with "guldbarre" in the title, then check
-        # that the title ends with " <size>g" to avoid false matches
-        # (e.g. "10g" matching "100g", or "5g" matching "50g").
+    def _find_cheapest_for_size(
+        self, tree: HTMLParser, size_g: float,
+    ) -> tuple[Node, float, bool, str | None] | None:
+        # Sero Guld uses WooCommerce <li class="product ...">.
+        # Titles: "Valcambi guldbarre 5g", "PAMP guldbarre 2,5g".
+        # Skip combi/pre-owned/special variants.
         if size_g.is_integer():
             needle = f"guldbarre {int(size_g)}g"
         else:
             danish_size = f"{size_g}".replace(".", ",")
             needle = f"guldbarre {danish_size}g"
 
+        candidates: list[tuple[float, bool, str | None, Node]] = []
         for card in tree.css("li.product"):
             title_node = card.css_first(".woocommerce-loop-product__title")
             if title_node is None:
                 continue
-            title = title_node.text(strip=True).lower()
-            if needle in title:
-                return card
+            raw_title = title_node.text(strip=True)
+            tl = raw_title.lower()
+            if needle not in tl:
+                continue
+            if "combi" in tl or "pre-owned" in tl or "stjerne" in tl or "ramme" in tl:
+                continue
+            price_node = card.css_first(".woocommerce-Price-amount.amount bdi")
+            if price_node is None:
+                continue
+            price = parse_dkk_price(price_node.text(strip=True))
+            if price is None:
+                continue
+            in_stock = "instock" in (card.attributes.get("class") or "")
+            brand = _extract_brand(raw_title)
+            candidates.append((price, in_stock, brand, card))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda c: (not c[1], c[0]))
+        price, in_stock, brand, card = candidates[0]
+        return card, price, in_stock, brand
+
+
+def _extract_brand(title: str) -> str | None:
+    # Title shape: "<BRAND> guldbarre <size>g" (case varies).
+    # Take everything before "guldbarre" as brand.
+    m = re.match(r"^(.*?)\s+guldbarre\s+", title, flags=re.IGNORECASE)
+    if not m:
         return None
+    return m.group(1).strip() or None

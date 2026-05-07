@@ -9,6 +9,7 @@ function saveApiKey(k) { localStorage.setItem(API_KEY_STORAGE, k); }
 function fmtDKK(n) { return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'DKK', maximumFractionDigits: 0 }).format(n); }
 function fmtEUR(n) { return new Intl.NumberFormat('da-DK', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 }).format(n); }
 function fmtPct(n) { return n == null ? '—' : (n > 0 ? '+' : '') + n.toFixed(1) + '%'; }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 
 let lastSize = null;
 
@@ -81,9 +82,11 @@ function renderPrices(data) {
   for (const li of data.listings) {
     const tr = document.createElement('tr');
     tr.className = li.status;
+    const brand = li.brand ? escapeHtml(li.brand) : '—';
     if (li.status === 'ok') {
       tr.innerHTML = `
-        <td>${li.dealer}</td>
+        <td>${escapeHtml(li.dealer)}</td>
+        <td class="brand-cell">${brand}</td>
         <td>${fmtDKK(li.price_dkk)}</td>
         <td>${fmtPct(li.premium_pct)}</td>
         <td><a class="visit-link" href="${li.url}" target="_blank" rel="noopener">Visit Website</a></td>
@@ -92,7 +95,7 @@ function renderPrices(data) {
       const note = li.status === 'out_of_stock' ? 'out of stock'
                 : li.status === 'unavailable' ? (li.error || 'unavailable')
                 : `error (${li.error || 'unknown'})`;
-      tr.innerHTML = `<td>${li.dealer}</td><td colspan="3">${note}</td>`;
+      tr.innerHTML = `<td>${escapeHtml(li.dealer)}</td><td class="brand-cell">${brand}</td><td colspan="3">${note}</td>`;
     }
     tbody.appendChild(tr);
   }

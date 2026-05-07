@@ -22,6 +22,7 @@ class Listing(BaseModel):
     price_dkk: float | None = None
     premium_pct: float | None = None
     in_stock: bool | None = None
+    brand: str | None = None
     url: HttpUrl | None = None
     error: str | None = None
     fetched_at: datetime

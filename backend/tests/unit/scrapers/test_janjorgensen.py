@@ -15,6 +15,7 @@ def test_janjorgensen_parses_5g_bar() -> None:
     assert listing is not None
     assert listing.status == "ok"
     assert listing.price_dkk == EXPECTED_5G_PRICE_DKK
+    assert listing.brand == "Mixed"
     assert EXPECTED_5G_URL_FRAGMENT in str(listing.url)
 
 
