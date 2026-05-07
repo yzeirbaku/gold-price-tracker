@@ -7,7 +7,9 @@ function loadApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ''; }
 function saveApiKey(k) { localStorage.setItem(API_KEY_STORAGE, k); }
 
 function fmtNum(n, decimals) {
-  return new Intl.NumberFormat('da-DK', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n);
+  // en-US locale: '.' as decimal separator, ',' as thousands — keeps spot
+  // values and table prices using the same convention across the page.
+  return new Intl.NumberFormat('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n);
 }
 function fmtDKK(n) { return `${fmtNum(n, 0)} dkk`; }
 function fmtEUR(n) { return `${fmtNum(n, 2)} eur`; }
