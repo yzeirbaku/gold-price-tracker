@@ -1,5 +1,6 @@
 const API_KEY_STORAGE = 'gold-tracker-api-key';
 const BACKEND_URL = (window.BACKEND_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+const SPOT_REFRESH_MS = 20000;
 const $ = (s) => document.querySelector(s);
 
 function loadApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ''; }
@@ -10,6 +11,40 @@ function fmtEUR(n) { return new Intl.NumberFormat('da-DK', { style: 'currency', 
 function fmtPct(n) { return n == null ? '—' : (n > 0 ? '+' : '') + n.toFixed(1) + '%'; }
 
 let lastSize = null;
+
+function renderSpot(data) {
+  if (!data || !data.spot) {
+    $('#spot-content').textContent = 'Spot price unavailable.';
+    $('#spot-updated').textContent = '';
+    return;
+  }
+  const g = data.spot.gold, s = data.spot.silver;
+  $('#spot-content').innerHTML = `
+    <div class="spot-row"><span>Gold</span><span>${fmtEUR(g.per_gram_eur)}/g · ${fmtDKK(g.per_gram_dkk)}/g</span></div>
+    <div class="spot-row"><span>Silver</span><span>${fmtEUR(s.per_gram_eur)}/g · ${fmtDKK(s.per_gram_dkk)}/g</span></div>
+    ${data.fx_stale ? '<div class="spot-row" style="color:var(--error)">⚠ FX rates stale (fallback in use)</div>' : ''}
+  `;
+  $('#spot-updated').textContent = `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`;
+}
+
+async function fetchSpot() {
+  const apiKey = loadApiKey();
+  if (!apiKey) {
+    $('#spot-content').textContent = 'Open Settings to configure your API key.';
+    return;
+  }
+  try {
+    const resp = await fetch(`${BACKEND_URL}/spot`, { headers: { 'X-API-Key': apiKey } });
+    if (resp.status === 401) {
+      $('#spot-content').textContent = 'Bad API key — open Settings.';
+      return;
+    }
+    if (!resp.ok) return;
+    renderSpot(await resp.json());
+  } catch {
+    /* silent — likely cold start or offline; next tick will retry */
+  }
+}
 
 async function fetchPrices(size) {
   const apiKey = loadApiKey();
@@ -35,21 +70,12 @@ async function fetchPrices(size) {
   if (resp.status === 401) { showStatus('Bad API key — open Settings.'); return; }
   if (!resp.ok) { showStatus(`Server error: ${resp.status}`); return; }
   const data = await resp.json();
-  render(data);
+  renderPrices(data);
+  // Reuse the spot block from the prices response — it's fresher than the cached one.
+  renderSpot(data);
 }
 
-function render(data) {
-  if (data.spot) {
-    const g = data.spot.gold, s = data.spot.silver;
-    $('#spot-content').innerHTML = `
-      <div class="spot-row"><span>Gold</span><span>${fmtEUR(g.per_gram_eur)}/g · ${fmtDKK(g.per_gram_dkk)}/g</span></div>
-      <div class="spot-row"><span>Silver</span><span>${fmtEUR(s.per_gram_eur)}/g · ${fmtDKK(s.per_gram_dkk)}/g</span></div>
-      ${data.fx_stale ? '<div class="spot-row" style="color:var(--error)">⚠ FX rates stale (fallback in use)</div>' : ''}
-    `;
-  } else {
-    $('#spot-content').textContent = 'Spot price unavailable.';
-  }
-
+function renderPrices(data) {
   const tbody = $('#listings tbody');
   tbody.innerHTML = '';
   for (const li of data.listings) {
@@ -60,7 +86,7 @@ function render(data) {
         <td>${li.dealer}</td>
         <td>${fmtDKK(li.price_dkk)}</td>
         <td>${fmtPct(li.premium_pct)}</td>
-        <td><a href="${li.url}" target="_blank" rel="noopener">→</a></td>
+        <td><a class="visit-link" href="${li.url}" target="_blank" rel="noopener">Visit Website</a></td>
       `;
     } else {
       const note = li.status === 'out_of_stock' ? 'out of stock'
@@ -84,13 +110,13 @@ function setActiveSize(size) {
   });
 }
 
-// Wire up UI
+// Wire up size buttons + refresh
 document.querySelectorAll('#size-picker button').forEach(b => {
   b.addEventListener('click', () => fetchPrices(parseFloat(b.dataset.size)));
 });
 $('#refresh').addEventListener('click', () => { if (lastSize != null) fetchPrices(lastSize); });
 
-// Settings dialog
+// Settings dialog (API key only — backend URL comes from config.js)
 $('#settings-btn').addEventListener('click', () => {
   $('#api-key').value = loadApiKey();
   $('#settings-dialog').showModal();
@@ -98,8 +124,17 @@ $('#settings-btn').addEventListener('click', () => {
 $('#settings-dialog').addEventListener('close', () => {
   if ($('#settings-dialog').returnValue === 'save') {
     saveApiKey($('#api-key').value);
-    showStatus('Settings saved.');
+    fetchSpot();   // immediately try with the new key
   }
+});
+
+// Spot price: load on page open, then auto-refresh while visible.
+fetchSpot();
+setInterval(() => {
+  if (document.visibilityState === 'visible') fetchSpot();
+}, SPOT_REFRESH_MS);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') fetchSpot();
 });
 
 // Service worker registration

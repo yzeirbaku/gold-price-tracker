@@ -64,25 +64,39 @@ class VitusGuldScraper:
         )
 
     def _find_product_for_size(self, tree: HTMLParser, size_g: float) -> Node | None:
-        # WooCommerce product grid uses <li class="product ..."> cards.
-        # Vitus Guld titles use "5 gr." format (Danish decimal: "2,5 gr.").
-        # We match the first in-stock card whose title starts with "<size> gr."
-        # For integer sizes (5.0, 10.0) the needle is "5 gr."; for non-integer
-        # (2.5) the needle is "2,5 gr." (Danish comma-decimal).
+        # Vitus has multiple branded variants per size (Valcambi, PAMP, Argor, plus
+        # special editions like Eid Mubarak, Rose, Lunar, and combi multipacks).
+        # Skip generic/used variants ("Vilkårlige", "Cirkuleret") and combi/multipacks.
+        # Pick the cheapest in-stock match.
         if size_g.is_integer():
             needle = f"{int(size_g)} gr."
         else:
-            # Format non-integer with Danish comma decimal (e.g. 2.5 → "2,5")
             needle = f"{size_g}".replace(".", ",") + " gr."
 
+        candidates: list[tuple[float, bool, Node]] = []  # (price, in_stock, card)
         for card in tree.css("li.product"):
             title_node = card.css_first(".woocommerce-loop-product__title")
             if title_node is None:
                 continue
             title = title_node.text(strip=True)
-            # Title must start with the size needle to avoid false matches
-            # (e.g. "25 gr." matching "5 gr." check, or "50 gr." matching "5 gr.")
-            if title.startswith(needle):
-                # Prefer in-stock cards; return first match regardless
-                return card
-        return None
+            if not title.startswith(needle):
+                continue
+            tl = title.lower()
+            if "vilkårlige" in tl or "cirkuleret" in tl:
+                continue
+            if " x " in tl or "combi" in tl or "multigram" in tl:
+                continue
+            price_node = card.css_first(".woocommerce-Price-amount.amount bdi")
+            if price_node is None:
+                continue
+            price = parse_dkk_price(price_node.text(strip=True))
+            if price is None:
+                continue
+            in_stock = card.css_first(".stock.in-stock") is not None
+            candidates.append((price, in_stock, card))
+
+        if not candidates:
+            return None
+        # In-stock first, then cheapest.
+        candidates.sort(key=lambda c: (not c[1], c[0]))
+        return candidates[0][2]
