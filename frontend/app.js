@@ -12,6 +12,7 @@ function fmtPct(n) { return n == null ? '—' : (n > 0 ? '+' : '') + n.toFixed(1
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 
 let lastSize = null;
+let lastSpot = { gold: null, silver: null };
 
 function renderSpot(data) {
   if (!data || !data.spot) {
@@ -20,12 +21,27 @@ function renderSpot(data) {
     return;
   }
   const g = data.spot.gold, s = data.spot.silver;
+  const goldText = `${fmtEUR(g.per_gram_eur)}/g · ${fmtDKK(g.per_gram_dkk)}/g`;
+  const silverText = `${fmtEUR(s.per_gram_eur)}/g · ${fmtDKK(s.per_gram_dkk)}/g`;
   $('#spot-content').innerHTML = `
-    <div class="spot-row"><span>Gold</span><span>${fmtEUR(g.per_gram_eur)}/g · ${fmtDKK(g.per_gram_dkk)}/g</span></div>
-    <div class="spot-row"><span>Silver</span><span>${fmtEUR(s.per_gram_eur)}/g · ${fmtDKK(s.per_gram_dkk)}/g</span></div>
+    <div class="spot-row"><span>Gold</span><span class="spot-value" data-spot="gold">${goldText}</span></div>
+    <div class="spot-row"><span>Silver</span><span class="spot-value" data-spot="silver">${silverText}</span></div>
     ${data.fx_stale ? '<div class="spot-row" style="color:var(--error)">⚠ FX rates stale (fallback in use)</div>' : ''}
   `;
   $('#spot-updated').textContent = `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`;
+  flashIfChanged('gold', goldText);
+  flashIfChanged('silver', silverText);
+}
+
+function flashIfChanged(key, text) {
+  if (lastSpot[key] !== null && lastSpot[key] !== text) {
+    const node = document.querySelector(`[data-spot="${key}"]`);
+    if (node) {
+      node.classList.add('flash');
+      setTimeout(() => node.classList.remove('flash'), 1200);
+    }
+  }
+  lastSpot[key] = text;
 }
 
 async function fetchSpot() {

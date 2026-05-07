@@ -42,15 +42,15 @@ header {
 }
 header h1 {
   margin: 0;
-  font-size: 1.05rem; font-weight: 600; letter-spacing: -0.01em;
+  font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em;
   background: linear-gradient(90deg, var(--accent) 0%, #f5e2a4 50%, var(--accent-2) 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .icon-btn {
   background: transparent; border: 1px solid transparent;
-  color: var(--fg-soft); width: 36px; height: 36px;
+  color: var(--fg-soft); width: 42px; height: 42px;
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 999px; font-size: 1.1rem; cursor: pointer;
+  border-radius: 999px; font-size: 1.3rem; cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
 .icon-btn:hover { background: var(--surface-2); color: var(--fg); border-color: var(--border); }
@@ -94,7 +94,7 @@ main { max-width: 720px; margin: 0 auto; }
 }
 #status {
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -160,6 +160,14 @@ dialog menu button[value="save"] {
 }
 .spot-row + .spot-row { border-top: 1px solid var(--border); }
 .spot-row span:first-child { color: var(--muted); font-size: 0.85rem; }
+.spot-value {
+  font-variant-numeric: tabular-nums;
+  transition: color 600ms ease, text-shadow 600ms ease;
+}
+.spot-value.flash {
+  color: var(--accent);
+  text-shadow: 0 0 14px rgba(226,192,84,0.45);
+}
 
 .muted-tiny { font-size: 0.75rem; color: var(--muted); margin-top: 0.6rem; }
 
