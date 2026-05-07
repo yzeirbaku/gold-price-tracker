@@ -1,0 +1,41 @@
+:root {
+  --bg: #1a1a1a;
+  --fg: #f5f5f5;
+  --muted: #8a8a8a;
+  --accent: #d4af37;
+  --error: #d97757;
+  --card: #262626;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg); color: var(--fg);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-top: env(safe-area-inset-top);
+}
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem; border-bottom: 1px solid #333;
+}
+header h1 { margin: 0; font-size: 1.2rem; }
+header button { background: none; border: 0; color: var(--fg); font-size: 1.4rem; cursor: pointer; }
+.card { margin: 1rem; padding: 1rem; background: var(--card); border-radius: 12px; }
+.card h2 { margin: 0 0 0.5rem 0; font-size: 0.9rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.buttons { display: flex; gap: 0.5rem; }
+.buttons button {
+  flex: 1; padding: 0.75rem; background: var(--bg); color: var(--fg);
+  border: 1px solid #444; border-radius: 8px; font-size: 1rem; cursor: pointer;
+}
+.buttons button.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 0.5rem; text-align: left; border-bottom: 1px solid #333; }
+th { color: var(--muted); font-weight: normal; font-size: 0.8rem; }
+tr.error td { color: var(--error); }
+tr.unavailable td { color: var(--muted); }
+#status { padding: 0.5rem 0; color: var(--muted); }
+#refresh { margin-top: 0.5rem; padding: 0.5rem 1rem; background: var(--accent); color: var(--bg); border: 0; border-radius: 8px; font-weight: bold; cursor: pointer; }
+dialog { background: var(--card); color: var(--fg); border: 0; border-radius: 12px; padding: 1.5rem; }
+dialog::backdrop { background: rgba(0,0,0,0.6); }
+dialog label { display: block; margin: 0.75rem 0; }
+dialog input { width: 100%; padding: 0.5rem; margin-top: 0.25rem; background: var(--bg); color: var(--fg); border: 1px solid #444; border-radius: 6px; }
+.spot-row { display: flex; justify-content: space-between; padding: 0.25rem 0; }

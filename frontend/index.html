@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#1a1a1a" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>Gold Bar Tracker</title>
+</head>
+<body>
+  <header>
+    <h1>Gold Bar Tracker</h1>
+    <button id="settings-btn" aria-label="Settings">⚙️</button>
+  </header>
+
+  <section id="spot" class="card">
+    <h2>Spot price</h2>
+    <div id="spot-content">Loading…</div>
+  </section>
+
+  <section id="size-picker" class="card">
+    <h2>Size</h2>
+    <div class="buttons">
+      <button data-size="2.5">2.5 g</button>
+      <button data-size="5">5 g</button>
+      <button data-size="10">10 g</button>
+    </div>
+  </section>
+
+  <section id="results" class="card">
+    <div id="status"></div>
+    <table id="listings" hidden>
+      <thead>
+        <tr><th>Dealer</th><th>Price</th><th>Premium</th><th></th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <button id="refresh" hidden>Refresh</button>
+  </section>
+
+  <dialog id="settings-dialog">
+    <form method="dialog">
+      <h2>Settings</h2>
+      <label>Backend URL
+        <input id="backend-url" type="url" placeholder="https://your-app.onrender.com" required />
+      </label>
+      <label>API key
+        <input id="api-key" type="password" placeholder="X-API-Key value" required />
+      </label>
+      <menu>
+        <button value="cancel">Cancel</button>
+        <button id="save-settings" value="save">Save</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
