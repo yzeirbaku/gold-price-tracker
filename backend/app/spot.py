@@ -1,32 +1,32 @@
+import asyncio
 import logging
-import os
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
 OUNCE_TO_GRAM = 31.1034768
-METALS_DEV_URL = "https://api.metals.dev/v1/latest"
+GOLD_API_BASE = "https://api.gold-api.com/price"
 
 
 async def fetch_spot_usd_per_gram(client: httpx.AsyncClient) -> dict[str, float] | None:
-    """Return {'gold': USD/g, 'silver': USD/g} or None on failure."""
-    api_key = os.environ.get("METALS_DEV_API_KEY")
-    if not api_key:
-        logger.warning("METALS_DEV_API_KEY not set; skipping spot fetch")
-        return None
+    """Return {'gold': USD/g, 'silver': USD/g} or None on failure.
+
+    Uses api.gold-api.com — free, no API key required, no advertised rate limit.
+    Returns spot price per troy ounce in USD; we convert to per-gram here.
+    """
     try:
-        resp = await client.get(
-            METALS_DEV_URL,
-            params={"api_key": api_key, "currency": "USD", "unit": "toz"},
-            timeout=8.0,
+        gold_resp, silver_resp = await asyncio.gather(
+            client.get(f"{GOLD_API_BASE}/XAU", timeout=8.0),
+            client.get(f"{GOLD_API_BASE}/XAG", timeout=8.0),
         )
-        resp.raise_for_status()
-        data = resp.json()
-        metals = data["metals"]
+        gold_resp.raise_for_status()
+        silver_resp.raise_for_status()
+        gold_oz = float(gold_resp.json()["price"])
+        silver_oz = float(silver_resp.json()["price"])
         return {
-            "gold": float(metals["gold"]) / OUNCE_TO_GRAM,
-            "silver": float(metals["silver"]) / OUNCE_TO_GRAM,
+            "gold": gold_oz / OUNCE_TO_GRAM,
+            "silver": silver_oz / OUNCE_TO_GRAM,
         }
     except (httpx.HTTPError, KeyError, ValueError) as e:
         logger.exception("spot fetch failed: %s", e)

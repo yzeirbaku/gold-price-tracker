@@ -6,8 +6,8 @@ Personal tool to compare 2.5 g, 5 g, and 10 g gold-bar prices across Danish onli
 
 - **Backend** — Python + FastAPI on Render free tier. `backend/`
 - **Frontend** — Static PWA on Cloudflare Pages. `frontend/`
-- **Spot price** — metals.dev (USD/oz)
-- **FX** — frankfurter.app (USD→EUR, USD→DKK)
+- **Spot price** — api.gold-api.com (USD/oz, free, no key)
+- **FX** — frankfurter.dev (USD→EUR, USD→DKK)
 
 ## Dealers wired
 
@@ -16,11 +16,11 @@ Personal tool to compare 2.5 g, 5 g, and 10 g gold-bar prices across Danish onli
 | Tavex | ✓ live |
 | Vitus Guld | ✓ live |
 | Plaza | ✓ live |
-| Nordisk Guld | ✓ (stock-dependent) |
-| Sero Guld | ✓ (stock-dependent) |
-| Nyfortuna | ✓ live |
+| Nordisk Guld | ✓ live (needed Sec-Ch-Ua / Sec-Fetch-* headers to bypass Simply.com WAF) |
+| Sero Guld | ✓ live (same WAF as Nordisk; stock varies) |
+| Nyfortuna | ✓ live (carries 1g/10g/20g/50g — no 2.5g or 5g) |
 | Jan Jørgensen Smykker | ✓ live |
-| Mønthuset | ✓ code (live category currently empty) |
+| Mønthuset | ✓ code (live guldbarrer category currently empty) |
 | Silver Gold Bull DK | skipped — JS-rendered React SPA + Algolia + dynamic pricing |
 
 ## Local dev
@@ -39,7 +39,7 @@ pytest tests/unit -v                   # unit tests, no network
 ruff check app tests
 mypy app
 
-API_KEY=test METALS_DEV_API_KEY=<your_key> uvicorn app.main:app --reload
+API_KEY=test uvicorn app.main:app --reload
 ```
 
 ### Frontend
@@ -56,7 +56,6 @@ Open `http://127.0.0.1:5500/`, click ⚙️, set backend URL and API key.
 | Var | Required | Notes |
 |---|---|---|
 | `API_KEY` | yes | Shared secret. PWA sends as `X-API-Key`. Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. |
-| `METALS_DEV_API_KEY` | yes | metals.dev free-tier key. |
 | `FRONTEND_ORIGIN` | yes | Your Cloudflare Pages URL, e.g. `https://gold-tracker.pages.dev` — for CORS. |
 
 ## Tests

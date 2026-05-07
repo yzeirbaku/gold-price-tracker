@@ -66,7 +66,7 @@ function render(data) {
       `;
     } else {
       const note = li.status === 'out_of_stock' ? 'out of stock'
-                : li.status === 'unavailable' ? 'price on request'
+                : li.status === 'unavailable' ? (li.error || 'unavailable')
                 : `error (${li.error || 'unknown'})`;
       tr.innerHTML = `<td>${li.dealer}</td><td colspan="3">${note}</td>`;
     }
