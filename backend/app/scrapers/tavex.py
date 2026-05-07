@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 
@@ -56,10 +57,11 @@ class TavexScraper:
     def _find_cheapest_for_size(
         self, tree: HTMLParser, size_g: float,
     ) -> tuple[Node, float, bool, str | None] | None:
-        # Product grid cards have class "not-listing js-product".
-        # Skip "product--listing" (carousel/sidebar items without prices) and combi/multipacks.
-        # Tavex titles: "5 gram Valcambi Suisse Guldbarre",
-        #               "5 gram Guldbarre (forskellige mærker)" (mixed-brand offering).
+        # Tavex cards (.not-listing.js-product) carry their price tiers in the
+        # data-pricelist JSON of `.product__price--single .js-product-price-from`.
+        # We pick the qty-1 (single-bar) sell price, which is the apples-to-apples
+        # comparison with other dealers. Falls back to the rendered price text on
+        # the rare cards where the JSON is absent.
         if size_g.is_integer():
             size_token = f"{int(size_g)} gram"
         else:
@@ -75,20 +77,14 @@ class TavexScraper:
                 continue
             raw_title = title_node.text(strip=True)
             tl = raw_title.lower()
-            # Tavex titles always start with the size, so use startswith to avoid
-            # "5 gram" matching "2,5 gram" / "25 gram" / "50 gram".
             if not tl.startswith(size_token + " "):
                 continue
-            # Skip combi/multipack ("100x 1 gram", "50 x 1 gram CombiBar") — different product.
             if "combibar" in tl or " x " in tl:
                 continue
-            price_node = card.css_first(".product__price--single .product__price-value")
-            if price_node is None:
-                continue
-            price = parse_dkk_price(price_node.text(strip=True))
+            price = _read_sell_price(card)
             if price is None:
                 continue
-            in_stock = card.css_first(".product__in-stock") is not None
+            in_stock = price > 0
             brand = _extract_brand(raw_title, size_token)
             candidates.append((price, in_stock, brand, card))
 
@@ -97,6 +93,29 @@ class TavexScraper:
         candidates.sort(key=lambda c: (not c[1], c[0]))
         price, in_stock, brand, card = candidates[0]
         return card, price, in_stock, brand
+
+
+def _read_sell_price(card: Node) -> float | None:
+    # Preferred path: parse the JSON pricelist on the sell-side price node and
+    # take the first tier (quantityFrom: 1) — that's the single-bar price.
+    sell_node = card.css_first(".product__price--single .js-product-price-from")
+    if sell_node is not None:
+        raw = sell_node.attributes.get("data-pricelist")
+        if raw:
+            try:
+                pl = json.loads(raw)
+                sell_tiers = pl.get("sell") or []
+                if sell_tiers and isinstance(sell_tiers[0], dict):
+                    val = sell_tiers[0].get("price")
+                    if isinstance(val, int | float) and val > 0:
+                        return float(val)
+            except (ValueError, TypeError):
+                pass
+    # Fallback: read the rendered text price.
+    text_node = card.css_first(".product__price--single .product__price-value")
+    if text_node is not None:
+        return parse_dkk_price(text_node.text(strip=True))
+    return None
 
 
 def _extract_brand(title: str, size_token: str) -> str | None:

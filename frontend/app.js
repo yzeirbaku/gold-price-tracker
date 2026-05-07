@@ -68,7 +68,7 @@ async function fetchPrices(size) {
     return;
   }
   lastSize = size;
-  showMessage('Loading…');
+  showSpinner();
   $('#listings').hidden = true;
   $('#refresh').hidden = true;
   $('#status').textContent = '';
@@ -120,6 +120,13 @@ function renderPrices(data) {
   $('#status').textContent = `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`;
 }
 
+function showSpinner() {
+  $('#loading').innerHTML = `
+    <div class="spinner"><span></span><span></span><span></span></div>
+    <div class="loading-text">Fetching prices…</div>
+  `;
+  $('#loading').hidden = false;
+}
 function showMessage(msg) {
   $('#loading').textContent = msg;
   $('#loading').hidden = false;
