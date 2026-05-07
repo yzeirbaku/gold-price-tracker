@@ -25,4 +25,7 @@ async def test_dealer_returns_a_price_live(scraper) -> None:
             if listing.status == "ok" and listing.price_dkk and listing.price_dkk > 0:
                 found_ok = True
                 break
-    assert found_ok, f"{scraper.name}: no in-stock price for any of 2.5/5/10g (last_status={last_status})"
+    assert found_ok, (
+        f"{scraper.name}: no in-stock price for any of 2.5/5/10g "
+        f"(last_status={last_status})"
+    )
