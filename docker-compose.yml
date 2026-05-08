@@ -1,0 +1,24 @@
+# Local-only Postgres for development. Mirrors the Neon schema 1:1 so the
+# backend boots with the same SCHEMA_SQL bootstrap. Run from repo root:
+#   docker compose up -d
+# then export DATABASE_URL=postgresql://gold:gold@localhost:5432/goldtracker
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: gold-tracker-db
+    environment:
+      POSTGRES_DB: goldtracker
+      POSTGRES_USER: gold
+      POSTGRES_PASSWORD: gold
+    ports:
+      - "5432:5432"
+    volumes:
+      - gold-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gold -d goldtracker"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  gold-db-data:

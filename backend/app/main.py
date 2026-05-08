@@ -198,7 +198,7 @@ async def get_dealer_history(
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             f"""
-            SELECT fetched_at, status, price_dkk, spot_gold_dkk_per_g
+            SELECT fetched_at, status, price_dkk, spot_gold_dkk_per_g, brand
             FROM dealer_snapshots
             WHERE dealer = $1 AND size_g = $2
               AND fetched_at >= NOW() - INTERVAL '{interval}'
@@ -221,6 +221,7 @@ async def get_dealer_history(
                     float(row["spot_gold_dkk_per_g"])
                     if row["spot_gold_dkk_per_g"] is not None else None
                 ),
+                "brand": row["brand"],
             }
             for row in rows
         ],

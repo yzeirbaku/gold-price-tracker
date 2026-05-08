@@ -74,6 +74,24 @@ python -m http.server 5500
 # open http://127.0.0.1:5500/ → ⚙ → paste API key (any value matching backend)
 ```
 
+### Local Postgres + seed (only needed to test the history feature)
+
+```bash
+# From repo root — starts Postgres on localhost:5432
+docker compose up -d
+
+# Seed 30 days of fake snapshots (refuses to run against non-localhost DBs)
+cd backend
+export DATABASE_URL='postgresql://gold:gold@localhost:5432/goldtracker'
+.venv/Scripts/python.exe -m scripts.seed
+
+# Start the backend with DATABASE_URL set so /snapshot and /history work
+API_KEY=test DATABASE_URL='postgresql://gold:gold@localhost:5432/goldtracker' \
+  uvicorn app.main:app --reload
+```
+
+The seed uses `random.seed(42)` so re-running gives identical data. It TRUNCATEs both tables on every run.
+
 ## Verification before completion
 
 Run from `backend/`:

@@ -246,15 +246,21 @@ function renderHistory(data) {
   }
   $('#history-status').hidden = true;
 
+  // Each chart point carries its brand for the tooltip — the cheapest variant
+  // can switch between snapshots (e.g. Tavex 5g flips PAMP↔Argor when one
+  // sells out), and a sudden jump on the line is more readable when you can
+  // see the brand changed at that point.
   const pricePoints = okPoints.map(p => ({
     x: new Date(p.fetched_at).getTime(),
     y: p.price_dkk,
+    brand: p.brand,
   }));
   const premiumPoints = okPoints.map(p => {
     const ref = p.spot_gold_dkk_per_g * data.size_g;
     return {
       x: new Date(p.fetched_at).getTime(),
       y: ref > 0 ? Number(((p.price_dkk - ref) / ref * 100).toFixed(2)) : null,
+      brand: p.brand,
     };
   });
 
@@ -304,7 +310,11 @@ function drawChart(key, canvasId, points, unit, color, yFmt) {
         tooltip: {
           callbacks: {
             title: items => new Date(items[0].parsed.x).toLocaleString(),
-            label: item => `${yFmt(item.parsed.y)} ${unit === '%' ? '' : unit}`.trim(),
+            label: item => {
+              const valueLabel = `${yFmt(item.parsed.y)} ${unit === '%' ? '' : unit}`.trim();
+              const brand = item.raw && item.raw.brand;
+              return brand ? `${valueLabel} — ${brand}` : valueLabel;
+            },
           },
         },
       },
