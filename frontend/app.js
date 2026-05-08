@@ -146,7 +146,10 @@ function renderListingsBody() {
     const brand = li.brand ? escapeHtml(li.brand) : '—';
     if (li.status === 'ok') {
       tr.innerHTML = `
-        <td><a class="dealer-link" href="${li.url}" target="_blank" rel="noopener">${escapeHtml(li.dealer)}<span class="visit-arrow" aria-hidden="true">↗</span></a></td>
+        <td>
+          <a class="dealer-link" href="${li.url}" target="_blank" rel="noopener">${escapeHtml(li.dealer)}<span class="visit-arrow" aria-hidden="true">↗</span></a>
+          <button type="button" class="history-btn" data-dealer="${escapeHtml(li.dealer)}" aria-label="Show price history">📈</button>
+        </td>
         <td class="brand-cell">${brand}</td>
         <td>${fmtDKK(li.price_dkk)}</td>
         <td>${fmtPct(li.premium_pct)}</td>
@@ -182,6 +185,157 @@ document.querySelectorAll('#size-picker button').forEach(b => {
   b.addEventListener('click', () => fetchPrices(parseFloat(b.dataset.size)));
 });
 $('#refresh').addEventListener('click', () => { if (lastSize != null) fetchPrices(lastSize); });
+
+// History modal —————————————————————————————————————————————————————————
+let historyState = { dealer: null, size: null, range: '30d' };
+const historyCharts = { price: null, premium: null };
+
+function openHistory(dealer, size) {
+  historyState = { dealer, size, range: '30d' };
+  $('#history-title').textContent = `${dealer} — ${size} g`;
+  document.querySelectorAll('#history-dialog .range-toggle button').forEach(b => {
+    b.classList.toggle('active', b.dataset.range === '30d');
+  });
+  $('#history-dialog').showModal();
+  fetchHistory();
+}
+
+function closeHistory() {
+  $('#history-dialog').close();
+  // Free Chart.js instances so the canvases can be re-initialized cleanly next time.
+  for (const k of Object.keys(historyCharts)) {
+    if (historyCharts[k]) { historyCharts[k].destroy(); historyCharts[k] = null; }
+  }
+}
+
+async function fetchHistory() {
+  const apiKey = loadApiKey();
+  if (!apiKey) { setHistoryStatus('Open Settings to configure your API key.'); return; }
+  const { dealer, size, range } = historyState;
+  setHistoryStatus('Loading…');
+  let resp;
+  try {
+    resp = await fetch(
+      `${BACKEND_URL}/history/dealer/${encodeURIComponent(dealer)}/${size}?range=${range}`,
+      { headers: { 'X-API-Key': apiKey } },
+    );
+  } catch (e) {
+    setHistoryStatus(`Network error: ${e.message}`);
+    return;
+  }
+  if (resp.status === 503) { setHistoryStatus('History not configured on the server yet.'); return; }
+  if (!resp.ok) { setHistoryStatus(`Server error: ${resp.status}`); return; }
+  renderHistory(await resp.json());
+}
+
+function setHistoryStatus(msg) {
+  $('#history-status').textContent = msg;
+  $('#history-status').hidden = false;
+}
+
+function renderHistory(data) {
+  const okPoints = data.points.filter(p =>
+    p.status === 'ok' && p.price_dkk != null && p.spot_gold_dkk_per_g != null,
+  );
+  if (okPoints.length === 0) {
+    setHistoryStatus('No data yet for this range.');
+    for (const k of Object.keys(historyCharts)) {
+      if (historyCharts[k]) { historyCharts[k].destroy(); historyCharts[k] = null; }
+    }
+    return;
+  }
+  $('#history-status').hidden = true;
+
+  const pricePoints = okPoints.map(p => ({
+    x: new Date(p.fetched_at).getTime(),
+    y: p.price_dkk,
+  }));
+  const premiumPoints = okPoints.map(p => {
+    const ref = p.spot_gold_dkk_per_g * data.size_g;
+    return {
+      x: new Date(p.fetched_at).getTime(),
+      y: ref > 0 ? Number(((p.price_dkk - ref) / ref * 100).toFixed(2)) : null,
+    };
+  });
+
+  drawChart('price', 'price-chart', pricePoints, 'DKK', '#e2c054', v => fmtNum(v, 0, 'da-DK'));
+  drawChart('premium', 'premium-chart', premiumPoints, '%', '#7dc8a4', v => v.toFixed(1) + '%');
+}
+
+function drawChart(key, canvasId, points, unit, color, yFmt) {
+  if (historyCharts[key]) historyCharts[key].destroy();
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  historyCharts[key] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [{
+        data: points,
+        borderColor: color,
+        backgroundColor: color + '22',
+        borderWidth: 2,
+        tension: 0.25,
+        pointRadius: points.length < 60 ? 2 : 0,
+        pointHoverRadius: 4,
+        fill: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: {
+          type: 'linear',
+          ticks: {
+            color: '#8a8a90',
+            maxTicksLimit: 5,
+            callback: v => new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+          },
+          grid: { color: 'rgba(255,255,255,0.04)' },
+        },
+        y: {
+          ticks: { color: '#8a8a90', callback: yFmt },
+          grid: { color: 'rgba(255,255,255,0.04)' },
+        },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: items => new Date(items[0].parsed.x).toLocaleString(),
+            label: item => `${yFmt(item.parsed.y)} ${unit === '%' ? '' : unit}`.trim(),
+          },
+        },
+      },
+    },
+  });
+}
+
+// Range toggle inside the history dialog.
+document.querySelectorAll('#history-dialog .range-toggle button').forEach(b => {
+  b.addEventListener('click', () => {
+    const range = b.dataset.range;
+    if (range === historyState.range) return;
+    historyState.range = range;
+    document.querySelectorAll('#history-dialog .range-toggle button').forEach(x => {
+      x.classList.toggle('active', x.dataset.range === range);
+    });
+    fetchHistory();
+  });
+});
+
+$('#history-close').addEventListener('click', closeHistory);
+$('#history-dialog').addEventListener('cancel', closeHistory);  // Esc key
+
+// Listings tbody click — delegate to history-btn so we don't rebind handlers
+// every render. Uses the row's size context (lastSize is the active size).
+$('#listings tbody').addEventListener('click', (e) => {
+  const btn = e.target.closest('.history-btn');
+  if (!btn) return;
+  const dealer = btn.dataset.dealer;
+  if (dealer && lastSize != null) openHistory(dealer, lastSize);
+});
 
 // Sortable headers — click to switch column, click again to flip direction.
 document.querySelectorAll('#listings th.sortable').forEach(th => {

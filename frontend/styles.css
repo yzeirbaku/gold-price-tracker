@@ -242,3 +242,57 @@ dialog menu button[value="save"] {
 
 .muted-tiny { color: var(--muted); margin-top: 0.6rem; }
 
+/* History modal —————————————————————————————————————————————————————— */
+.history-btn {
+  background: transparent; border: none; color: var(--muted);
+  cursor: pointer; padding: 0 0.25rem; margin-left: 0.25rem;
+  font-size: 0.95rem; vertical-align: middle;
+  opacity: 0.7; transition: opacity 120ms ease;
+}
+.history-btn:hover { opacity: 1; }
+.history-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+#history-dialog {
+  width: min(94vw, 560px); max-width: 560px; padding: 1rem 1.1rem 1.2rem;
+}
+.history-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+.history-head h2 { margin: 0; font-size: 1rem; color: var(--fg); }
+.history-head .icon-btn { width: 32px; height: 32px; font-size: 1.2rem; }
+
+.range-toggle {
+  display: flex; gap: 0.4rem; margin-bottom: 0.85rem;
+}
+.range-toggle button {
+  flex: 1; padding: 0.45rem 0.5rem;
+  background: var(--surface-2); color: var(--fg-soft);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 0.85rem; font-weight: 500; cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.range-toggle button:hover { background: #2a2a2d; color: var(--fg); }
+.range-toggle button.active {
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
+  color: #1a1300; border-color: var(--accent-2);
+}
+
+.chart-block { margin-top: 0.75rem; }
+.chart-block h3 {
+  margin: 0 0 0.35rem; font-size: 0.7rem; font-weight: 600;
+  color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;
+}
+.chart-container {
+  position: relative; height: 160px; width: 100%;
+}
+#history-status:not([hidden]) {
+  display: flex; justify-content: center; padding: 1.2rem 0;
+  color: var(--muted); font-size: 0.9rem;
+}
+
+@media (max-width: 480px) {
+  #history-dialog { width: min(95vw, 400px); padding: 0.85rem 0.9rem 1rem; }
+  .chart-container { height: 140px; }
+}
+
