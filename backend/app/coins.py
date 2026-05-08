@@ -23,6 +23,7 @@ COINS: dict[str, dict[str, tuple[float, float]]] = {
     "Maple Leaf": {
         "1 oz": (31.10, 0.9999), "1/2 oz": (15.55, 0.9999),
         "1/4 oz": (7.78, 0.9999), "1/10 oz": (3.11, 0.9999),
+        "1/20 oz": (1.555, 0.9999),
     },
     "Vienna Philharmonic": {
         "1 oz": (31.10, 0.9999), "1/2 oz": (15.55, 0.9999),
@@ -43,8 +44,13 @@ COINS: dict[str, dict[str, tuple[float, float]]] = {
         "1 ducat": (3.49, 0.9860), "4 ducat": (13.96, 0.9860),
     },
     "Panda": {
+        # Modern (post-2016) gram-denominated
         "30 g": (30.00, 0.9999), "15 g": (15.00, 0.9999),
         "8 g": (8.00, 0.9999), "3 g": (3.00, 0.9999), "1 g": (1.00, 0.9999),
+        # Pre-2016 fractional troy ounce
+        "1 oz": (31.10, 0.9999), "1/2 oz": (15.55, 0.9999),
+        "1/4 oz": (7.78, 0.9999), "1/10 oz": (3.11, 0.9999),
+        "1/20 oz": (1.555, 0.9999),
     },
 }
 
@@ -53,9 +59,17 @@ _TYPE_ALIASES: dict[str, list[str]] = {
     "Krugerrand": ["krugerrand", "kruger rand"],
     "Maple Leaf": ["maple leaf", "maple"],
     "Vienna Philharmonic": [
-        "vienna philharmonic", "wiener philharmoniker", "philharmonic", "filharmoniker",
+        "vienna philharmonic", "wiener philharmoniker",
+        # Danish: "Østrigsk Philharmoniker". Standalone "philharmoniker" alone
+        # is enough; "philharmonic" is left in for English-language listings
+        # where the full word ends in -ic.
+        "philharmoniker", "philharmonic", "filharmoniker",
     ],
-    "American Eagle": ["american eagle", "us eagle", "amerikansk ørn"],
+    "American Eagle": [
+        "american eagle", "us eagle",
+        # Danish dealers usually keep "Eagle" English; "Amerikansk Eagle".
+        "amerikansk eagle",
+    ],
     "Britannia": ["britannia"],
     "Sovereign": ["sovereign"],
     "Ducat": ["ducat", "dukat"],
@@ -65,32 +79,42 @@ _TYPE_ALIASES: dict[str, list[str]] = {
 # Size-label synonyms per (coin_type, size_label). Lowercase. We sort the
 # matches by alias-length descending at lookup so "1/10 oz" beats "1 oz" on
 # strings that contain both substrings.
+_FRACTIONAL_TYPES = (
+    "Krugerrand", "Maple Leaf", "Vienna Philharmonic",
+    "American Eagle", "Britannia", "Panda",
+)
+
 _SIZE_ALIASES: dict[tuple[str, str], list[str]] = {
     # Fractional ounce sizes — apply to all coin types that use them.
+    # 1/20 oz only exists for Maple Leaf and Panda.
+    **{
+        (t, "1/20 oz"): ["1/20 oz", "1/20oz", "1/20 unze", "1/20 ounce"]
+        for t in ("Maple Leaf", "Panda")
+    },
     **{
         (t, "1/10 oz"): [
             "1/10 oz", "1/10oz", "0.1 oz", "1/10 unze", "1/10 ounce",
             "tenth oz", "tenth ounce",
         ]
-        for t in ("Krugerrand", "Maple Leaf", "Vienna Philharmonic", "American Eagle", "Britannia")
+        for t in _FRACTIONAL_TYPES
     },
     **{
         (t, "1/4 oz"): [
             "1/4 oz", "1/4oz", "0.25 oz", "1/4 unze", "1/4 ounce",
             "quarter oz", "quarter ounce",
         ]
-        for t in ("Krugerrand", "Maple Leaf", "Vienna Philharmonic", "American Eagle", "Britannia")
+        for t in _FRACTIONAL_TYPES
     },
     **{
         (t, "1/2 oz"): [
             "1/2 oz", "1/2oz", "0.5 oz", "1/2 unze", "1/2 ounce",
             "half oz", "half ounce",
         ]
-        for t in ("Krugerrand", "Maple Leaf", "Vienna Philharmonic", "American Eagle", "Britannia")
+        for t in _FRACTIONAL_TYPES
     },
     **{
         (t, "1 oz"): ["1 oz", "1oz", "1 ounce", "1 unze", "one oz", "one ounce"]
-        for t in ("Krugerrand", "Maple Leaf", "Vienna Philharmonic", "American Eagle", "Britannia")
+        for t in _FRACTIONAL_TYPES
     },
     # Sovereigns
     ("Sovereign", "Full"): ["full sovereign", "1 sovereign"],
