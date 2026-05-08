@@ -58,6 +58,60 @@ DEALER_PROFILES: dict[str, dict[float, tuple[str | None, float]]] = {
     },
 }
 
+# Coin offerings per dealer. Each entry: (coin_type, size_label, gross_g,
+# purity, fine_g, base_premium). Plaza and Jan Jørgensen are absent — they
+# don't carry bullion coins in real life. Premiums are slightly higher than
+# bars (typical real-world coin markup) and small fractional sizes carry a
+# higher per-gram premium than half-oz.
+COIN_PROFILES: dict[str, list[tuple[str, str, float, float, float, float]]] = {
+    "Tavex": [
+        ("Krugerrand", "1/2 oz", 16.96, 0.9167, 15.5472, 0.110),
+        ("Krugerrand", "1/4 oz", 8.48, 0.9167, 7.7736, 0.135),
+        ("Krugerrand", "1/10 oz", 3.39, 0.9167, 3.1076, 0.180),
+        ("Maple Leaf", "1/2 oz", 15.55, 0.9999, 15.5484, 0.115),
+        ("Maple Leaf", "1/4 oz", 7.78, 0.9999, 7.7792, 0.140),
+        ("Britannia", "1/2 oz", 15.55, 0.9999, 15.5484, 0.118),
+        ("Britannia", "1/4 oz", 7.78, 0.9999, 7.7792, 0.142),
+        ("Vienna Philharmonic", "1/2 oz", 15.55, 0.9999, 15.5484, 0.117),
+        ("Ducat", "1 ducat", 3.49, 0.9860, 3.4411, 0.165),
+    ],
+    "Vitus Guld": [
+        ("Krugerrand", "1/2 oz", 16.96, 0.9167, 15.5472, 0.108),
+        ("Krugerrand", "1/4 oz", 8.48, 0.9167, 7.7736, 0.132),
+        ("Krugerrand", "1/10 oz", 3.39, 0.9167, 3.1076, 0.175),
+        ("Maple Leaf", "1/2 oz", 15.55, 0.9999, 15.5484, 0.112),
+        ("Maple Leaf", "1/4 oz", 7.78, 0.9999, 7.7792, 0.138),
+        ("Maple Leaf", "1/10 oz", 3.11, 0.9999, 3.1097, 0.185),
+        ("Vienna Philharmonic", "1/2 oz", 15.55, 0.9999, 15.5484, 0.114),
+        ("Britannia", "1/4 oz", 7.78, 0.9999, 7.7792, 0.140),
+        ("Ducat", "1 ducat", 3.49, 0.9860, 3.4411, 0.160),
+        ("American Eagle", "1/4 oz", 8.48, 0.9167, 7.7736, 0.145),
+    ],
+    "Nordisk Guld": [
+        ("Britannia", "1/2 oz", 15.55, 0.9999, 15.5484, 0.122),
+        ("Britannia", "1/4 oz", 7.78, 0.9999, 7.7792, 0.148),
+        ("Maple Leaf", "1/2 oz", 15.55, 0.9999, 15.5484, 0.120),
+        ("Maple Leaf", "1/4 oz", 7.78, 0.9999, 7.7792, 0.145),
+        ("Maple Leaf", "1/10 oz", 3.11, 0.9999, 3.1097, 0.190),
+        ("Ducat", "1 ducat", 3.49, 0.9860, 3.4411, 0.170),
+    ],
+    "Sero Guld": [
+        ("Krugerrand", "1/2 oz", 16.96, 0.9167, 15.5472, 0.112),
+        ("Krugerrand", "1/4 oz", 8.48, 0.9167, 7.7736, 0.138),
+        ("Krugerrand", "1/10 oz", 3.39, 0.9167, 3.1076, 0.182),
+        ("Vienna Philharmonic", "1/2 oz", 15.55, 0.9999, 15.5484, 0.116),
+        ("Vienna Philharmonic", "1/4 oz", 7.78, 0.9999, 7.7792, 0.142),
+        ("Britannia", "1/2 oz", 15.55, 0.9999, 15.5484, 0.119),
+    ],
+    "Nyfortuna": [
+        ("Krugerrand", "1/2 oz", 16.96, 0.9167, 15.5472, 0.113),
+        ("Krugerrand", "1/4 oz", 8.48, 0.9167, 7.7736, 0.139),
+        ("Maple Leaf", "1/2 oz", 15.55, 0.9999, 15.5484, 0.116),
+        ("American Eagle", "1/2 oz", 16.97, 0.9167, 15.5564, 0.120),
+        ("Panda", "1/2 oz", 15.55, 0.9999, 15.5484, 0.130),
+    ],
+}
+
 DAYS_BACK = 30
 TICK_MINUTES = 30
 # ~current real-world DKK-per-gram gold (live row in PWA shows 10,448 DKK at
@@ -96,7 +150,9 @@ async def main() -> None:
     async with pool.acquire() as conn:
         # Bootstrap schema (idempotent) and wipe any previous seed.
         await conn.execute(SCHEMA_SQL)
-        await conn.execute("TRUNCATE bar_snapshots, spot_snapshots RESTART IDENTITY")
+        await conn.execute(
+            "TRUNCATE bar_snapshots, coin_snapshots, spot_snapshots RESTART IDENTITY"
+        )
 
         # Snap "now" down to the most recent 30-min boundary so the chart
         # x-axis ends on a clean tick.
@@ -108,15 +164,17 @@ async def main() -> None:
         spot_dkk = START_SPOT_DKK_PER_G
         spot_rows: list[tuple] = []
         dealer_rows: list[tuple] = []
+        coin_rows: list[tuple] = []
 
         for i in range(ticks):
             ts = start + timedelta(minutes=TICK_MINUTES * i)
             spot_dkk += random.gauss(0, SPOT_DRIFT_STDDEV)
             spot_dkk = max(SPOT_MIN, min(SPOT_MAX, spot_dkk))
+            spot_rounded = round(spot_dkk, 4)
 
             spot_rows.append((
                 ts,
-                round(spot_dkk, 4),
+                spot_rounded,
                 round(spot_dkk * EUR_PER_DKK, 4),
                 round(spot_dkk * SILVER_DKK_RATIO, 4),
                 round(spot_dkk * SILVER_DKK_RATIO * EUR_PER_DKK, 4),
@@ -128,14 +186,35 @@ async def main() -> None:
                     if random.random() < ERROR_PROBABILITY:
                         dealer_rows.append((
                             ts, dealer, size_g, "error",
-                            None, brand, "fake_seed_error", round(spot_dkk, 4),
+                            None, brand, "fake_seed_error", spot_rounded,
                         ))
                         continue
                     prem = base_prem + random.gauss(0, PREMIUM_NOISE_STDDEV)
                     price = spot_dkk * size_g * (1 + prem)
                     dealer_rows.append((
                         ts, dealer, size_g, "ok",
-                        round(price, 2), brand, None, round(spot_dkk, 4),
+                        round(price, 2), brand, None, spot_rounded,
+                    ))
+
+            for dealer, coins in COIN_PROFILES.items():
+                for coin_type, size_label, gross_g, purity, fine_g, base_prem in coins:
+                    if random.random() < ERROR_PROBABILITY:
+                        coin_rows.append((
+                            ts, dealer, coin_type, size_label,
+                            gross_g, purity, fine_g, "error",
+                            None, "fake_seed_error", spot_rounded, None,
+                        ))
+                        continue
+                    prem = base_prem + random.gauss(0, PREMIUM_NOISE_STDDEV)
+                    price = spot_dkk * fine_g * (1 + prem)
+                    slug_dealer = dealer.lower().replace(" ", "-")
+                    slug_type = coin_type.lower().replace(" ", "-")
+                    slug_size = size_label.replace(" ", "").replace("/", "-")
+                    coin_rows.append((
+                        ts, dealer, coin_type, size_label,
+                        gross_g, purity, fine_g, "ok",
+                        round(price, 2), None, spot_rounded,
+                        f"https://example.invalid/{slug_dealer}/{slug_type}-{slug_size}",
                     ))
 
         await conn.executemany(
@@ -156,10 +235,20 @@ async def main() -> None:
             """,
             dealer_rows,
         )
+        await conn.executemany(
+            """
+            INSERT INTO coin_snapshots (
+                fetched_at, dealer, coin_type, size_label,
+                gross_weight_g, purity, fine_gold_g, status,
+                price_dkk, error, spot_gold_dkk_per_g, listing_url
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            """,
+            coin_rows,
+        )
 
         print(
-            f"seeded {len(spot_rows)} spot rows + {len(dealer_rows)} dealer rows "
-            f"({DAYS_BACK} days × {ticks} ticks)"
+            f"seeded {len(spot_rows)} spot rows + {len(dealer_rows)} bar rows "
+            f"+ {len(coin_rows)} coin rows ({DAYS_BACK} days × {ticks} ticks)"
         )
 
     await pool.close()

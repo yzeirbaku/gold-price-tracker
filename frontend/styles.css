@@ -61,23 +61,27 @@ header h1 {
 
 main { max-width: 720px; margin: 0 auto; }
 
-/* Bars/Coins tab strip — sits below the spot ticker, above the per-tab card. */
+/* Bars/Coins view switcher — minimal underline-style tabs that read as
+   navigation rather than as primary CTAs. Sits below the spot ticker. */
 .tab-strip {
-  display: flex; gap: 0.5rem;
-  max-width: 720px; margin: 1rem auto 0; padding: 0 1rem;
+  display: flex; gap: 1.4rem;
+  max-width: 720px; margin: 0.5rem auto -0.4rem;
+  padding: 0 1.5rem;
+  border-bottom: 1px solid var(--border);
 }
 .tab-strip button {
-  flex: 1; padding: 0.55rem 0.75rem;
-  background: var(--surface-2); color: var(--fg-soft);
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  font: inherit; font-weight: 500; cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  background: none; border: none;
+  padding: 0.55rem 0.1rem; margin-bottom: -1px;
+  font: inherit; font-size: 0.8rem; font-weight: 500;
+  color: var(--muted); cursor: pointer;
+  border-bottom: 2px solid transparent;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  transition: color 120ms ease, border-color 120ms ease;
 }
-.tab-strip button:hover { background: #2a2a2d; color: var(--fg); }
+.tab-strip button:hover { color: var(--fg-soft); }
 .tab-strip button.active {
-  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
-  color: #1a1300; border-color: var(--accent-2);
-  box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 6px 16px rgba(184,147,42,0.18);
+  color: var(--accent);
+  border-bottom-color: var(--accent);
 }
 .card {
   margin: 1rem; padding: 1.1rem 1.1rem 1.25rem;
@@ -121,7 +125,7 @@ main { max-width: 720px; margin: 0 auto; }
   margin-bottom: 0.15rem;
 }
 .results-head .icon-btn { width: 34px; height: 34px; font-size: 1.15rem; }
-#status {
+#status, #coins-status {
   color: var(--muted);
   font-size: 0.7rem;
   text-align: right;

@@ -110,7 +110,7 @@ API_KEY=test DATABASE_URL='postgresql://gold:gold@localhost:5433/goldtracker' \
   uvicorn app.main:app --reload
 ```
 
-The seed uses `random.seed(42)` so re-running gives identical data. It TRUNCATEs both tables on every run.
+The seed uses `random.seed(42)` so re-running gives identical data. It TRUNCATEs `bar_snapshots`, `coin_snapshots`, and `spot_snapshots` on every run.
 
 ## Verification before completion
 

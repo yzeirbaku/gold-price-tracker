@@ -450,7 +450,7 @@ async function fetchCoins() {
 function showCoinsSpinner() {
   $('#coins-loading').innerHTML = `
     <div class="spinner"><span></span><span></span><span></span></div>
-    <div class="loading-text">Fetching coins…</div>
+    <div class="loading-text">Fetching prices…</div>
   `;
   $('#coins-loading').hidden = false;
 }
