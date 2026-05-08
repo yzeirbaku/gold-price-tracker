@@ -174,8 +174,8 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
     }
 
 
-@app.get("/history/dealer/{dealer}/{size}")
-async def get_dealer_history(
+@app.get("/history/bar/{dealer}/{size}")
+async def get_bar_history(
     dealer: str,
     size: float,
     range: str = "30d",

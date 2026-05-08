@@ -271,7 +271,7 @@ async function fetchHistory() {
   let resp;
   try {
     resp = await fetch(
-      `${BACKEND_URL}/history/dealer/${encodeURIComponent(dealer)}/${size}?range=${range}`,
+      `${BACKEND_URL}/history/bar/${encodeURIComponent(dealer)}/${size}?range=${range}`,
       { headers: { 'X-API-Key': apiKey } },
     );
   } catch (e) {
