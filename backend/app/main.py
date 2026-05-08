@@ -10,11 +10,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.auth import require_api_key
 from app.db import close_pool, get_pool
 from app.fx import fetch_usd_to
-from app.models import PriceResponse
+from app.models import CoinListing, PriceResponse
 from app.orchestrator import run
 from app.scrapers.base import DEFAULT_HEADERS, DealerScraper, now_utc
-from app.scrapers.registry import ALL_SCRAPERS
+from app.scrapers.registry import ALL_COIN_SCRAPERS, ALL_SCRAPERS
 from app.spot import fetch_spot_usd_per_gram
+
+# Per-coin-scraper deadline. Coin scrapers do a single fetch each (unlike the
+# Vitus bar scraper that does two), so 10s is plenty of headroom and a hung
+# coin dealer can't block the whole snapshot.
+COIN_SCRAPER_DEADLINE_S = 10.0
 
 # Send INFO+ logs to stdout — Render captures stdout per service.
 # `force=True` so we win over uvicorn's default handler config and the
@@ -102,13 +107,32 @@ async def get_spot(_: None = Depends(require_api_key)) -> dict[str, object]:
     }
 
 
+async def _safe_fetch_coins(scraper, client: httpx.AsyncClient) -> list[CoinListing]:
+    """Run a coin scraper with a deadline. Errors → single error Listing."""
+    try:
+        return await asyncio.wait_for(
+            scraper.fetch(client), timeout=COIN_SCRAPER_DEADLINE_S,
+        )
+    except TimeoutError:
+        return [CoinListing(
+            dealer=scraper.name, status="error",
+            error=f"timeout after {COIN_SCRAPER_DEADLINE_S:g}s", fetched_at=now_utc(),
+        )]
+    except Exception as e:
+        return [CoinListing(
+            dealer=scraper.name, status="error",
+            error=f"{e.__class__.__name__}: {e}", fetched_at=now_utc(),
+        )]
+
+
 @app.post("/snapshot")
 async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
-    """Run all sizes × all dealers + spot, persist to Postgres.
+    """Run all sizes × all dealers + spot + coins, persist to Postgres.
 
-    Called by the GitHub Action cron every 30 min. Writes one spot_snapshots
-    row plus N bar_snapshots rows (one per dealer × size, including errors —
-    so the history view can show outages, not just successful prices).
+    Called by the GitHub Action cron every 20 min. Writes one spot_snapshots
+    row, N bar_snapshots rows (one per dealer × size, including errors), and
+    M coin_snapshots rows (one per recognized in-stock coin per dealer). All
+    in a single transaction so the snapshot is atomic.
     """
     pool = await get_pool()
     if pool is None:
@@ -124,8 +148,13 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
     # than keeping each Listing's individual fetched_at.
     fetched_at = now_utc()
     first_with_spot = next((r for r in results if r.spot is not None), None)
+    spot_gold_dkk = (
+        first_with_spot.spot.gold.per_gram_dkk
+        if first_with_spot is not None and first_with_spot.spot is not None
+        else None
+    )
 
-    dealer_rows = [
+    bar_rows = [
         (
             fetched_at,
             li.dealer,
@@ -134,9 +163,33 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
             li.price_dkk,
             li.brand,
             li.error,
-            r.spot.gold.per_gram_dkk if r.spot else None,
+            spot_gold_dkk if r.spot is None else r.spot.gold.per_gram_dkk,
         )
         for r in results for li in r.listings
+    ]
+
+    # Now fan out the coin scrapers. They share a fresh client.
+    async with httpx.AsyncClient(headers=DEFAULT_HEADERS) as coin_client:
+        coin_results = await asyncio.gather(
+            *[_safe_fetch_coins(s, coin_client) for s in ALL_COIN_SCRAPERS]
+        )
+
+    coin_rows = [
+        (
+            fetched_at,
+            c.dealer,
+            c.coin_type,
+            c.size_label,
+            c.gross_weight_g,
+            c.purity,
+            c.fine_gold_g,
+            c.status,
+            c.price_dkk,
+            c.error,
+            spot_gold_dkk,
+            str(c.url) if c.url else None,
+        )
+        for batch in coin_results for c in batch
     ]
 
     async with pool.acquire() as conn:
@@ -162,14 +215,27 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
                     brand, error, spot_gold_dkk_per_g
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 """,
-                dealer_rows,
+                bar_rows,
             )
+            if coin_rows:
+                await conn.executemany(
+                    """
+                    INSERT INTO coin_snapshots (
+                        fetched_at, dealer, coin_type, size_label,
+                        gross_weight_g, purity, fine_gold_g,
+                        status, price_dkk, error,
+                        spot_gold_dkk_per_g, listing_url
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    """,
+                    coin_rows,
+                )
 
     return {
         "ok": True,
         "fetched_at": fetched_at.isoformat(),
         "sizes": sizes,
-        "dealer_rows": len(dealer_rows),
+        "bar_rows": len(bar_rows),
+        "coin_rows": len(coin_rows),
         "spot_recorded": first_with_spot is not None,
     }
 
