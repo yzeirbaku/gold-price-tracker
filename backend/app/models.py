@@ -34,3 +34,18 @@ class PriceResponse(BaseModel):
     spot: SpotPrice | None
     fx_stale: bool
     listings: list[Listing]
+
+
+class CoinListing(BaseModel):
+    dealer: str
+    status: ListingStatus
+    coin_type: str | None = None
+    size_label: str | None = None
+    gross_weight_g: float | None = None
+    purity: float | None = None
+    fine_gold_g: float | None = None
+    price_dkk: float | None = None
+    premium_pct: float | None = None
+    url: HttpUrl | None = None
+    error: str | None = None
+    fetched_at: datetime
