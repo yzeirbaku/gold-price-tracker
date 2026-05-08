@@ -64,17 +64,18 @@ main { max-width: 720px; margin: 0 auto; }
 /* Header layout — title on the left, tabs immediately after the title,
    settings on the far right. Tabs read as navigation, not primary CTAs. */
 .header-title {
-  display: flex; align-items: baseline; gap: 1rem;
+  display: flex; align-items: center; gap: 2rem;
   min-width: 0;  /* let the h1 truncate if narrow */
   flex: 1;
 }
 .tab-strip {
   display: flex; gap: 1.1rem;
+  transform: translateY(2px);
 }
 .tab-strip button {
   background: none; border: none;
   padding: 0.15rem 0; margin: 0;
-  font: inherit; font-size: 0.72rem; font-weight: 600;
+  font: inherit; font-size: 0.78rem; font-weight: 600;
   color: var(--muted); cursor: pointer;
   border-bottom: 2px solid transparent;
   text-transform: uppercase; letter-spacing: 0.08em;

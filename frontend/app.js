@@ -481,7 +481,7 @@ function renderCoins(data) {
   $('#coin-listings').hidden = false;
   $('#coins-refresh').hidden = false;
   $('#coins-status').textContent = data.fetched_at
-    ? `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`
+    ? `Updated ${new Date().toLocaleTimeString()}`
     : 'No data yet — wait for the snapshot cron to run.';
 }
 
