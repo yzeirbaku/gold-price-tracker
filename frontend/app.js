@@ -137,6 +137,10 @@ function renderPrices(data) {
 
 function renderListingsBody() {
   const tbody = $('#listings tbody');
+  // Clear any expansion state — the history-row will be wiped along with
+  // the rest of tbody, so leave nothing dangling.
+  destroyHistoryCharts();
+  historyState.dealer = null;
   tbody.innerHTML = '';
   updateSortIndicators();
   const ordered = sortListings(lastListings);
@@ -145,11 +149,13 @@ function renderListingsBody() {
     tr.className = li.status;
     const brand = li.brand ? escapeHtml(li.brand) : '—';
     if (li.status === 'ok') {
+      // The whole row is the click target for expanding history (the dealer
+      // link inside still navigates to the dealer site — handled in the
+      // delegated click listener via .dealer-link guard).
+      tr.classList.add('row-clickable');
+      tr.dataset.dealer = li.dealer;
       tr.innerHTML = `
-        <td>
-          <a class="dealer-link" href="${li.url}" target="_blank" rel="noopener">${escapeHtml(li.dealer)}<span class="visit-arrow" aria-hidden="true">↗</span></a>
-          <button type="button" class="history-btn" data-dealer="${escapeHtml(li.dealer)}" aria-label="Show price history">📈</button>
-        </td>
+        <td><a class="dealer-link" href="${li.url}" target="_blank" rel="noopener">${escapeHtml(li.dealer)}<span class="visit-arrow" aria-hidden="true">↗</span></a></td>
         <td class="brand-cell">${brand}</td>
         <td>${fmtDKK(li.price_dkk)}</td>
         <td>${fmtPct(li.premium_pct)}</td>
@@ -186,26 +192,75 @@ document.querySelectorAll('#size-picker button').forEach(b => {
 });
 $('#refresh').addEventListener('click', () => { if (lastSize != null) fetchPrices(lastSize); });
 
-// History modal —————————————————————————————————————————————————————————
+// Inline history expansion — only one row can be expanded at a time.
+// Clicking a row inserts a tr.history-row directly below it; clicking the same
+// row again collapses; clicking a different row collapses the old and expands
+// the new. Re-rendering the table (size change, sort, refresh) clears any
+// expansion automatically.
 let historyState = { dealer: null, size: null, range: '30d' };
 const historyCharts = { price: null, premium: null };
 
-function openHistory(dealer, size) {
-  historyState = { dealer, size, range: '30d' };
-  $('#history-title').textContent = `${dealer} — ${size} g`;
-  document.querySelectorAll('#history-dialog .range-toggle button').forEach(b => {
-    b.classList.toggle('active', b.dataset.range === '30d');
-  });
-  $('#history-dialog').showModal();
-  fetchHistory();
-}
-
-function closeHistory() {
-  $('#history-dialog').close();
-  // Free Chart.js instances so the canvases can be re-initialized cleanly next time.
+function destroyHistoryCharts() {
   for (const k of Object.keys(historyCharts)) {
     if (historyCharts[k]) { historyCharts[k].destroy(); historyCharts[k] = null; }
   }
+}
+
+function collapseHistory() {
+  destroyHistoryCharts();
+  document.querySelectorAll('#listings tr.row-expanded').forEach(tr => tr.classList.remove('row-expanded'));
+  const existing = document.querySelector('#listings tr.history-row');
+  if (existing) existing.remove();
+  historyState.dealer = null;
+}
+
+function expandHistory(rowEl, dealer) {
+  collapseHistory();
+  historyState = { dealer, size: lastSize, range: '30d' };
+  rowEl.classList.add('row-expanded');
+
+  const histTr = document.createElement('tr');
+  histTr.className = 'history-row';
+  histTr.innerHTML = `
+    <td colspan="4">
+      <div class="history-panel">
+        <div class="history-panel-head">
+          <h3>${escapeHtml(dealer)} — ${lastSize} g</h3>
+          <div class="range-toggle" role="tablist">
+            <button data-range="24h" type="button">24h</button>
+            <button data-range="7d" type="button">7d</button>
+            <button data-range="30d" class="active" type="button">30d</button>
+          </div>
+        </div>
+        <div class="history-status loading-msg">Loading…</div>
+        <div class="charts-grid">
+          <div class="chart-block">
+            <h4>Price</h4>
+            <div class="chart-container"><canvas id="history-price-chart"></canvas></div>
+          </div>
+          <div class="chart-block">
+            <h4>Premium</h4>
+            <div class="chart-container"><canvas id="history-premium-chart"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </td>
+  `;
+  rowEl.after(histTr);
+
+  // Range toggle clicks live inside the inserted tr — wire them up after insert.
+  histTr.querySelectorAll('.range-toggle button').forEach(b => {
+    b.addEventListener('click', () => {
+      if (b.dataset.range === historyState.range) return;
+      historyState.range = b.dataset.range;
+      histTr.querySelectorAll('.range-toggle button').forEach(x => {
+        x.classList.toggle('active', x.dataset.range === historyState.range);
+      });
+      fetchHistory();
+    });
+  });
+
+  fetchHistory();
 }
 
 async function fetchHistory() {
@@ -229,22 +284,23 @@ async function fetchHistory() {
 }
 
 function setHistoryStatus(msg) {
-  $('#history-status').textContent = msg;
-  $('#history-status').hidden = false;
+  const el = document.querySelector('#listings tr.history-row .history-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.hidden = false;
 }
 
 function renderHistory(data) {
   const okPoints = data.points.filter(p =>
     p.status === 'ok' && p.price_dkk != null && p.spot_gold_dkk_per_g != null,
   );
+  const statusEl = document.querySelector('#listings tr.history-row .history-status');
   if (okPoints.length === 0) {
     setHistoryStatus('No data yet for this range.');
-    for (const k of Object.keys(historyCharts)) {
-      if (historyCharts[k]) { historyCharts[k].destroy(); historyCharts[k] = null; }
-    }
+    destroyHistoryCharts();
     return;
   }
-  $('#history-status').hidden = true;
+  if (statusEl) statusEl.hidden = true;
 
   // Each chart point carries its brand for the tooltip — the cheapest variant
   // can switch between snapshots (e.g. Tavex 5g flips PAMP↔Argor when one
@@ -264,12 +320,21 @@ function renderHistory(data) {
     };
   });
 
-  drawChart('price', 'price-chart', pricePoints, 'DKK', '#e2c054', v => fmtNum(v, 0, 'da-DK'));
-  drawChart('premium', 'premium-chart', premiumPoints, '%', '#7dc8a4', v => v.toFixed(1) + '%');
+  drawChart('price', 'history-price-chart', pricePoints, 'DKK', '#e2c054', v => fmtNum(v, 0, 'da-DK'));
+  drawChart('premium', 'history-premium-chart', premiumPoints, '%', '#7dc8a4', v => v.toFixed(1) + '%');
 }
 
 function drawChart(key, canvasId, points, unit, color, yFmt) {
-  if (historyCharts[key]) historyCharts[key].destroy();
+  // If a chart already exists for this key, update in place. Destroying and
+  // re-creating on every range toggle causes a brief width flicker because
+  // Chart.js's responsive sizing measures the canvas during the init handshake;
+  // updating in place keeps the DOM stable.
+  if (historyCharts[key]) {
+    historyCharts[key].data.datasets[0].data = points;
+    historyCharts[key].data.datasets[0].pointRadius = points.length < 60 ? 2 : 0;
+    historyCharts[key].update('none');
+    return;
+  }
   const ctx = document.getElementById(canvasId).getContext('2d');
   historyCharts[key] = new Chart(ctx, {
     type: 'line',
@@ -290,19 +355,38 @@ function drawChart(key, canvasId, points, unit, color, yFmt) {
       maintainAspectRatio: false,
       animation: false,
       interaction: { mode: 'index', intersect: false },
+      // Strip Chart.js's default 3px outer padding so the plot fills the box.
+      layout: { padding: 0 },
       scales: {
         x: {
           type: 'linear',
+          // Stop Chart.js from extending the x-range to the next "nice" tick
+          // boundary — it leaves blank space past the last data point.
+          bounds: 'data',
           ticks: {
             color: '#8a8a90',
             maxTicksLimit: 5,
+            padding: 2,
             callback: v => new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
           },
           grid: { color: 'rgba(255,255,255,0.04)' },
         },
         y: {
-          ticks: { color: '#8a8a90', callback: yFmt },
+          ticks: {
+            color: '#8a8a90',
+            padding: 2,         // pulls the value labels right up against the plot
+            callback: yFmt,
+          },
           grid: { color: 'rgba(255,255,255,0.04)' },
+          // Lock the y-axis gutter to a fixed width so the price chart and
+          // premium chart in the same row have identically-sized plot areas.
+          // Without this, "10.450" reserves more horizontal space than "5.0%"
+          // and the charts no longer line up vertically.
+          afterFit: (axis) => {
+            axis.width = 52;
+            axis.paddingTop = 0;
+            axis.paddingBottom = 0;
+          },
         },
       },
       plugins: {
@@ -322,29 +406,20 @@ function drawChart(key, canvasId, points, unit, color, yFmt) {
   });
 }
 
-// Range toggle inside the history dialog.
-document.querySelectorAll('#history-dialog .range-toggle button').forEach(b => {
-  b.addEventListener('click', () => {
-    const range = b.dataset.range;
-    if (range === historyState.range) return;
-    historyState.range = range;
-    document.querySelectorAll('#history-dialog .range-toggle button').forEach(x => {
-      x.classList.toggle('active', x.dataset.range === range);
-    });
-    fetchHistory();
-  });
-});
-
-$('#history-close').addEventListener('click', closeHistory);
-$('#history-dialog').addEventListener('cancel', closeHistory);  // Esc key
-
-// Listings tbody click — delegate to history-btn so we don't rebind handlers
-// every render. Uses the row's size context (lastSize is the active size).
+// Listings tbody click — delegate to row-clickable rows. Clicks on the dealer
+// link itself fall through to the anchor (opens dealer site in a new tab);
+// any other click on a clickable row toggles the inline history panel.
 $('#listings tbody').addEventListener('click', (e) => {
-  const btn = e.target.closest('.history-btn');
-  if (!btn) return;
-  const dealer = btn.dataset.dealer;
-  if (dealer && lastSize != null) openHistory(dealer, lastSize);
+  if (e.target.closest('.dealer-link')) return;  // let the link navigate
+  const tr = e.target.closest('tr.row-clickable');
+  if (!tr) return;
+  const dealer = tr.dataset.dealer;
+  if (!dealer || lastSize == null) return;
+  if (historyState.dealer === dealer) {
+    collapseHistory();
+  } else {
+    expandHistory(tr, dealer);
+  }
 });
 
 // Sortable headers — click to switch column, click again to flip direction.

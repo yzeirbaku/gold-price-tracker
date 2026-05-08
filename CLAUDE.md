@@ -82,11 +82,11 @@ docker compose up -d
 
 # Seed 30 days of fake snapshots (refuses to run against non-localhost DBs)
 cd backend
-export DATABASE_URL='postgresql://gold:gold@localhost:5432/goldtracker'
+export DATABASE_URL='postgresql://gold:gold@localhost:5433/goldtracker'
 .venv/Scripts/python.exe -m scripts.seed
 
 # Start the backend with DATABASE_URL set so /snapshot and /history work
-API_KEY=test DATABASE_URL='postgresql://gold:gold@localhost:5432/goldtracker' \
+API_KEY=test DATABASE_URL='postgresql://gold:gold@localhost:5433/goldtracker' \
   uvicorn app.main:app --reload
 ```
 
