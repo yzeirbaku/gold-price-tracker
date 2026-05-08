@@ -2,7 +2,7 @@ name: snapshot
 
 on:
   schedule:
-    - cron: '*/30 * * * *'   # every 30 minutes
+    - cron: '*/20 * * * *'   # every 20 minutes (best-effort; GitHub schedules are lossy on free tier)
   workflow_dispatch:
 
 jobs:
