@@ -335,6 +335,11 @@ function drawChart(key, canvasId, points, unit, color, yFmt) {
     historyCharts[key].update('none');
     return;
   }
+  // Mobile: smaller font + tighter gutters so the plot can stretch wider.
+  const isMobile = window.matchMedia('(max-width: 600px)').matches;
+  const tickFontSize = isMobile ? 10 : 12;
+  const yAxisWidth = isMobile ? 38 : 52;
+  const xMaxTicks = isMobile ? 3 : 5;
   const ctx = document.getElementById(canvasId).getContext('2d');
   historyCharts[key] = new Chart(ctx, {
     type: 'line',
@@ -365,25 +370,31 @@ function drawChart(key, canvasId, points, unit, color, yFmt) {
           bounds: 'data',
           ticks: {
             color: '#8a8a90',
-            maxTicksLimit: 5,
+            maxTicksLimit: xMaxTicks,
             padding: 2,
+            font: { size: tickFontSize },
             callback: v => new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
           },
           grid: { color: 'rgba(255,255,255,0.04)' },
+          // Trim Chart.js's reserved gutter on the right edge so the plot can
+          // run nearly to the canvas edge. Last x-tick label may slightly
+          // overhang on the right but stays readable.
+          afterFit: (axis) => { axis.paddingRight = 4; },
         },
         y: {
           ticks: {
             color: '#8a8a90',
             padding: 2,         // pulls the value labels right up against the plot
+            font: { size: tickFontSize },
             callback: yFmt,
           },
           grid: { color: 'rgba(255,255,255,0.04)' },
           // Lock the y-axis gutter to a fixed width so the price chart and
           // premium chart in the same row have identically-sized plot areas.
-          // Without this, "10.450" reserves more horizontal space than "5.0%"
-          // and the charts no longer line up vertically.
+          // Mobile uses a tighter gutter + smaller font so the plot stretches
+          // closer to the canvas edge.
           afterFit: (axis) => {
-            axis.width = 52;
+            axis.width = yAxisWidth;
             axis.paddingTop = 0;
             axis.paddingBottom = 0;
           },
