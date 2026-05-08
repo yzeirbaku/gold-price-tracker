@@ -1,6 +1,6 @@
 # Gold Bar Tracker — Claude guide
 
-Personal PWA that compares 2.5 / 5 / 10 / 20 g gold-bar prices across Danish online dealers, plus a live spot ticker for gold and silver. Online-only by design — every load is a fresh scrape.
+Personal PWA that compares gold-bar prices (2.5 / 5 / 10 / 20 g) and gold-coin prices (≤ 20 g of fine gold) across Danish online dealers, plus a live spot ticker for gold and silver. Online-only by design — every load of the bars view is a fresh scrape; the coins view + per-row history charts read from a Postgres snapshot table populated by a 20-min cron.
 
 ## Git
 
@@ -17,46 +17,66 @@ backend/         FastAPI on Render free tier (Python 3.12)
     auth.py            X-API-Key header check (constant-time compare)
     fx.py              USD→EUR/DKK via frankfurter.dev (+ stamped fallback)
     spot.py            api.gold-api.com USD/oz → per-gram USD
-    orchestrator.py    fan-out scrapers, compute premium %, sort
-    models.py          Pydantic response models
+    orchestrator.py    fan-out bar scrapers, compute premium %, sort
+    models.py          Pydantic response models — Listing + CoinListing
+    coins.py           static registry of recognized bullion coin types + resolver
+    db.py              asyncpg pool + idempotent SCHEMA_SQL bootstrap
     scrapers/
       base.py          DealerScraper Protocol, DEFAULT_HEADERS, parse_dkk_price
-      registry.py      ALL_SCRAPERS list (order = display order before sort)
-      tavex.py         JSON pricelist on .product__price--single
-      vitusguld.py     listing → product page (apples-to-apples)
-      plaza.py
-      nordiskguld.py   needs Sec-Ch-Ua / Sec-Fetch-* to bypass Simply.com WAF
-      seroguld.py      same WAF as Nordisk
-      nyfortuna.py
-      janjorgensen.py
+      registry.py      ALL_SCRAPERS (bars) + ALL_COIN_SCRAPERS
+      tavex.py / tavex_coins.py
+      vitusguld.py / vitusguld_coins.py
+      plaza.py / plaza_coins.py
+      nordiskguld.py / nordiskguld_coins.py    (Simply.com WAF — needs Sec-* headers)
+      seroguld.py / seroguld_coins.py          (same WAF)
+      nyfortuna.py / nyfortuna_coins.py
+      janjorgensen.py / janjorgensen_coins.py
+  scripts/
+    seed.py            local-only: 30 days of fake bar+spot data into local Postgres
   tests/
     unit/              fixtures-driven, no network — runs in CI on every push
     integration/       hits real dealer sites — weekly cron + manual dispatch
-    fixtures/          frozen HTML snapshots per dealer
+    fixtures/          frozen HTML snapshots per dealer (one for bars, one for coins)
 
 frontend/        Static PWA on Cloudflare Pages (vanilla JS, no build)
-  index.html
-  app.js               size picker, listings table, spot ticker, settings dialog
+  index.html           Bars/Coins tab strip, both views' table cards, settings dialog
+  app.js               tabs + size picker (bars) + ranked list (coins) + inline history
   config.js            window.BACKEND_URL — overwritten by CF Pages build script
   styles.css
   service-worker.js    minimal — required for iOS install, no caching
   manifest.webmanifest
 ```
 
+Postgres tables (Neon in prod, local Docker in dev):
+- `bar_snapshots` (was `dealer_snapshots` until 2026-05-08; idempotent rename in `db.py`)
+- `coin_snapshots`
+- `spot_snapshots`
+
 ## Endpoints
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/` | none | health ping |
-| GET | `/prices/{size}` | `X-API-Key` | size ∈ {2.5, 5, 10, 20}; runs all scrapers + spot + FX in parallel with a 15 s wall-clock timeout |
-| GET | `/spot` | `X-API-Key` | spot + FX only — used by the auto-refreshing ticker every 20 s |
-| GET | `/health` | `X-API-Key` | runs every scraper at 5 g, returns per-dealer pass/fail |
+| GET  | `/` | none | health ping |
+| GET  | `/prices/{size}` | `X-API-Key` | size ∈ {2.5, 5, 10, 20}; live bar scrapes + spot + FX in parallel |
+| GET  | `/spot` | `X-API-Key` | spot + FX only — used by the auto-refreshing ticker every 20 s |
+| GET  | `/coins` | `X-API-Key` | latest coin snapshot, sorted by premium % asc |
+| GET  | `/history/bar/{dealer}/{size}` | `X-API-Key` | bar price/premium time series (`?range=24h\|7d\|30d`) |
+| GET  | `/history/coin/{dealer}/{coin_type}/{fine_gold_g}` | `X-API-Key` | coin price/premium time series |
+| POST | `/snapshot` | `X-API-Key` | runs all scrapers + spot + coins, writes to Postgres (cron-only) |
+| GET  | `/health` | `X-API-Key` | runs every bar scraper at 5 g, returns per-dealer pass/fail |
 
 ## Dealers
 
-Live: **Tavex, Vitus Guld, Plaza, Nordisk Guld, Sero Guld, Nyfortuna, Jan Jørgensen Smykker**.
+Live (bars): **Tavex, Vitus Guld, Plaza, Nordisk Guld, Sero Guld, Nyfortuna, Jan Jørgensen Smykker**.
+Live (coins): **Tavex, Vitus Guld, Nordisk Guld, Sero Guld, Nyfortuna**. Plaza and Jan Jørgensen don't currently stock bullion coins; their coin scrapers run anyway and return empty.
 Dropped: **Mønthuset** (live category empty since early 2025).
 Skipped: **Silver Gold Bull DK** (JS-rendered React SPA + Algolia + dynamic pricing).
+
+## Coins
+
+Coin coverage is **bullion-only** via the static registry in `app/coins.py`: Krugerrand, Maple Leaf, Vienna Philharmonic, American Eagle, Britannia, Sovereign, Ducat, Panda. Each entry pins `(gross_weight_g, purity)` per recognized size variant; `fine_gold_g = gross × purity` is the canonical size axis. Listings whose title doesn't match the registry are silently skipped — that's by design.
+
+The 20 g fine-gold cap excludes all 1 oz coins (1 oz Krugerrand/Eagle = 31.1 g fine, 1 oz Maple/Phil/Britannia = 31.1 g fine). Easy to lift later by raising `FINE_GOLD_CAP_G` in each coin scraper.
 
 ## Local dev
 
@@ -115,12 +135,25 @@ CI (`.github/workflows/tests.yml`) runs all three on push/PR to `main`. The live
 - **Number formatting**: dots only, never commas. DKK prices use `da-DK` for thousand-grouping (`12.345 dkk`), spot uses `en-US` so the `.` is a decimal separator (`695.42 dkk`). See `fmtDKK` / `fmtSpotDKK` in `app.js`.
 - **Backend URL on the frontend** comes from `window.BACKEND_URL` in `config.js`. Cloudflare Pages overwrites this file at build time:
   `echo "window.BACKEND_URL = '${BACKEND_URL}';" > frontend/config.js`
+- **Coins use a static registry.** `app/coins.py` is the source of truth for which coins we recognize. The resolver does case-insensitive substring matching; aliases live in `_TYPE_ALIASES` and `_SIZE_ALIASES`. Add to those dicts to widen coverage, not to the scraper code. Real-world Danish/German spelling drift ("Wiener Philharmoniker", "Amerikansk Eagle", "American Gold Eagle") tends to surface during the first run against a new dealer's fixture.
+- **Coin scrapers don't pick a single cheapest variant per dealer.** Unlike bar scrapers, coin scrapers emit every recognized in-stock coin from the listing page; the global ranked `/coins` view sorts them across all dealers.
+- **Bars table was renamed `dealer_snapshots` → `bar_snapshots`** on 2026-05-08. The schema bootstrap in `app/db.py` includes an idempotent migration block that runs on every backend startup; safe to re-run.
+- **Bar history endpoint was renamed `/history/dealer/...` → `/history/bar/...`** at the same time, for symmetry with `/history/coin/...`. The PWA is the only client, so no compatibility shim.
 
-## Adding a new scraper
+## Adding a new bar scraper
 
 1. Drop a fixture in `backend/tests/fixtures/<dealer>_listing.html`.
 2. Add `backend/app/scrapers/<dealer>.py` implementing the `DealerScraper` Protocol — return `Listing | None` (`None` = size not offered).
-3. Register it in `scrapers/registry.py`.
+3. Register it in `scrapers/registry.py` → `ALL_SCRAPERS`.
 4. Add a unit test in `backend/tests/unit/scrapers/` using the fixture; cover at least one in-stock and one out-of-stock case.
 5. Add the dealer to the live smoke test in `tests/integration/test_live.py`.
 6. Update the README + this file's "Dealers" section.
+
+## Adding a new coin scraper
+
+1. Capture a fixture from the dealer's gold-coin category page into `backend/tests/fixtures/<dealer>_coins.html` (use `httpx` with `DEFAULT_HEADERS` if curl is blocked by a WAF).
+2. Audit which titles `coins.resolve()` recognizes — extend `_TYPE_ALIASES` / `_SIZE_ALIASES` in `app/coins.py` if you see Danish/German/English variants that should match but don't.
+3. Add `backend/app/scrapers/<dealer>_coins.py` modeled on `tavex_coins.py`. Return `list[CoinListing]`.
+4. Register in `scrapers/registry.py` → `ALL_COIN_SCRAPERS`.
+5. Add unit test in `backend/tests/unit/scrapers/test_<dealer>_coins.py` — assert at least one recognized coin type is found and that all results are ≤ 20 g fine.
+6. Update README + this file's "Dealers" / "Coins" sections.

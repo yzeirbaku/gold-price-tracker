@@ -1,6 +1,6 @@
 # Gold Bar Tracker
 
-Personal tool to compare 2.5 g, 5 g, 10 g, and 20 g gold-bar prices across Danish online dealers, plus live spot prices for gold and silver.
+Personal tool to compare gold-bar prices (2.5 / 5 / 10 / 20 g) and gold-coin prices (≤ 20 g of fine gold) across Danish online dealers, plus live spot prices for gold and silver.
 
 ## Architecture
 
@@ -22,6 +22,21 @@ Personal tool to compare 2.5 g, 5 g, 10 g, and 20 g gold-bar prices across Danis
 | Jan Jørgensen Smykker | ✓ live |
 | Mønthuset | dropped — live guldbarrer category empty since early 2025 |
 | Silver Gold Bull DK | skipped — JS-rendered React SPA + Algolia + dynamic pricing |
+
+Coin coverage is bullion-only via a static registry in `backend/app/coins.py`: Krugerrand, Maple Leaf, Vienna Philharmonic, American Eagle, Britannia, Sovereign, Ducat, Panda. Listings whose title doesn't match the registry are skipped. Plaza and Jan Jørgensen don't currently stock bullion coins; their coin scrapers return empty lists and pick up new listings automatically if the dealers ever expand.
+
+## API endpoints
+
+| Method | Path | Notes |
+|---|---|---|
+| GET  | `/`                                                          | unauthenticated health ping |
+| GET  | `/prices/{size}`                                             | live bar prices for {2.5, 5, 10, 20} g |
+| GET  | `/spot`                                                      | live gold + silver spot in EUR/DKK per g |
+| GET  | `/coins`                                                     | latest snapshot of all recognized coins, sorted by premium |
+| GET  | `/history/bar/{dealer}/{size}?range=24h\|7d\|30d`             | bar price history (renamed from `/history/dealer/...`) |
+| GET  | `/history/coin/{dealer}/{coin_type}/{fine_gold_g}?range=...`  | coin price history |
+| POST | `/snapshot`                                                  | runs all scrapers + spot, persists to Postgres (cron-only) |
+| GET  | `/health`                                                    | per-scraper pass/fail summary |
 
 ## Local dev
 
