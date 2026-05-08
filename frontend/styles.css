@@ -355,5 +355,10 @@ tr.history-row > td {
   .charts-grid { grid-template-columns: 1fr; gap: 0.6rem; }
   .chart-container { height: 180px; }
   .history-panel-head h3 { font-size: 0.8rem; }
+  /* Coins table: 5 columns is too wide on phones — every cell wraps to
+     two lines. Hide the "g (fine)" column; the size is already implied
+     by the size_label in the Coin column. */
+  #coin-listings th:nth-child(3),
+  #coin-listings td:nth-child(3) { display: none; }
 }
 
