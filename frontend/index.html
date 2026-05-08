@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=5" />
+  <link rel="stylesheet" href="styles.css?v=6" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
@@ -43,7 +43,12 @@
     <div id="loading" class="loading-msg" hidden></div>
     <table id="listings" hidden>
       <thead>
-        <tr><th>Dealer</th><th>Brand</th><th>Price</th><th>Premium</th></tr>
+        <tr>
+          <th>Dealer</th>
+          <th>Brand</th>
+          <th class="sortable" data-sort="price">Price<span class="sort-indicator"></span></th>
+          <th class="sortable" data-sort="premium">Premium<span class="sort-indicator"></span></th>
+        </tr>
       </thead>
       <tbody></tbody>
     </table>
@@ -62,7 +67,7 @@
     </form>
   </dialog>
 
-  <script src="config.js?v=5"></script>
-  <script src="app.js?v=5"></script>
+  <script src="config.js?v=6"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

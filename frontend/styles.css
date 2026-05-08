@@ -125,6 +125,10 @@ th, td { padding: 0.55rem 0.3rem; text-align: left; border-bottom: 1px solid var
 th:first-child, td:first-child { padding-left: 0; }
 th:last-child, td:last-child { padding-right: 0; text-align: right; }
 th { color: var(--muted); font-weight: 500; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+th.sortable { cursor: pointer; user-select: none; transition: color 120ms ease; }
+th.sortable:hover { color: var(--fg-soft); }
+th.sortable.active { color: var(--accent); }
+th .sort-indicator { font-size: 0.85em; }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr { transition: background 120ms ease; }
 tbody tr:hover { background: rgba(255,255,255,0.02); }

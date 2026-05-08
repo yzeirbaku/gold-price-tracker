@@ -21,6 +21,8 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;
 
 let lastSize = null;
 let hasRenderedSpot = false;
+let lastListings = [];           // cached so we can re-sort without re-fetching
+let sortState = { col: 'price', dir: 'asc' };  // default matches backend order
 
 function renderSpot(data) {
   if (!data || !data.spot) {
@@ -92,12 +94,53 @@ async function fetchPrices(size) {
   renderSpot(data);
 }
 
+function sortListings(listings) {
+  // Always keep ok rows above non-ok rows regardless of sort direction —
+  // an "error" sorted to the top would be useless. Within each group we
+  // sort by the chosen column; null values at group bottom.
+  const dirMul = sortState.dir === 'asc' ? 1 : -1;
+  const key = sortState.col === 'price' ? 'price_dkk' : 'premium_pct';
+  return [...listings].sort((a, b) => {
+    const aOk = a.status === 'ok' ? 0 : 1;
+    const bOk = b.status === 'ok' ? 0 : 1;
+    if (aOk !== bOk) return aOk - bOk;
+    const av = a[key], bv = b[key];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return (av - bv) * dirMul;
+  });
+}
+
+function updateSortIndicators() {
+  document.querySelectorAll('#listings th.sortable').forEach(th => {
+    const ind = th.querySelector('.sort-indicator');
+    if (th.dataset.sort === sortState.col) {
+      th.classList.add('active');
+      ind.textContent = sortState.dir === 'asc' ? ' ↑' : ' ↓';
+    } else {
+      th.classList.remove('active');
+      ind.textContent = '';
+    }
+  });
+}
+
 function renderPrices(data) {
+  // Hide out-of-stock listings — they're noise; only surface ok rows + scraper errors.
+  lastListings = data.listings.filter(li => li.status !== 'out_of_stock');
+  renderListingsBody();
+  $('#loading').hidden = true;
+  $('#listings').hidden = false;
+  $('#refresh').hidden = false;
+  $('#status').textContent = `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`;
+}
+
+function renderListingsBody() {
   const tbody = $('#listings tbody');
   tbody.innerHTML = '';
-  // Hide out-of-stock listings — they're noise; only surface ok rows + scraper errors.
-  const visible = data.listings.filter(li => li.status !== 'out_of_stock');
-  for (const li of visible) {
+  updateSortIndicators();
+  const ordered = sortListings(lastListings);
+  for (const li of ordered) {
     const tr = document.createElement('tr');
     tr.className = li.status;
     const brand = li.brand ? escapeHtml(li.brand) : '—';
@@ -115,10 +158,6 @@ function renderPrices(data) {
     }
     tbody.appendChild(tr);
   }
-  $('#loading').hidden = true;
-  $('#listings').hidden = false;
-  $('#refresh').hidden = false;
-  $('#status').textContent = `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`;
 }
 
 function showSpinner() {
@@ -143,6 +182,20 @@ document.querySelectorAll('#size-picker button').forEach(b => {
   b.addEventListener('click', () => fetchPrices(parseFloat(b.dataset.size)));
 });
 $('#refresh').addEventListener('click', () => { if (lastSize != null) fetchPrices(lastSize); });
+
+// Sortable headers — click to switch column, click again to flip direction.
+document.querySelectorAll('#listings th.sortable').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    if (sortState.col === col) {
+      sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortState.col = col;
+      sortState.dir = 'asc';
+    }
+    if (lastListings.length) renderListingsBody();
+  });
+});
 
 // Settings dialog (API key only — backend URL comes from config.js)
 $('#settings-btn').addEventListener('click', () => {

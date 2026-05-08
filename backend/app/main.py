@@ -1,5 +1,7 @@
 import asyncio
+import logging
 import os
+import sys
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
@@ -12,6 +14,16 @@ from app.orchestrator import run
 from app.scrapers.base import DEFAULT_HEADERS, DealerScraper, now_utc
 from app.scrapers.registry import ALL_SCRAPERS
 from app.spot import fetch_spot_usd_per_gram
+
+# Send INFO+ logs to stdout — Render captures stdout per service.
+# `force=True` so we win over uvicorn's default handler config and the
+# orchestrator's structured JSON lines actually surface in logs.
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stdout,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    force=True,
+)
 
 app = FastAPI(title="Gold Bar Price Tracker")
 
