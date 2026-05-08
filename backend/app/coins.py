@@ -69,6 +69,9 @@ _TYPE_ALIASES: dict[str, list[str]] = {
         "american eagle", "us eagle",
         # Danish dealers usually keep "Eagle" English; "Amerikansk Eagle".
         "amerikansk eagle",
+        # Some dealers spell out "American Gold Eagle" — the "gold" word
+        # in the middle breaks substring matching against "american eagle".
+        "american gold eagle",
     ],
     "Britannia": ["britannia"],
     "Sovereign": ["sovereign"],
