@@ -28,6 +28,8 @@ COINS: dict[str, dict[str, tuple[float, float]]] = {
     "Vienna Philharmonic": {
         "1 oz": (31.10, 0.9999), "1/2 oz": (15.55, 0.9999),
         "1/4 oz": (7.78, 0.9999), "1/10 oz": (3.11, 0.9999),
+        # The Phil also strikes a 1/25 oz €4 face-value coin.
+        "1/25 oz": (1.244, 0.9999),
     },
     "American Eagle": {
         "1 oz": (33.93, 0.9167), "1/2 oz": (16.97, 0.9167),
@@ -94,6 +96,10 @@ _SIZE_ALIASES: dict[tuple[str, str], list[str]] = {
         (t, "1/20 oz"): ["1/20 oz", "1/20oz", "1/20 unze", "1/20 ounce"]
         for t in ("Maple Leaf", "Panda")
     },
+    # 1/25 oz only exists for Vienna Philharmonic.
+    ("Vienna Philharmonic", "1/25 oz"): [
+        "1/25 oz", "1/25oz", "1/25 unze", "1/25 ounce",
+    ],
     **{
         (t, "1/10 oz"): [
             "1/10 oz", "1/10oz", "0.1 oz", "1/10 unze", "1/10 ounce",
