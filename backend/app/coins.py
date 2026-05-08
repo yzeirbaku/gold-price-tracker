@@ -141,11 +141,35 @@ _SIZE_ALIASES: dict[tuple[str, str], list[str]] = {
 }
 
 
+def _size_specificity(size_label: str) -> int:
+    """Higher = more specific.
+
+    Fractional sizes that look like "1/N oz" must beat plain "1 oz" — and
+    larger denominators (1/20, 1/25) must beat smaller (1/2). We score by
+    the denominator if it's a fraction; "1 oz" is rank 1; gram-denominated
+    ("30 g") and named ("Full") fall back to the label length. Sort
+    descending by this score so the most specific size is tried first.
+    """
+    sl = size_label.lower()
+    if sl.startswith("1/"):
+        try:
+            return int(sl.split("/", 1)[1].split(" ")[0])
+        except ValueError:
+            pass
+    if sl.startswith("1 oz") or sl == "1 oz":
+        return 1
+    return len(size_label)  # for "Full"/"Half"/"30 g"/"1 ducat"/etc.
+
+
 def resolve(title: str) -> tuple[str, str, float, float, float] | None:
     """Identify (coin_type, size_label, gross_g, purity, fine_g) from a title.
 
     Returns None if no recognized coin type appears or no recognized size
     matches for that type. Caller decides whether to enforce the >20g cap.
+
+    On a coin_type alias hit but no matching size, we *continue* trying other
+    coin_types — so a title like "Britannia Sovereign 2024" can fall through
+    to Sovereign even if Britannia matches first.
     """
     if not title:
         return None
@@ -157,16 +181,26 @@ def resolve(title: str) -> tuple[str, str, float, float, float] | None:
         if coin_type == "Sovereign" and "half" not in tl and "quarter" not in tl:
             gross_g, purity = COINS["Sovereign"]["Full"]
             return ("Sovereign", "Full", gross_g, purity, round(gross_g * purity, 4))
-        # Try size labels longest-first so "1/10 oz" doesn't get caught by "1 oz".
-        candidates = [
-            (size_label, sorted(syns, key=len, reverse=True))
-            for (ct, size_label), syns in _SIZE_ALIASES.items()
-            if ct == coin_type
-        ]
-        candidates.sort(key=lambda c: max((len(s) for s in c[1]), default=0), reverse=True)
+        # Try size labels by specificity descending, so "1/10 oz" beats
+        # "1 oz" on titles that contain both substrings.
+        candidates = sorted(
+            [
+                (size_label, syns)
+                for (ct, size_label), syns in _SIZE_ALIASES.items()
+                if ct == coin_type
+            ],
+            key=lambda c: _size_specificity(c[0]),
+            reverse=True,
+        )
         for size_label, syns in candidates:
-            if any(s in tl for s in syns):
-                gross_g, purity = COINS[coin_type][size_label]
-                return (coin_type, size_label, gross_g, purity, round(gross_g * purity, 4))
-        return None
+            # Within a single size_label's aliases, longer aliases first
+            # (e.g. "tenth ounce" vs "oz") so substring traps don't fire.
+            for alias in sorted(syns, key=len, reverse=True):
+                if alias in tl:
+                    gross_g, purity = COINS[coin_type][size_label]
+                    return (
+                        coin_type, size_label, gross_g, purity,
+                        round(gross_g * purity, 4),
+                    )
+        # Fall through to next coin_type instead of giving up immediately.
     return None

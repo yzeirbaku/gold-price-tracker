@@ -8,12 +8,18 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=17" />
+  <link rel="stylesheet" href="styles.css?v=18" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
   <header>
-    <h1>Danish Market Gold Prices</h1>
+    <div class="header-title">
+      <h1>Danish Market Gold Prices</h1>
+      <nav id="tab-strip" class="tab-strip" role="tablist">
+        <button data-tab="bars" class="active" type="button" role="tab" aria-selected="true">Bars</button>
+        <button data-tab="coins" type="button" role="tab" aria-selected="false">Coins</button>
+      </nav>
+    </div>
     <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
   </header>
 
@@ -24,11 +30,6 @@
     </div>
     <div id="spot-content">Loading…</div>
   </section>
-
-  <div id="tab-strip" class="tab-strip">
-    <button data-tab="bars" class="active" type="button">Bars</button>
-    <button data-tab="coins" type="button">Coins</button>
-  </div>
 
   <div id="bars-view">
     <section id="size-picker" class="card">
@@ -98,7 +99,7 @@
 
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=17"></script>
-  <script src="app.js?v=17"></script>
+  <script src="config.js?v=18"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>

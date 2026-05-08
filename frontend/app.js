@@ -19,6 +19,29 @@ function fmtSpotEUR(n) { return `${fmtNum(n, 2)} eur`; }
 function fmtPct(n) { return n == null ? '—' : (n > 0 ? '+' : '') + n.toFixed(1) + '%'; }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 
+// Relative time for "Updated …" labels — survives timezone confusion (e.g.
+// a UTC midnight snapshot that displays as "00:00" in the user's local
+// time looks broken; "12 min ago" is unambiguous).
+function fmtUpdated(iso) {
+  if (!iso) return '';
+  const sec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (sec < 5)     return 'just now';
+  if (sec < 60)    return `${sec}s ago`;
+  if (sec < 3600)  return `${Math.floor(sec / 60)} min ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)} h ago`;
+  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+}
+
+// URL safety: only allow http(s):// — block anything else (javascript:, data:,
+// etc.) that might come from a compromised/scraped listing.
+function safeHref(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol === 'http:' || u.protocol === 'https:') return url;
+  } catch { /* fall through */ }
+  return '#';
+}
+
 let lastSize = null;
 let hasRenderedSpot = false;
 let lastListings = [];           // cached so we can re-sort without re-fetching
@@ -47,7 +70,7 @@ function renderSpot(data) {
     <div class="spot-row"><span>Silver/g</span><span class="spot-value${flashClass}" data-spot="silver">${silverText}</span></div>
     ${data.fx_stale ? '<div class="spot-row" style="color:var(--error)">⚠ FX rates stale (fallback in use)</div>' : ''}
   `;
-  $('#spot-updated').textContent = `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`;
+  $('#spot-updated').textContent = `Updated ${fmtUpdated(data.fetched_at)}`;
   hasRenderedSpot = true;
 }
 
@@ -138,7 +161,7 @@ function renderPrices(data) {
   $('#loading').hidden = true;
   $('#listings').hidden = false;
   $('#refresh').hidden = false;
-  $('#status').textContent = `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`;
+  $('#status').textContent = `Updated ${fmtUpdated(data.fetched_at)}`;
 }
 
 function renderListingsBody() {
@@ -161,7 +184,7 @@ function renderListingsBody() {
       tr.classList.add('row-clickable');
       tr.dataset.dealer = li.dealer;
       tr.innerHTML = `
-        <td><a class="dealer-link" href="${li.url}" target="_blank" rel="noopener">${escapeHtml(li.dealer)}<span class="visit-arrow" aria-hidden="true">↗</span></a></td>
+        <td><a class="dealer-link" href="${escapeHtml(safeHref(li.url))}" target="_blank" rel="noopener">${escapeHtml(li.dealer)}<span class="visit-arrow" aria-hidden="true">↗</span></a></td>
         <td class="brand-cell">${brand}</td>
         <td>${fmtDKK(li.price_dkk)}</td>
         <td>${fmtPct(li.premium_pct)}</td>
@@ -310,21 +333,23 @@ function renderHistory(data) {
   }
   if (statusEl) statusEl.hidden = true;
 
-  // Bars: data.size_g + brand-per-point. Coins: data.fine_gold_g + size_label.
+  // Bars: data.size_g + brand-per-point in tooltip.
+  // Coins: data.fine_gold_g and no per-point label (coin_type+size_label
+  // are already in the panel header, repeating in the tooltip is noise).
   const sizeG = data.size_g ?? data.fine_gold_g;
-  const labelKey = data.size_g != null ? 'brand' : 'size_label';
+  const isBars = data.size_g != null;
 
   const pricePoints = okPoints.map(p => ({
     x: new Date(p.fetched_at).getTime(),
     y: p.price_dkk,
-    label: p[labelKey],
+    label: isBars ? p.brand : null,
   }));
   const premiumPoints = okPoints.map(p => {
     const ref = p.spot_gold_dkk_per_g * sizeG;
     return {
       x: new Date(p.fetched_at).getTime(),
       y: ref > 0 ? Number(((p.price_dkk - ref) / ref * 100).toFixed(2)) : null,
-      label: p[labelKey],
+      label: isBars ? p.brand : null,
     };
   });
 
@@ -469,7 +494,7 @@ function renderCoins(data) {
   $('#coin-listings').hidden = false;
   $('#coins-refresh').hidden = false;
   $('#coins-status').textContent = data.fetched_at
-    ? `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`
+    ? `Updated ${fmtUpdated(data.fetched_at)}`
     : 'No data yet — wait for the snapshot cron to run.';
 }
 
@@ -520,7 +545,7 @@ function renderCoinListingsBody() {
       tr.dataset.coinType = li.coin_type;
       tr.dataset.fineGoldG = String(li.fine_gold_g);
       tr.innerHTML = `
-        <td><a class="dealer-link" href="${li.url}" target="_blank" rel="noopener">${escapeHtml(li.dealer)}<span class="visit-arrow" aria-hidden="true">↗</span></a></td>
+        <td><a class="dealer-link" href="${escapeHtml(safeHref(li.url))}" target="_blank" rel="noopener">${escapeHtml(li.dealer)}<span class="visit-arrow" aria-hidden="true">↗</span></a></td>
         <td class="brand-cell">${escapeHtml(coinLabel)}</td>
         <td>${li.fine_gold_g != null ? fmtNum(li.fine_gold_g, 2) + ' g' : '—'}</td>
         <td>${fmtDKK(li.price_dkk)}</td>
@@ -576,7 +601,9 @@ function setTab(tab) {
   currentTab = tab;
   localStorage.setItem(TAB_STORAGE, tab);
   document.querySelectorAll('#tab-strip button').forEach(b => {
-    b.classList.toggle('active', b.dataset.tab === tab);
+    const active = b.dataset.tab === tab;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-selected', active ? 'true' : 'false');
   });
   $('#bars-view').hidden = tab !== 'bars';
   $('#coins-view').hidden = tab !== 'coins';

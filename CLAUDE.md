@@ -67,7 +67,7 @@ Postgres tables (Neon in prod, local Docker in dev):
 
 ## Dealers
 
-Live (bars): **Tavex, Vitus Guld, Plaza, Nordisk Guld, Sero Guld, Nyfortuna, Jan Jørgensen Smykker**.
+Live (bars): **Tavex, Vitus Guld, Plaza, Nordisk Guld, Sero Guld, Nyfortuna, Jan Jørgensen**.
 Live (coins): **Tavex, Vitus Guld, Nordisk Guld, Sero Guld, Nyfortuna**. Plaza and Jan Jørgensen don't currently stock bullion coins; their coin scrapers run anyway and return empty.
 Dropped: **Mønthuset** (live category empty since early 2025).
 Skipped: **Silver Gold Bull DK** (JS-rendered React SPA + Algolia + dynamic pricing).

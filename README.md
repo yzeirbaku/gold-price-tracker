@@ -19,7 +19,7 @@ Personal tool to compare gold-bar prices (2.5 / 5 / 10 / 20 g) and gold-coin pri
 | Nordisk Guld | ✓ live (needed Sec-Ch-Ua / Sec-Fetch-* headers to bypass Simply.com WAF) |
 | Sero Guld | ✓ live (same WAF as Nordisk; stock varies) |
 | Nyfortuna | ✓ live |
-| Jan Jørgensen Smykker | ✓ live |
+| Jan Jørgensen | ✓ live |
 | Mønthuset | dropped — live guldbarrer category empty since early 2025 |
 | Silver Gold Bull DK | skipped — JS-rendered React SPA + Algolia + dynamic pricing |
 

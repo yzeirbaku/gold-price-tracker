@@ -52,7 +52,9 @@ DEALER_PROFILES: dict[str, dict[float, tuple[str | None, float]]] = {
         2.5: ("PAMP", 0.112), 5.0: ("PAMP", 0.094),
         10.0: ("PAMP", 0.080), 20.0: ("PAMP", 0.066),
     },
-    "Jan Jørgensen Smykker": {
+    # Dealer name MUST match the live scrapers' .name attribute exactly so
+    # seeded history lines up with what /snapshot writes in production.
+    "Jan Jørgensen": {
         2.5: ("Mixed", 0.130), 5.0: ("Mixed", 0.110),
         10.0: ("Mixed", 0.095), 20.0: ("Mixed", 0.080),
     },
