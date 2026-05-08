@@ -96,7 +96,7 @@ async def main() -> None:
     async with pool.acquire() as conn:
         # Bootstrap schema (idempotent) and wipe any previous seed.
         await conn.execute(SCHEMA_SQL)
-        await conn.execute("TRUNCATE dealer_snapshots, spot_snapshots RESTART IDENTITY")
+        await conn.execute("TRUNCATE bar_snapshots, spot_snapshots RESTART IDENTITY")
 
         # Snap "now" down to the most recent 30-min boundary so the chart
         # x-axis ends on a clean tick.
@@ -149,7 +149,7 @@ async def main() -> None:
         )
         await conn.executemany(
             """
-            INSERT INTO dealer_snapshots (
+            INSERT INTO bar_snapshots (
                 fetched_at, dealer, size_g, status, price_dkk,
                 brand, error, spot_gold_dkk_per_g
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

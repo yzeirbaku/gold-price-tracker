@@ -107,7 +107,7 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
     """Run all sizes × all dealers + spot, persist to Postgres.
 
     Called by the GitHub Action cron every 30 min. Writes one spot_snapshots
-    row plus N dealer_snapshots rows (one per dealer × size, including errors —
+    row plus N bar_snapshots rows (one per dealer × size, including errors —
     so the history view can show outages, not just successful prices).
     """
     pool = await get_pool()
@@ -157,7 +157,7 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
                 )
             await conn.executemany(
                 """
-                INSERT INTO dealer_snapshots (
+                INSERT INTO bar_snapshots (
                     fetched_at, dealer, size_g, status, price_dkk,
                     brand, error, spot_gold_dkk_per_g
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -199,7 +199,7 @@ async def get_dealer_history(
         rows = await conn.fetch(
             f"""
             SELECT fetched_at, status, price_dkk, spot_gold_dkk_per_g, brand
-            FROM dealer_snapshots
+            FROM bar_snapshots
             WHERE dealer = $1 AND size_g = $2
               AND fetched_at >= NOW() - INTERVAL '{interval}'
             ORDER BY fetched_at ASC
