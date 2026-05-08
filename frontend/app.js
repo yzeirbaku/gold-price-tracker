@@ -23,6 +23,12 @@ let lastSize = null;
 let hasRenderedSpot = false;
 let lastListings = [];           // cached so we can re-sort without re-fetching
 let sortState = { col: 'price', dir: 'asc' };  // default matches backend order
+let lastCoinListings = [];       // ditto for coins
+let coinSortState = { col: 'premium', dir: 'asc' };  // best deals first
+
+// Tab state — persisted across page loads.
+const TAB_STORAGE = 'gold-tracker-tab';
+let currentTab = localStorage.getItem(TAB_STORAGE) || 'bars';
 
 function renderSpot(data) {
   if (!data || !data.spot) {
@@ -140,7 +146,7 @@ function renderListingsBody() {
   // Clear any expansion state — the history-row will be wiped along with
   // the rest of tbody, so leave nothing dangling.
   destroyHistoryCharts();
-  historyState.dealer = null;
+  historyState.key = null;
   tbody.innerHTML = '';
   updateSortIndicators();
   const ordered = sortListings(lastListings);
@@ -192,12 +198,16 @@ document.querySelectorAll('#size-picker button').forEach(b => {
 });
 $('#refresh').addEventListener('click', () => { if (lastSize != null) fetchPrices(lastSize); });
 
-// Inline history expansion — only one row can be expanded at a time.
-// Clicking a row inserts a tr.history-row directly below it; clicking the same
-// row again collapses; clicking a different row collapses the old and expands
-// the new. Re-rendering the table (size change, sort, refresh) clears any
-// expansion automatically.
-let historyState = { dealer: null, size: null, range: '30d' };
+// Inline history expansion — only one row can be expanded at a time across
+// either the bars or the coins table. Clicking a row inserts a tr.history-row
+// directly below it; clicking the same row again collapses; clicking a
+// different row collapses the old and expands the new. Re-rendering either
+// table (size change, sort, refresh) clears the expansion automatically.
+//
+// historyState is shaped as { key, titleText, historyUrlBuilder, range } —
+// the URL builder is a closure over the row's identity, so the same expand
+// logic works for both bars (/history/bar/...) and coins (/history/coin/...).
+let historyState = { key: null, titleText: '', historyUrlBuilder: null, range: '30d' };
 const historyCharts = { price: null, premium: null };
 
 function destroyHistoryCharts() {
@@ -208,24 +218,24 @@ function destroyHistoryCharts() {
 
 function collapseHistory() {
   destroyHistoryCharts();
-  document.querySelectorAll('#listings tr.row-expanded').forEach(tr => tr.classList.remove('row-expanded'));
-  const existing = document.querySelector('#listings tr.history-row');
-  if (existing) existing.remove();
-  historyState.dealer = null;
+  document.querySelectorAll('tr.row-expanded').forEach(tr => tr.classList.remove('row-expanded'));
+  document.querySelectorAll('tr.history-row').forEach(tr => tr.remove());
+  historyState.key = null;
 }
 
-function expandHistory(rowEl, dealer) {
+function expandHistory(rowEl, config) {
   collapseHistory();
-  historyState = { dealer, size: lastSize, range: '30d' };
+  historyState = { ...config, range: '30d' };
   rowEl.classList.add('row-expanded');
 
+  const colspan = rowEl.children.length;
   const histTr = document.createElement('tr');
   histTr.className = 'history-row';
   histTr.innerHTML = `
-    <td colspan="4">
+    <td colspan="${colspan}">
       <div class="history-panel">
         <div class="history-panel-head">
-          <h3>${escapeHtml(dealer)} — ${lastSize} g</h3>
+          <h3>${escapeHtml(config.titleText)}</h3>
           <div class="range-toggle" role="tablist">
             <button data-range="24h" type="button">24h</button>
             <button data-range="7d" type="button">7d</button>
@@ -248,7 +258,6 @@ function expandHistory(rowEl, dealer) {
   `;
   rowEl.after(histTr);
 
-  // Range toggle clicks live inside the inserted tr — wire them up after insert.
   histTr.querySelectorAll('.range-toggle button').forEach(b => {
     b.addEventListener('click', () => {
       if (b.dataset.range === historyState.range) return;
@@ -266,14 +275,13 @@ function expandHistory(rowEl, dealer) {
 async function fetchHistory() {
   const apiKey = loadApiKey();
   if (!apiKey) { setHistoryStatus('Open Settings to configure your API key.'); return; }
-  const { dealer, size, range } = historyState;
+  if (!historyState.historyUrlBuilder) return;
   setHistoryStatus('Loading…');
   let resp;
   try {
-    resp = await fetch(
-      `${BACKEND_URL}/history/bar/${encodeURIComponent(dealer)}/${size}?range=${range}`,
-      { headers: { 'X-API-Key': apiKey } },
-    );
+    resp = await fetch(historyState.historyUrlBuilder(historyState.range), {
+      headers: { 'X-API-Key': apiKey },
+    });
   } catch (e) {
     setHistoryStatus(`Network error: ${e.message}`);
     return;
@@ -284,7 +292,7 @@ async function fetchHistory() {
 }
 
 function setHistoryStatus(msg) {
-  const el = document.querySelector('#listings tr.history-row .history-status');
+  const el = document.querySelector('tr.history-row .history-status');
   if (!el) return;
   el.textContent = msg;
   el.hidden = false;
@@ -294,7 +302,7 @@ function renderHistory(data) {
   const okPoints = data.points.filter(p =>
     p.status === 'ok' && p.price_dkk != null && p.spot_gold_dkk_per_g != null,
   );
-  const statusEl = document.querySelector('#listings tr.history-row .history-status');
+  const statusEl = document.querySelector('tr.history-row .history-status');
   if (okPoints.length === 0) {
     setHistoryStatus('No data yet for this range.');
     destroyHistoryCharts();
@@ -302,21 +310,21 @@ function renderHistory(data) {
   }
   if (statusEl) statusEl.hidden = true;
 
-  // Each chart point carries its brand for the tooltip — the cheapest variant
-  // can switch between snapshots (e.g. Tavex 5g flips PAMP↔Argor when one
-  // sells out), and a sudden jump on the line is more readable when you can
-  // see the brand changed at that point.
+  // Bars: data.size_g + brand-per-point. Coins: data.fine_gold_g + size_label.
+  const sizeG = data.size_g ?? data.fine_gold_g;
+  const labelKey = data.size_g != null ? 'brand' : 'size_label';
+
   const pricePoints = okPoints.map(p => ({
     x: new Date(p.fetched_at).getTime(),
     y: p.price_dkk,
-    brand: p.brand,
+    label: p[labelKey],
   }));
   const premiumPoints = okPoints.map(p => {
-    const ref = p.spot_gold_dkk_per_g * data.size_g;
+    const ref = p.spot_gold_dkk_per_g * sizeG;
     return {
       x: new Date(p.fetched_at).getTime(),
       y: ref > 0 ? Number(((p.price_dkk - ref) / ref * 100).toFixed(2)) : null,
-      brand: p.brand,
+      label: p[labelKey],
     };
   });
 
@@ -407,8 +415,8 @@ function drawChart(key, canvasId, points, unit, color, yFmt) {
             title: items => new Date(items[0].parsed.x).toLocaleString(),
             label: item => {
               const valueLabel = `${yFmt(item.parsed.y)} ${unit === '%' ? '' : unit}`.trim();
-              const brand = item.raw && item.raw.brand;
-              return brand ? `${valueLabel} — ${brand}` : valueLabel;
+              const lbl = item.raw && item.raw.label;
+              return lbl ? `${valueLabel} — ${lbl}` : valueLabel;
             },
           },
         },
@@ -416,6 +424,169 @@ function drawChart(key, canvasId, points, unit, color, yFmt) {
     },
   });
 }
+
+// Coins view ————————————————————————————————————————————————————————————
+
+async function fetchCoins() {
+  const apiKey = loadApiKey();
+  if (!apiKey) { showCoinsMessage('Open Settings to configure your API key.'); return; }
+  showCoinsSpinner();
+  $('#coin-listings').hidden = true;
+  $('#coins-refresh').hidden = true;
+  $('#coins-status').textContent = '';
+  let resp;
+  try {
+    resp = await fetch(`${BACKEND_URL}/coins`, { headers: { 'X-API-Key': apiKey } });
+  } catch (e) {
+    showCoinsMessage(`Network error: ${e.message}`);
+    return;
+  }
+  if (resp.status === 401) { showCoinsMessage('Bad API key — open Settings.'); return; }
+  if (resp.status === 503) { showCoinsMessage('History not configured on the server yet.'); return; }
+  if (!resp.ok) { showCoinsMessage(`Server error: ${resp.status}`); return; }
+  renderCoins(await resp.json());
+}
+
+function showCoinsSpinner() {
+  $('#coins-loading').innerHTML = `
+    <div class="spinner"><span></span><span></span><span></span></div>
+    <div class="loading-text">Fetching coins…</div>
+  `;
+  $('#coins-loading').hidden = false;
+}
+
+function showCoinsMessage(msg) {
+  $('#coins-loading').textContent = msg;
+  $('#coins-loading').hidden = false;
+}
+
+function renderCoins(data) {
+  // Coins arrive sorted by premium asc from the backend, but we re-sort
+  // client-side so column-header clicks work without refetching.
+  lastCoinListings = (data.listings || []).filter(li => li.status !== 'out_of_stock');
+  renderCoinListingsBody();
+  $('#coins-loading').hidden = true;
+  $('#coin-listings').hidden = false;
+  $('#coins-refresh').hidden = false;
+  $('#coins-status').textContent = data.fetched_at
+    ? `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`
+    : 'No data yet — wait for the snapshot cron to run.';
+}
+
+function sortCoinListings(listings) {
+  const dirMul = coinSortState.dir === 'asc' ? 1 : -1;
+  const key = coinSortState.col === 'price' ? 'price_dkk' : 'premium_pct';
+  return [...listings].sort((a, b) => {
+    const aOk = a.status === 'ok' ? 0 : 1;
+    const bOk = b.status === 'ok' ? 0 : 1;
+    if (aOk !== bOk) return aOk - bOk;
+    const av = a[key], bv = b[key];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return (av - bv) * dirMul;
+  });
+}
+
+function updateCoinSortIndicators() {
+  document.querySelectorAll('#coin-listings th.sortable').forEach(th => {
+    const ind = th.querySelector('.sort-indicator');
+    if (th.dataset.sort === coinSortState.col) {
+      th.classList.add('active');
+      ind.textContent = coinSortState.dir === 'asc' ? ' ↑' : ' ↓';
+    } else {
+      th.classList.remove('active');
+      ind.textContent = '';
+    }
+  });
+}
+
+function renderCoinListingsBody() {
+  const tbody = $('#coin-listings tbody');
+  destroyHistoryCharts();
+  historyState.key = null;
+  tbody.innerHTML = '';
+  updateCoinSortIndicators();
+  const ordered = sortCoinListings(lastCoinListings);
+  for (const li of ordered) {
+    const tr = document.createElement('tr');
+    tr.className = li.status;
+    const coinLabel = li.size_label
+      ? `${li.coin_type} ${li.size_label}`
+      : (li.coin_type ?? '—');
+    if (li.status === 'ok') {
+      tr.classList.add('row-clickable');
+      tr.dataset.dealer = li.dealer;
+      tr.dataset.coinType = li.coin_type;
+      tr.dataset.fineGoldG = String(li.fine_gold_g);
+      tr.innerHTML = `
+        <td><a class="dealer-link" href="${li.url}" target="_blank" rel="noopener">${escapeHtml(li.dealer)}<span class="visit-arrow" aria-hidden="true">↗</span></a></td>
+        <td class="brand-cell">${escapeHtml(coinLabel)}</td>
+        <td>${li.fine_gold_g != null ? fmtNum(li.fine_gold_g, 2) + ' g' : '—'}</td>
+        <td>${fmtDKK(li.price_dkk)}</td>
+        <td>${fmtPct(li.premium_pct)}</td>
+      `;
+    } else {
+      const note = li.error || li.status;
+      tr.innerHTML = `<td>${escapeHtml(li.dealer)}</td><td class="brand-cell">${escapeHtml(coinLabel)}</td><td colspan="3">${escapeHtml(note)}</td>`;
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+$('#coins-refresh').addEventListener('click', () => fetchCoins());
+
+document.querySelectorAll('#coin-listings th.sortable').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    if (coinSortState.col === col) {
+      coinSortState.dir = coinSortState.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      coinSortState.col = col;
+      coinSortState.dir = 'asc';
+    }
+    if (lastCoinListings.length) renderCoinListingsBody();
+  });
+});
+
+$('#coin-listings tbody').addEventListener('click', (e) => {
+  if (e.target.closest('.dealer-link')) return;
+  const tr = e.target.closest('tr.row-clickable');
+  if (!tr) return;
+  const dealer = tr.dataset.dealer;
+  const coinType = tr.dataset.coinType;
+  const fineGoldG = parseFloat(tr.dataset.fineGoldG);
+  if (!dealer || !coinType || !fineGoldG) return;
+  const key = `coin:${dealer}:${coinType}:${fineGoldG}`;
+  if (historyState.key === key) {
+    collapseHistory();
+  } else {
+    expandHistory(tr, {
+      key,
+      titleText: `${dealer} — ${coinType} (${fineGoldG.toFixed(2)} g)`,
+      historyUrlBuilder: (range) =>
+        `${BACKEND_URL}/history/coin/${encodeURIComponent(dealer)}/${encodeURIComponent(coinType)}/${fineGoldG}?range=${range}`,
+    });
+  }
+});
+
+// Tab toggle ——————————————————————————————————————————————————————————————
+
+function setTab(tab) {
+  currentTab = tab;
+  localStorage.setItem(TAB_STORAGE, tab);
+  document.querySelectorAll('#tab-strip button').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+  $('#bars-view').hidden = tab !== 'bars';
+  $('#coins-view').hidden = tab !== 'coins';
+  collapseHistory();  // stop a panel from sticking around when switching tabs
+  if (tab === 'coins' && !lastCoinListings.length) fetchCoins();
+}
+
+document.querySelectorAll('#tab-strip button').forEach(b => {
+  b.addEventListener('click', () => setTab(b.dataset.tab));
+});
 
 // Listings tbody click — delegate to row-clickable rows. Clicks on the dealer
 // link itself fall through to the anchor (opens dealer site in a new tab);
@@ -426,10 +597,16 @@ $('#listings tbody').addEventListener('click', (e) => {
   if (!tr) return;
   const dealer = tr.dataset.dealer;
   if (!dealer || lastSize == null) return;
-  if (historyState.dealer === dealer) {
+  const key = `bar:${dealer}:${lastSize}`;
+  if (historyState.key === key) {
     collapseHistory();
   } else {
-    expandHistory(tr, dealer);
+    expandHistory(tr, {
+      key,
+      titleText: `${dealer} — ${lastSize} g`,
+      historyUrlBuilder: (range) =>
+        `${BACKEND_URL}/history/bar/${encodeURIComponent(dealer)}/${lastSize}?range=${range}`,
+    });
   }
 });
 
@@ -463,6 +640,8 @@ $('#settings-dialog').addEventListener('close', () => {
 fetchSpot();
 // Default size selection: load 10 g listings as soon as the page opens.
 fetchPrices(10);
+// Restore tab state from localStorage (defaults to 'bars').
+setTab(currentTab);
 setInterval(() => {
   if (document.visibilityState === 'visible') fetchSpot();
 }, SPOT_REFRESH_MS);

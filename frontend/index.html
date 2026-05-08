@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=15" />
+  <link rel="stylesheet" href="styles.css?v=16" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
@@ -25,34 +25,63 @@
     <div id="spot-content">Loading…</div>
   </section>
 
-  <section id="size-picker" class="card">
-    <h2>Size</h2>
-    <div class="buttons">
-      <button data-size="2.5">2.5 g</button>
-      <button data-size="5">5 g</button>
-      <button data-size="10">10 g</button>
-      <button data-size="20">20 g</button>
-    </div>
-  </section>
+  <div id="tab-strip" class="tab-strip">
+    <button data-tab="bars" class="active" type="button">Bars</button>
+    <button data-tab="coins" type="button">Coins</button>
+  </div>
 
-  <section id="results" class="card">
-    <div class="results-head">
-      <button id="refresh" class="icon-btn" aria-label="Refresh prices" title="Refresh" hidden>↻</button>
-      <div id="status"></div>
-    </div>
-    <div id="loading" class="loading-msg" hidden></div>
-    <table id="listings" hidden>
-      <thead>
-        <tr>
-          <th>Dealer</th>
-          <th>Brand</th>
-          <th class="sortable" data-sort="price">Price<span class="sort-indicator"></span></th>
-          <th class="sortable" data-sort="premium">Premium<span class="sort-indicator"></span></th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </section>
+  <div id="bars-view">
+    <section id="size-picker" class="card">
+      <h2>Size</h2>
+      <div class="buttons">
+        <button data-size="2.5">2.5 g</button>
+        <button data-size="5">5 g</button>
+        <button data-size="10">10 g</button>
+        <button data-size="20">20 g</button>
+      </div>
+    </section>
+
+    <section id="results" class="card">
+      <div class="results-head">
+        <button id="refresh" class="icon-btn" aria-label="Refresh prices" title="Refresh" hidden>↻</button>
+        <div id="status"></div>
+      </div>
+      <div id="loading" class="loading-msg" hidden></div>
+      <table id="listings" hidden>
+        <thead>
+          <tr>
+            <th>Dealer</th>
+            <th>Brand</th>
+            <th class="sortable" data-sort="price">Price<span class="sort-indicator"></span></th>
+            <th class="sortable" data-sort="premium">Premium<span class="sort-indicator"></span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </div>
+
+  <div id="coins-view" hidden>
+    <section id="coins" class="card">
+      <div class="results-head">
+        <button id="coins-refresh" class="icon-btn" aria-label="Refresh coins" title="Refresh" hidden>↻</button>
+        <div id="coins-status"></div>
+      </div>
+      <div id="coins-loading" class="loading-msg" hidden></div>
+      <table id="coin-listings" hidden>
+        <thead>
+          <tr>
+            <th>Dealer</th>
+            <th>Coin</th>
+            <th>g (fine)</th>
+            <th class="sortable" data-sort="price">Price<span class="sort-indicator"></span></th>
+            <th class="sortable" data-sort="premium">Premium<span class="sort-indicator"></span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </div>
 
   <dialog id="settings-dialog">
     <form method="dialog">
@@ -69,7 +98,7 @@
 
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=15"></script>
-  <script src="app.js?v=15"></script>
+  <script src="config.js?v=16"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>
