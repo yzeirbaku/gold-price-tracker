@@ -294,6 +294,109 @@ async def get_bar_history(
     }
 
 
+@app.get("/coins")
+async def get_coins(_: None = Depends(require_api_key)) -> dict[str, object]:
+    """Latest snapshot's coin rows across all dealers, sorted by premium asc."""
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    async with pool.acquire() as conn:
+        latest = await conn.fetchval("SELECT MAX(fetched_at) FROM coin_snapshots")
+        if latest is None:
+            return {"fetched_at": None, "listings": []}
+        rows = await conn.fetch(
+            """
+            SELECT dealer, coin_type, size_label, gross_weight_g, purity,
+                   fine_gold_g, status, price_dkk, error,
+                   spot_gold_dkk_per_g, listing_url
+            FROM coin_snapshots
+            WHERE fetched_at = $1
+            ORDER BY status, fine_gold_g
+            """,
+            latest,
+        )
+    listings: list[dict[str, object]] = []
+    for r in rows:
+        price = float(r["price_dkk"]) if r["price_dkk"] is not None else None
+        spot = float(r["spot_gold_dkk_per_g"]) if r["spot_gold_dkk_per_g"] is not None else None
+        fine = float(r["fine_gold_g"]) if r["fine_gold_g"] is not None else None
+        premium: float | None = None
+        if r["status"] == "ok" and price is not None and spot is not None and fine and fine > 0:
+            ref = spot * fine
+            if ref > 0:
+                premium = round((price - ref) / ref * 100, 2)
+        listings.append({
+            "dealer": r["dealer"],
+            "coin_type": r["coin_type"],
+            "size_label": r["size_label"],
+            "gross_weight_g": (
+                float(r["gross_weight_g"]) if r["gross_weight_g"] is not None else None
+            ),
+            "purity": float(r["purity"]) if r["purity"] is not None else None,
+            "fine_gold_g": fine,
+            "status": r["status"],
+            "price_dkk": price,
+            "premium_pct": premium,
+            "error": r["error"],
+            "url": r["listing_url"],
+        })
+    listings.sort(key=lambda li: (
+        0 if li["status"] == "ok" else 1,
+        li["premium_pct"] if li["premium_pct"] is not None else float("inf"),
+    ))
+    return {"fetched_at": latest.isoformat(), "listings": listings}
+
+
+@app.get("/history/coin/{dealer}/{coin_type}/{fine_gold_g}")
+async def get_coin_history(
+    dealer: str,
+    coin_type: str,
+    fine_gold_g: float,
+    range: str = "30d",
+    _: None = Depends(require_api_key),
+) -> dict[str, object]:
+    """Time series for a specific (dealer, coin_type, fine_gold_g) combo."""
+    if range not in HISTORY_RANGES:
+        raise HTTPException(
+            status_code=400, detail=f"range must be one of {sorted(HISTORY_RANGES)}",
+        )
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    interval = HISTORY_RANGES[range]
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT fetched_at, status, price_dkk, spot_gold_dkk_per_g, size_label
+            FROM coin_snapshots
+            WHERE dealer = $1 AND coin_type = $2
+              AND ABS(fine_gold_g - $3::numeric) < 0.005
+              AND fetched_at >= NOW() - INTERVAL '{interval}'
+            ORDER BY fetched_at ASC
+            """,
+            dealer, coin_type, fine_gold_g,
+        )
+    return {
+        "dealer": dealer,
+        "coin_type": coin_type,
+        "fine_gold_g": fine_gold_g,
+        "range": range,
+        "points": [
+            {
+                "fetched_at": r["fetched_at"].isoformat(),
+                "status": r["status"],
+                "price_dkk": float(r["price_dkk"]) if r["price_dkk"] is not None else None,
+                "spot_gold_dkk_per_g": (
+                    float(r["spot_gold_dkk_per_g"])
+                    if r["spot_gold_dkk_per_g"] is not None else None
+                ),
+                "size_label": r["size_label"],
+            }
+            for r in rows
+        ],
+    }
+
+
 @app.get("/health")
 async def health(_: None = Depends(require_api_key)) -> dict[str, object]:
     """Run all scrapers against 5g and return per-dealer pass/fail summary."""
