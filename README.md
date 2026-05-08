@@ -1,4 +1,4 @@
-# Gold Bar Tracker
+# Gold Prices Tracker
 
 Personal tool to compare gold-bar prices (2.5 / 5 / 10 / 20 g) and gold-coin prices (≤ 20 g of fine gold) across Danish online dealers, plus live spot prices for gold and silver.
 
