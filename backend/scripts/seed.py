@@ -156,12 +156,13 @@ async def main() -> None:
             "TRUNCATE bar_snapshots, coin_snapshots, spot_snapshots RESTART IDENTITY"
         )
 
-        # Snap "now" down to the most recent 30-min boundary so the chart
-        # x-axis ends on a clean tick.
-        now = datetime.now(UTC).replace(second=0, microsecond=0)
-        now = now.replace(minute=(now.minute // TICK_MINUTES) * TICK_MINUTES)
-        start = now - timedelta(days=DAYS_BACK)
-        ticks = int((now - start).total_seconds() // (TICK_MINUTES * 60))
+        # End at "now" (microsecond-stripped) and step backwards in 30-min
+        # ticks. We deliberately do NOT snap to a UTC 30-min boundary — that
+        # creates the ugly case where the latest tick is e.g. 22:00 UTC and
+        # displays as 00:00 in a UTC+2 viewer's locale.
+        now = datetime.now(UTC).replace(microsecond=0)
+        ticks = DAYS_BACK * (24 * 60 // TICK_MINUTES)
+        start = now - timedelta(minutes=TICK_MINUTES * (ticks - 1))
 
         spot_dkk = START_SPOT_DKK_PER_G
         spot_rows: list[tuple] = []

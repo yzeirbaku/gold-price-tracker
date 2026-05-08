@@ -19,19 +19,6 @@ function fmtSpotEUR(n) { return `${fmtNum(n, 2)} eur`; }
 function fmtPct(n) { return n == null ? '—' : (n > 0 ? '+' : '') + n.toFixed(1) + '%'; }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 
-// Relative time for "Updated …" labels — survives timezone confusion (e.g.
-// a UTC midnight snapshot that displays as "00:00" in the user's local
-// time looks broken; "12 min ago" is unambiguous).
-function fmtUpdated(iso) {
-  if (!iso) return '';
-  const sec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
-  if (sec < 5)     return 'just now';
-  if (sec < 60)    return `${sec}s ago`;
-  if (sec < 3600)  return `${Math.floor(sec / 60)} min ago`;
-  if (sec < 86400) return `${Math.floor(sec / 3600)} h ago`;
-  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-}
-
 // URL safety: only allow http(s):// — block anything else (javascript:, data:,
 // etc.) that might come from a compromised/scraped listing.
 function safeHref(url) {
@@ -70,7 +57,7 @@ function renderSpot(data) {
     <div class="spot-row"><span>Silver/g</span><span class="spot-value${flashClass}" data-spot="silver">${silverText}</span></div>
     ${data.fx_stale ? '<div class="spot-row" style="color:var(--error)">⚠ FX rates stale (fallback in use)</div>' : ''}
   `;
-  $('#spot-updated').textContent = `Updated ${fmtUpdated(data.fetched_at)}`;
+  $('#spot-updated').textContent = `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`;
   hasRenderedSpot = true;
 }
 
@@ -161,7 +148,7 @@ function renderPrices(data) {
   $('#loading').hidden = true;
   $('#listings').hidden = false;
   $('#refresh').hidden = false;
-  $('#status').textContent = `Updated ${fmtUpdated(data.fetched_at)}`;
+  $('#status').textContent = `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`;
 }
 
 function renderListingsBody() {
@@ -494,7 +481,7 @@ function renderCoins(data) {
   $('#coin-listings').hidden = false;
   $('#coins-refresh').hidden = false;
   $('#coins-status').textContent = data.fetched_at
-    ? `Updated ${fmtUpdated(data.fetched_at)}`
+    ? `Updated ${new Date(data.fetched_at).toLocaleTimeString()}`
     : 'No data yet — wait for the snapshot cron to run.';
 }
 
