@@ -15,7 +15,23 @@ logger = logging.getLogger(__name__)
 # on startup; new columns get added via plain ALTER TABLE statements appended
 # below over time.
 SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS dealer_snapshots (
+-- Idempotent migration: rename dealer_snapshots → bar_snapshots if needed.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'dealer_snapshots')
+       AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'bar_snapshots')
+    THEN
+        ALTER TABLE dealer_snapshots RENAME TO bar_snapshots;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_dealer_snapshots_lookup')
+       AND NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_bar_snapshots_lookup')
+    THEN
+        ALTER INDEX idx_dealer_snapshots_lookup RENAME TO idx_bar_snapshots_lookup;
+    END IF;
+END
+$$;
+
+CREATE TABLE IF NOT EXISTS bar_snapshots (
     id BIGSERIAL PRIMARY KEY,
     fetched_at TIMESTAMPTZ NOT NULL,
     dealer TEXT NOT NULL,
@@ -27,8 +43,8 @@ CREATE TABLE IF NOT EXISTS dealer_snapshots (
     spot_gold_dkk_per_g NUMERIC(10,4)
 );
 
-CREATE INDEX IF NOT EXISTS idx_dealer_snapshots_lookup
-    ON dealer_snapshots (dealer, size_g, fetched_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bar_snapshots_lookup
+    ON bar_snapshots (dealer, size_g, fetched_at DESC);
 
 CREATE TABLE IF NOT EXISTS spot_snapshots (
     id BIGSERIAL PRIMARY KEY,
@@ -42,6 +58,25 @@ CREATE TABLE IF NOT EXISTS spot_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_spot_snapshots_time
     ON spot_snapshots (fetched_at DESC);
+
+CREATE TABLE IF NOT EXISTS coin_snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    fetched_at        TIMESTAMPTZ NOT NULL,
+    dealer            TEXT NOT NULL,
+    coin_type         TEXT,
+    size_label        TEXT,
+    gross_weight_g    NUMERIC(8,4),
+    purity            NUMERIC(6,4),
+    fine_gold_g       NUMERIC(8,4),
+    status            TEXT NOT NULL,
+    price_dkk         NUMERIC(10,2),
+    error             TEXT,
+    spot_gold_dkk_per_g NUMERIC(10,4),
+    listing_url       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_coin_snapshots_lookup
+    ON coin_snapshots (dealer, coin_type, fine_gold_g, fetched_at DESC);
 """
 
 _pool: asyncpg.Pool | None = None
