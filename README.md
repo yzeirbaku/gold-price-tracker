@@ -1,6 +1,6 @@
 # Gold Bar Tracker
 
-Personal tool to compare 2.5 g, 5 g, 10 g, and 20 g gold-bar prices across Danish online dealers, plus live spot prices for gold and silver. Accessed as a PWA from iPhone.
+Personal tool to compare 2.5 g, 5 g, 10 g, and 20 g gold-bar prices across Danish online dealers, plus live spot prices for gold and silver.
 
 ## Architecture
 
@@ -63,8 +63,3 @@ Open `http://127.0.0.1:5500/`, click ⚙️, paste your API key. The backend URL
 - Unit (no network): `pytest tests/unit -v`
 - Live integration (hits real dealer sites): `pytest tests/integration -v`
 - Lint + types: `ruff check app tests && mypy app`
-
-## Spec & plan
-
-- Design: `docs/superpowers/specs/2026-05-07-gold-bar-tracker-design.md`
-- Plan: `docs/superpowers/plans/2026-05-07-gold-bar-tracker.md`
