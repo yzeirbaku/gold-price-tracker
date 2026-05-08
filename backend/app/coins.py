@@ -12,6 +12,11 @@ Sources for weights/purity:
   fineness; gross ≈ fine.
 - Sovereign: 22-carat, 7.988 g gross full / 3.994 g half / 1.997 g quarter.
 - Ducat (Austrian): .9860 fineness.
+- Scandinavian Monetary Union kroner (Denmark, 1873–1917): .900 fineness;
+  20 kr = 8.9606 g gross / 8.0645 g fine, 10 kr = 4.4803 g gross / 4.0322 g fine.
+  Christian IX, Christian X, and Frederik VIII all share the same physical
+  spec — they're tracked as separate size_labels so per-monarch premiums
+  surface independently.
 """
 
 # Each entry: coin_type → { size_label: (gross_weight_g, purity) }
@@ -54,6 +59,16 @@ COINS: dict[str, dict[str, tuple[float, float]]] = {
         "1/4 oz": (7.78, 0.9999), "1/10 oz": (3.11, 0.9999),
         "1/20 oz": (1.555, 0.9999),
     },
+    "Danish 20 kr": {
+        "Christian IX": (8.9606, 0.900),
+        "Christian X": (8.9606, 0.900),
+        "Frederik VIII": (8.9606, 0.900),
+    },
+    "Danish 10 kr": {
+        "Christian IX": (4.4803, 0.900),
+        "Christian X": (4.4803, 0.900),
+        "Frederik VIII": (4.4803, 0.900),
+    },
 }
 
 # Title-fragment synonyms per coin_type. Lowercase; first hit wins.
@@ -79,6 +94,17 @@ _TYPE_ALIASES: dict[str, list[str]] = {
     "Sovereign": ["sovereign"],
     "Ducat": ["ducat", "dukat"],
     "Panda": ["panda"],
+    # Danish Scandinavian-Monetary-Union kroner. The "20 kroner" / "10 kroner"
+    # phrase is what Tavex et al. put in titles; "20 kr" with trailing space
+    # catches abbreviated forms without colliding with "20 kroner".
+    "Danish 20 kr": [
+        "dansk 20 kroner", "danske 20 kroner", "danmark 20 kroner",
+        "dansk 20 kr ", "danske 20 kr ", "danish 20 krone",
+    ],
+    "Danish 10 kr": [
+        "dansk 10 kroner", "danske 10 kroner", "danmark 10 kroner",
+        "dansk 10 kr ", "danske 10 kr ", "danish 10 krone",
+    ],
 }
 
 # Size-label synonyms per (coin_type, size_label). Lowercase. We sort the
@@ -138,6 +164,20 @@ _SIZE_ALIASES: dict[tuple[str, str], list[str]] = {
     ("Panda", "8 g"): ["8 g", "8g", "8 gram"],
     ("Panda", "3 g"): ["3 g", "3g", "3 gram"],
     ("Panda", "1 g"): ["1 g", "1g", "1 gram"],
+    # Danish kroner — monarch is the size_label. "christian ix" must beat
+    # "christian x" by length (12 vs 11 chars) so the resolver tries it first.
+    **{
+        (t, "Christian IX"): ["christian ix"]
+        for t in ("Danish 20 kr", "Danish 10 kr")
+    },
+    **{
+        (t, "Christian X"): ["christian x"]
+        for t in ("Danish 20 kr", "Danish 10 kr")
+    },
+    **{
+        (t, "Frederik VIII"): ["frederik viii", "frederik 8"]
+        for t in ("Danish 20 kr", "Danish 10 kr")
+    },
 }
 
 

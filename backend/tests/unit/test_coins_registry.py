@@ -8,6 +8,8 @@ def test_registry_has_expected_types() -> None:
     assert "Maple Leaf" in COINS
     assert "Sovereign" in COINS
     assert "Ducat" in COINS
+    assert "Danish 20 kr" in COINS
+    assert "Danish 10 kr" in COINS
 
 
 @pytest.mark.parametrize(
@@ -28,6 +30,13 @@ def test_registry_has_expected_types() -> None:
         ("4 Ducat 1915", ("Ducat", "4 ducat", 13.96, 0.9860)),
         ("Panda 8 g 2024", ("Panda", "8 g", 8.00, 0.9999)),
         ("Panda 1 g", ("Panda", "1 g", 1.00, 0.9999)),
+        # Danish Scandinavian-Monetary-Union kroner
+        ("Dansk 20 kroner Christian X", ("Danish 20 kr", "Christian X", 8.9606, 0.900)),
+        ("Dansk 20 kroner Christian IX", ("Danish 20 kr", "Christian IX", 8.9606, 0.900)),
+        ("Dansk 20 kroner Frederik VIII", ("Danish 20 kr", "Frederik VIII", 8.9606, 0.900)),
+        ("Dansk 10 kroner Christian IX", ("Danish 10 kr", "Christian IX", 4.4803, 0.900)),
+        ("Dansk 10 kroner Christian X", ("Danish 10 kr", "Christian X", 4.4803, 0.900)),
+        ("Dansk 10 kroner Frederik VIII", ("Danish 10 kr", "Frederik VIII", 4.4803, 0.900)),
     ],
 )
 def test_resolve_known_titles(title: str, expected: tuple) -> None:

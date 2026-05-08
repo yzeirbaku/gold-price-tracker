@@ -23,7 +23,7 @@ Personal tool to compare gold-bar prices (2.5 / 5 / 10 / 20 g) and gold-coin pri
 | Mønthuset | dropped — live guldbarrer category empty since early 2025 |
 | Silver Gold Bull DK | skipped — JS-rendered React SPA + Algolia + dynamic pricing |
 
-Coin coverage is bullion-only via a static registry in `backend/app/coins.py`: Krugerrand, Maple Leaf, Vienna Philharmonic, American Eagle, Britannia, Sovereign, Ducat, Panda. Listings whose title doesn't match the registry are skipped. Plaza and Jan Jørgensen don't currently stock bullion coins; their coin scrapers return empty lists and pick up new listings automatically if the dealers ever expand.
+Coin coverage is bullion-only via a static registry in `backend/app/coins.py`: Krugerrand, Maple Leaf, Vienna Philharmonic, American Eagle, Britannia, Sovereign, Ducat, Panda, plus the Danish Scandinavian-Monetary-Union 20 kr and 10 kr (Christian IX, Christian X, Frederik VIII) which still trade as quasi-bullion. Listings whose title doesn't match the registry are skipped. Plaza and Jan Jørgensen don't currently stock bullion coins; their coin scrapers return empty lists and pick up new listings automatically if the dealers ever expand.
 
 ## API endpoints
 
