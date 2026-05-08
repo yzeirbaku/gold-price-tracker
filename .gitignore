@@ -22,3 +22,7 @@ Thumbs.db
 dist/
 build/
 *.egg-info/
+
+# Local-only superpowers specs/plans — kept on disk, never committed
+docs/superpowers/
+.claude/
