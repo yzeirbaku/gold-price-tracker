@@ -43,6 +43,41 @@ async def test_fresh_schema_creates_bar_and_coin_tables() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fresh_schema_creates_report_archive() -> None:
+    conn = await asyncpg.connect(LOCAL_DSN)
+    try:
+        await conn.execute(
+            "DROP TABLE IF EXISTS bar_snapshots, coin_snapshots, "
+            "spot_snapshots, dealer_snapshots, report_archive CASCADE"
+        )
+        await conn.execute(SCHEMA_SQL)
+        tables = {
+            r["table_name"]
+            for r in await conn.fetch(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema='public'"
+            )
+        }
+        assert "report_archive" in tables
+
+        await conn.execute(
+            """
+            INSERT INTO report_archive (report_type, period_start, period_end, html)
+            VALUES ('weekly', '2026-05-04', '2026-05-10', '<html>1</html>')
+            """
+        )
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await conn.execute(
+                """
+                INSERT INTO report_archive (report_type, period_start, period_end, html)
+                VALUES ('weekly', '2026-05-04', '2026-05-10', '<html>2</html>')
+                """
+            )
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
 async def test_migration_renames_existing_dealer_snapshots() -> None:
     conn = await asyncpg.connect(LOCAL_DSN)
     try:

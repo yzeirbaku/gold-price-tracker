@@ -77,6 +77,19 @@ CREATE TABLE IF NOT EXISTS coin_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_coin_snapshots_lookup
     ON coin_snapshots (dealer, coin_type, fine_gold_g, fetched_at DESC);
+
+CREATE TABLE IF NOT EXISTS report_archive (
+    id            BIGSERIAL PRIMARY KEY,
+    report_type   TEXT NOT NULL CHECK (report_type IN ('weekly', 'monthly')),
+    period_start  DATE NOT NULL,
+    period_end    DATE NOT NULL,
+    generated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    html          TEXT NOT NULL,
+    UNIQUE (report_type, period_start)
+);
+
+CREATE INDEX IF NOT EXISTS idx_report_archive_type_period
+    ON report_archive (report_type, period_start DESC);
 """
 
 _pool: asyncpg.Pool | None = None
