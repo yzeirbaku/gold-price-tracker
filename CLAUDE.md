@@ -61,7 +61,7 @@ Postgres tables (Neon in prod, local Docker in dev):
 | GET  | `/` | none | health ping |
 | GET  | `/prices/{size}` | `X-API-Key` | size ∈ {2.5, 5, 10, 20}; live bar scrapes + spot + FX in parallel |
 | GET  | `/spot` | `X-API-Key` | spot + FX only — used by the auto-refreshing ticker every 20 s |
-| GET  | `/coins` | `X-API-Key` | latest coin snapshot, sorted by premium % asc |
+| GET  | `/coins` | `X-API-Key` | live fan-out to all coin scrapers + spot, sorted by premium % asc |
 | GET  | `/history/bar/{dealer}/{size}` | `X-API-Key` | bar price/premium time series (`?range=24h\|7d\|30d`) |
 | GET  | `/history/coin/{dealer}/{coin_type}/{fine_gold_g}` | `X-API-Key` | coin price/premium time series |
 | POST | `/snapshot` | `X-API-Key` | runs all scrapers + spot + coins, writes to Postgres (cron-only) |

@@ -669,7 +669,7 @@ document.addEventListener('keydown', (e) => {
 // Click the page title to go back to Prices with bars tab + 10g size.
 function goToPricesHome() {
   setTab('bars');
-  navigate('/prices');
+  showPricesView();
   // Snap the size selector back to 10 g and refetch.
   fetchPrices(10);
 }
@@ -685,8 +685,8 @@ $('#menu-dropdown').addEventListener('click', (e) => {
   if (!action) return;
   setMenuOpen(false);
   if (action === 'settings') openSettings();
-  else if (action === 'reports') navigate('/reports');
-  else if (action === 'prices') navigate('/prices');
+  else if (action === 'reports') openReportsView();
+  else if (action === 'prices') showPricesView();
 });
 
 // Settings dialog — API key + theme. Backend URL from config.js.
@@ -711,9 +711,7 @@ $('#settings-dialog').addEventListener('close', () => {
 fetchSpot();
 // Default size selection: load 10 g listings as soon as the page opens.
 fetchPrices(10);
-// Restore tab state from localStorage (defaults to 'bars'), then route from URL.
-// `navigate` and `ROUTES` are defined below; this call must run AFTER their
-// `const` declarations execute, so it's moved to the very end of the file.
+// Restore tab state from localStorage (defaults to 'bars').
 setTab(currentTab);
 setInterval(() => {
   if (document.visibilityState === 'visible') fetchSpot();
@@ -727,7 +725,7 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('service-worker.js').catch(() => {});
 }
 
-// View switching + routing ————————————————————————————————————————————————————
+// View switching ————————————————————————————————————————————————————————————
 
 function showPricesView() {
   $('#reports-view').hidden = true;
@@ -749,29 +747,10 @@ function showReportsView() {
   });
 }
 
-// Tiny pushState router. Paths: '/', '/prices', '/reports'. Anything else
-// falls back to prices. Bars/Coins tabs stay in localStorage (no URL impact).
-const ROUTES = { '/': 'prices', '/prices': 'prices', '/reports': 'reports' };
-
-function navigate(path, push = true) {
-  const view = ROUTES[path] ?? 'prices';
-  const canonical = view === 'reports' ? '/reports' : '/prices';
-  if (window.location.pathname !== canonical) {
-    if (push) history.pushState({}, '', canonical);
-    else history.replaceState({}, '', canonical);
-  }
-  if (view === 'reports') {
-    showReportsView();
-    loadReportsArchive();
-  } else {
-    showPricesView();
-  }
+async function openReportsView() {
+  showReportsView();
+  await loadReportsArchive();
 }
-
-window.addEventListener('popstate', () => navigate(window.location.pathname, false));
-
-// Initial route — must come AFTER `const ROUTES` above (TDZ).
-navigate(window.location.pathname, false);
 
 // All archive rows from the latest fetch — kept so filters can re-render
 // without hitting the network on every dropdown change.

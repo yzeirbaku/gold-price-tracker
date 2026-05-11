@@ -140,7 +140,6 @@ header h1 {
 
 /* Title is a click-link to the Prices view. */
 #header-title-link { cursor: pointer; }
-#header-title-link:hover { color: var(--accent); }
 #menu-btn { font-size: 1.25rem; }
 .icon-btn {
   background: transparent; border: 1px solid transparent;

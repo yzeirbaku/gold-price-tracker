@@ -32,7 +32,7 @@ Coin coverage is bullion-only via a static registry in `backend/app/coins.py`: K
 | GET  | `/`                                                          | unauthenticated health ping |
 | GET  | `/prices/{size}`                                             | live bar prices for {2.5, 5, 10, 20} g |
 | GET  | `/spot`                                                      | live gold + silver spot in EUR/DKK per g |
-| GET  | `/coins`                                                     | latest snapshot of all recognized coins, sorted by premium |
+| GET  | `/coins`                                                     | live fan-out to all coin scrapers + spot, sorted by premium |
 | GET  | `/history/bar/{dealer}/{size}?range=24h\|7d\|30d`             | bar price history (renamed from `/history/dealer/...`) |
 | GET  | `/history/coin/{dealer}/{coin_type}/{fine_gold_g}?range=...`  | coin price history |
 | POST | `/snapshot`                                                  | runs all scrapers + spot, persists to Postgres (cron-only) |
