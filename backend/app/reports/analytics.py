@@ -129,3 +129,94 @@ def compute_weekend_activity(
     changes = _all_changes_for_dealer(dealer, bars, coins)
     weekend = [ch for ch in changes if ch.at.astimezone(CPH).weekday() >= 5]
     return WeekendActivity(change_count=len(weekend), changes=weekend)
+
+
+from statistics import quantiles  # noqa: E402
+
+
+@dataclass(frozen=True)
+class TimeOfDayDist:
+    morning: int    # 06-12
+    afternoon: int  # 12-18
+    evening: int    # 18-24
+    night: int      # 00-06
+    total: int
+
+
+@dataclass(frozen=True)
+class DayOfWeekDist:
+    by_day: list[int]  # length 7, Mon..Sun
+    total: int
+
+
+@dataclass(frozen=True)
+class PremiumBand:
+    p25: float | None
+    p75: float | None
+
+
+def compute_time_of_day(
+    dealer: str,
+    bars: Iterable[BarPoint],
+    coins: Iterable[CoinPoint] = (),
+) -> TimeOfDayDist:
+    morning = afternoon = evening = night = 0
+    for ch in _all_changes_for_dealer(dealer, bars, coins):
+        hour = ch.at.astimezone(CPH).hour
+        if 6 <= hour < 12:
+            morning += 1
+        elif 12 <= hour < 18:
+            afternoon += 1
+        elif 18 <= hour < 24:
+            evening += 1
+        else:
+            night += 1
+    return TimeOfDayDist(
+        morning=morning, afternoon=afternoon,
+        evening=evening, night=night,
+        total=morning + afternoon + evening + night,
+    )
+
+
+def compute_day_of_week(
+    dealer: str,
+    bars: Iterable[BarPoint],
+    coins: Iterable[CoinPoint] = (),
+) -> DayOfWeekDist:
+    by_day = [0] * 7
+    for ch in _all_changes_for_dealer(dealer, bars, coins):
+        by_day[ch.at.astimezone(CPH).weekday()] += 1
+    return DayOfWeekDist(by_day=by_day, total=sum(by_day))
+
+
+def compute_premium_band(
+    dealer: str,
+    bars: Iterable[BarPoint],
+    coins: Iterable[CoinPoint] = (),
+) -> PremiumBand:
+    """Q1 and Q3 of premium % across all of this dealer's observed products."""
+    premiums: list[float] = []
+    for b in bars:
+        if b.dealer != dealer or b.status != "ok":
+            continue
+        if b.price_dkk is None or b.spot_dkk_per_g is None or b.spot_dkk_per_g <= 0:
+            continue
+        ref = b.spot_dkk_per_g * b.size_g
+        if ref <= 0:
+            continue
+        premiums.append((b.price_dkk - ref) / ref * 100.0)
+    for c in coins:
+        if c.dealer != dealer or c.status != "ok":
+            continue
+        if (c.price_dkk is None or c.spot_dkk_per_g is None
+                or c.fine_gold_g is None or c.spot_dkk_per_g <= 0):
+            continue
+        ref = c.spot_dkk_per_g * c.fine_gold_g
+        if ref <= 0:
+            continue
+        premiums.append((c.price_dkk - ref) / ref * 100.0)
+    if len(premiums) < 4:
+        return PremiumBand(p25=None, p75=None)
+    # statistics.quantiles returns interior cut points; n=4 \u2192 [q1, q2, q3]
+    q1, _, q3 = quantiles(premiums, n=4)
+    return PremiumBand(p25=round(q1, 2), p75=round(q3, 2))

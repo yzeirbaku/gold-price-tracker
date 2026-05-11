@@ -99,3 +99,82 @@ def test_weekend_activity_empty_when_only_weekday_changes() -> None:
     wa = compute_weekend_activity("Tavex", points)
     assert wa.change_count == 0
     assert wa.changes == []
+
+
+from app.reports.analytics import (  # noqa: E402
+    DayOfWeekDist,
+    PremiumBand,
+    TimeOfDayDist,
+    compute_day_of_week,
+    compute_premium_band,
+    compute_time_of_day,
+)
+
+
+def test_time_of_day_distribution_counts_into_4_buckets() -> None:
+    def _at(h: int) -> datetime:
+        return datetime(2026, 5, 6, h, 0, tzinfo=CPH).astimezone(UTC)
+    points = [
+        _bar(_at(2), "X", 5.0, 5000.0),
+        _bar(_at(3), "X", 5.0, 5050.0),   # night change
+        _bar(_at(8), "X", 5.0, 5100.0),   # morning change
+        _bar(_at(14), "X", 5.0, 5150.0),  # afternoon change
+        _bar(_at(15), "X", 5.0, 5200.0),  # afternoon change
+        _bar(_at(20), "X", 5.0, 5250.0),  # evening change
+    ]
+    dist = compute_time_of_day("X", points)
+    assert isinstance(dist, TimeOfDayDist)
+    assert dist.morning == 1
+    assert dist.afternoon == 2
+    assert dist.evening == 1
+    assert dist.night == 1
+    assert dist.total == 5
+
+
+def test_day_of_week_distribution() -> None:
+    mon = datetime(2026, 5, 4, 10, 0, tzinfo=CPH).astimezone(UTC)
+    tue = datetime(2026, 5, 5, 10, 0, tzinfo=CPH).astimezone(UTC)
+    wed = datetime(2026, 5, 6, 10, 0, tzinfo=CPH).astimezone(UTC)
+    points = [
+        _bar(mon, "X", 5.0, 5000.0),
+        _bar(tue, "X", 5.0, 5050.0),   # Tue change
+        _bar(wed, "X", 5.0, 5100.0),   # Wed change
+    ]
+    dist = compute_day_of_week("X", points)
+    assert isinstance(dist, DayOfWeekDist)
+    assert dist.by_day == [0, 1, 1, 0, 0, 0, 0]  # Mon..Sun
+    assert dist.total == 2
+
+
+def test_premium_band_iqr() -> None:
+    # Spot at 1000 DKK/g, 5g bar should be 5000 baseline.
+    ts = datetime(2026, 5, 5, 10, 0, tzinfo=UTC)
+    points = [
+        BarPoint(fetched_at=ts, dealer="X", size_g=5.0, status="ok",
+                 price_dkk=5250.0, spot_dkk_per_g=1000.0),   # 5.00%
+        BarPoint(fetched_at=ts, dealer="X", size_g=5.0, status="ok",
+                 price_dkk=5300.0, spot_dkk_per_g=1000.0),   # 6.00%
+        BarPoint(fetched_at=ts, dealer="X", size_g=5.0, status="ok",
+                 price_dkk=5350.0, spot_dkk_per_g=1000.0),   # 7.00%
+        BarPoint(fetched_at=ts, dealer="X", size_g=5.0, status="ok",
+                 price_dkk=5400.0, spot_dkk_per_g=1000.0),   # 8.00%
+    ]
+    band = compute_premium_band("X", points)
+    assert isinstance(band, PremiumBand)
+    # statistics.quantiles(n=4) on [5,6,7,8] interpolates p25=5.25, p75=7.75
+    assert band.p25 is not None and band.p75 is not None
+    assert 5.0 <= band.p25 <= 6.0
+    assert 7.0 <= band.p75 <= 8.0
+    # p75 should be greater than p25
+    assert band.p75 > band.p25
+
+
+def test_premium_band_none_when_no_valid_observations() -> None:
+    ts = datetime(2026, 5, 5, 10, 0, tzinfo=UTC)
+    points = [
+        BarPoint(fetched_at=ts, dealer="X", size_g=5.0, status="error",
+                 price_dkk=None, spot_dkk_per_g=None),
+    ]
+    band = compute_premium_band("X", points)
+    assert band.p25 is None
+    assert band.p75 is None
