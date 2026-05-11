@@ -310,3 +310,26 @@ def compute_spot_tracking(
         lag_hours=round(lag_hours, 2),
         sensitivity=sensitivity,
     )
+
+
+def classify_fingerprint(
+    changes_per_week: float,
+    spot_correlation: float | None,
+    weekend_change_count: int,
+) -> str:
+    if changes_per_week > 5:
+        cadence = "high-cadence"
+    elif changes_per_week >= 2:
+        cadence = "med-cadence"
+    else:
+        cadence = "low-cadence"
+    if spot_correlation is None:
+        tracking = "tracking-unknown"
+    elif spot_correlation > 0.85:
+        tracking = "tight-tracking"
+    elif spot_correlation >= 0.5:
+        tracking = "loose-tracking"
+    else:
+        tracking = "decoupled"
+    weekend = "weekend-active" if weekend_change_count > 0 else "weekend-frozen"
+    return f"{cadence} \u00b7 {tracking} \u00b7 {weekend}"

@@ -236,3 +236,42 @@ def test_spot_tracking_returns_none_with_insufficient_data() -> None:
     assert st.correlation is None
     assert st.lag_hours is None
     assert st.sensitivity is None
+
+
+from app.reports.analytics import classify_fingerprint  # noqa: E402
+
+
+def test_classify_high_cadence_tight_active() -> None:
+    tag = classify_fingerprint(
+        changes_per_week=8.0,
+        spot_correlation=0.92,
+        weekend_change_count=2,
+    )
+    assert tag == "high-cadence \u00b7 tight-tracking \u00b7 weekend-active"
+
+
+def test_classify_low_cadence_decoupled_frozen() -> None:
+    tag = classify_fingerprint(
+        changes_per_week=0.5,
+        spot_correlation=0.2,
+        weekend_change_count=0,
+    )
+    assert tag == "low-cadence \u00b7 decoupled \u00b7 weekend-frozen"
+
+
+def test_classify_med_cadence_loose_frozen() -> None:
+    tag = classify_fingerprint(
+        changes_per_week=3.0,
+        spot_correlation=0.7,
+        weekend_change_count=0,
+    )
+    assert tag == "med-cadence \u00b7 loose-tracking \u00b7 weekend-frozen"
+
+
+def test_classify_unknown_when_correlation_missing() -> None:
+    tag = classify_fingerprint(
+        changes_per_week=4.0,
+        spot_correlation=None,
+        weekend_change_count=0,
+    )
+    assert "tracking-unknown" in tag
