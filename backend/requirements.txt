@@ -5,3 +5,4 @@ selectolax==0.3.27
 pydantic==2.9.2
 asyncpg==0.30.0
 tzdata==2025.2
+numpy==2.1.3

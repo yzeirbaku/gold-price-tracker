@@ -220,3 +220,93 @@ def compute_premium_band(
     # statistics.quantiles returns interior cut points; n=4 \u2192 [q1, q2, q3]
     q1, _, q3 = quantiles(premiums, n=4)
     return PremiumBand(p25=round(q1, 2), p75=round(q3, 2))
+
+
+import numpy as np  # noqa: E402
+
+from app.reports.loader import SpotPoint  # noqa: E402
+
+
+@dataclass(frozen=True)
+class SpotTracking:
+    correlation: float | None
+    lag_hours: float | None
+    sensitivity: float | None
+
+
+def _build_dealer_avg_series(
+    dealer: str, bars: Iterable[BarPoint],
+) -> dict[datetime, float]:
+    """At each fetched_at, average the dealer's ok-status bar prices
+    normalized per-gram (price_dkk / size_g)."""
+    by_ts: dict[datetime, list[float]] = defaultdict(list)
+    for b in bars:
+        if b.dealer != dealer or b.status != "ok" or b.price_dkk is None:
+            continue
+        if b.size_g <= 0:
+            continue
+        by_ts[b.fetched_at].append(b.price_dkk / b.size_g)
+    return {ts: sum(vs) / len(vs) for ts, vs in by_ts.items()}
+
+
+def compute_spot_tracking(
+    dealer: str,
+    bars: Iterable[BarPoint],
+    spots: Iterable[SpotPoint],
+) -> SpotTracking:
+    """Pearson correlation + lag + sensitivity on matched snapshot pairs."""
+    dealer_avg = _build_dealer_avg_series(dealer, bars)
+    spot_by_ts = {
+        s.fetched_at: s.gold_dkk_per_g
+        for s in spots if s.gold_dkk_per_g is not None
+    }
+    matched_ts = sorted(set(dealer_avg) & set(spot_by_ts))
+    if len(matched_ts) < 5:
+        return SpotTracking(correlation=None, lag_hours=None, sensitivity=None)
+
+    dealer_arr = np.array([dealer_avg[ts] for ts in matched_ts], dtype=float)
+    spot_arr = np.array([spot_by_ts[ts] for ts in matched_ts], dtype=float)
+
+    if np.std(dealer_arr) == 0 or np.std(spot_arr) == 0:
+        return SpotTracking(correlation=None, lag_hours=None, sensitivity=None)
+
+    corr = float(np.corrcoef(dealer_arr, spot_arr)[0, 1])
+
+    # Lag: shift the dealer series by k in {-12..12}, pick the k that maximizes
+    # the correlation. Snapshots are nominally 20 minutes apart.
+    best_corr = corr
+    best_k = 0
+    n = len(matched_ts)
+    for k in range(-12, 13):
+        if k == 0 or n - abs(k) < 5:
+            continue
+        if k > 0:
+            d = dealer_arr[k:]
+            s = spot_arr[:n - k]
+        else:
+            d = dealer_arr[:n + k]
+            s = spot_arr[-k:]
+        if np.std(d) == 0 or np.std(s) == 0:
+            continue
+        c = float(np.corrcoef(d, s)[0, 1])
+        if c > best_corr:
+            best_corr = c
+            best_k = k
+    lag_hours = best_k * (20 / 60.0) if best_k != 0 else 0.0
+
+    # Sensitivity: OLS slope of pct-change(dealer) vs pct-change(spot).
+    pct_d = np.diff(dealer_arr) / dealer_arr[:-1]
+    pct_s = np.diff(spot_arr) / spot_arr[:-1]
+    mask = np.abs(pct_s) > 1e-9
+    sensitivity: float | None
+    if mask.sum() < 3:
+        sensitivity = None
+    else:
+        slope, _ = np.polyfit(pct_s[mask], pct_d[mask], 1)
+        sensitivity = float(round(slope, 3))
+
+    return SpotTracking(
+        correlation=round(corr, 3),
+        lag_hours=round(lag_hours, 2),
+        sensitivity=sensitivity,
+    )

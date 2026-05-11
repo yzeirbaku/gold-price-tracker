@@ -178,3 +178,61 @@ def test_premium_band_none_when_no_valid_observations() -> None:
     band = compute_premium_band("X", points)
     assert band.p25 is None
     assert band.p75 is None
+
+
+from app.reports.analytics import SpotTracking, compute_spot_tracking  # noqa: E402
+from app.reports.loader import SpotPoint  # noqa: E402
+
+
+def test_spot_tracking_high_correlation_when_dealer_mirrors_spot() -> None:
+    base = datetime(2026, 5, 5, 0, 0, tzinfo=UTC)
+    bars: list[BarPoint] = []
+    spots: list[SpotPoint] = []
+    for i in range(50):
+        ts = base + timedelta(minutes=20 * i)
+        spot = 950.0 + i * 0.5
+        bars.append(BarPoint(
+            fetched_at=ts, dealer="X", size_g=5.0, status="ok",
+            price_dkk=5.0 * spot * 1.07,  # 7% premium, perfect tracking
+            spot_dkk_per_g=spot,
+        ))
+        spots.append(SpotPoint(
+            fetched_at=ts, gold_dkk_per_g=spot, silver_dkk_per_g=None,
+        ))
+    st = compute_spot_tracking("X", bars, spots)
+    assert isinstance(st, SpotTracking)
+    assert st.correlation is not None
+    assert st.correlation > 0.99
+    # Sensitivity should be ~1.0 (dealer price moves 1% per 1% spot)
+    assert st.sensitivity is not None
+    assert 0.95 <= st.sensitivity <= 1.05
+
+
+def test_spot_tracking_low_correlation_when_dealer_is_decoupled() -> None:
+    import random
+    random.seed(7)
+    base = datetime(2026, 5, 5, 0, 0, tzinfo=UTC)
+    bars: list[BarPoint] = []
+    spots: list[SpotPoint] = []
+    for i in range(50):
+        ts = base + timedelta(minutes=20 * i)
+        spot = 950.0 + i * 0.5  # spot drifts up
+        # Dealer price walks randomly, ignores spot
+        random_price = 5050.0 + random.uniform(-50, 50)
+        bars.append(BarPoint(
+            fetched_at=ts, dealer="X", size_g=5.0, status="ok",
+            price_dkk=random_price, spot_dkk_per_g=spot,
+        ))
+        spots.append(SpotPoint(
+            fetched_at=ts, gold_dkk_per_g=spot, silver_dkk_per_g=None,
+        ))
+    st = compute_spot_tracking("X", bars, spots)
+    assert st.correlation is not None
+    assert abs(st.correlation) < 0.5
+
+
+def test_spot_tracking_returns_none_with_insufficient_data() -> None:
+    st = compute_spot_tracking("Empty", [], [])
+    assert st.correlation is None
+    assert st.lag_hours is None
+    assert st.sensitivity is None
