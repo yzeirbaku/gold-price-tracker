@@ -100,7 +100,7 @@
   {% if spot.fx_note %}<div class="muted">{{ spot.fx_note }}</div>{% endif %}
 </details>
 
-<details id="section-fingerprints" open>
+<details id="section-fingerprints">
   <summary>Dealer behavior fingerprints</summary>
   <div class="fp-grid">
   {% for fp in fingerprints %}
@@ -203,7 +203,7 @@
   {% endif %}
 </details>
 
-<details id="section-notable" open>
+<details id="section-notable">
   <summary>Notable this period</summary>
   {% if notable %}
   <ul class="bullets">
@@ -215,7 +215,7 @@
 </details>
 
 {% if time_of_month %}
-<details id="section-time-of-month" open>
+<details id="section-time-of-month">
   <summary>Time-of-month drift</summary>
   <table>
     <thead>

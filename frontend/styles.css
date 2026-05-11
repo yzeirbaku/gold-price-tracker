@@ -92,33 +92,55 @@ header h1 {
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 
-/* Hamburger menu — anchored next to the title, dropdown appears below. */
-.menu-wrapper { position: relative; flex: 0 0 auto; }
+/* Hamburger menu — slide-in drawer from the left, with a backdrop overlay. */
+.menu-wrapper { flex: 0 0 auto; }
 .menu-dropdown {
-  position: absolute;
-  top: calc(100% + 0.4rem);
-  left: 0;
-  min-width: 180px;
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  width: min(260px, 80vw);
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  padding: 0.35rem;
-  z-index: 20;
+  border-right: 1px solid var(--border);
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.35);
+  padding: 1.25rem 0.85rem;
+  z-index: 200;
+  display: flex; flex-direction: column;
+  gap: 0.35rem;
+  transform: translateX(-100%);
+  transition: transform 0.22s ease;
+  pointer-events: none;
 }
-.menu-dropdown[hidden] { display: none; }
+.menu-dropdown.is-open {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+.menu-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 150;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+}
+.menu-backdrop.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
 .menu-item {
   display: block; width: 100%;
   background: transparent; border: none;
-  padding: 0.55rem 0.75rem;
+  padding: 0.65rem 0.85rem;
   color: var(--fg-soft);
-  font: inherit; font-size: 0.9rem;
+  font: inherit; font-size: 0.95rem;
   text-align: left; cursor: pointer;
-  border-radius: 6px;
+  border-radius: 8px;
   transition: background 100ms ease, color 100ms ease;
 }
 .menu-item:hover { background: var(--hover-bg); color: var(--fg); }
 .menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Title is a click-link to the Prices view. */
+#header-title-link { cursor: pointer; }
+#header-title-link:hover { color: var(--accent); }
 #menu-btn { font-size: 1.25rem; }
 .icon-btn {
   background: transparent; border: 1px solid transparent;
@@ -481,17 +503,33 @@ tr.history-row > td {
 
 .archive-filters {
   display: flex; gap: 0.75rem; flex-wrap: wrap;
-  margin: 0.25rem 0 0.75rem;
+  margin: 0.5rem 0 1rem;
 }
 .archive-filters label {
-  display: flex; gap: 0.4rem; align-items: center;
-  font-size: 0.85rem; color: var(--muted);
+  display: flex; flex-direction: column; gap: 0.2rem;
+  font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted, #8a8a8a);
 }
 .archive-filters select {
-  background: var(--surface); color: var(--fg);
-  border: 1px solid var(--border); border-radius: 6px;
-  padding: 0.25rem 0.4rem;
+  appearance: none; -webkit-appearance: none;
+  background: var(--surface-2, var(--surface));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 2rem 0.45rem 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 16px) center, calc(100% - 11px) center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  min-width: 9rem;
 }
+.archive-filters select:hover { border-color: var(--accent); }
+.archive-filters select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* When an archive section is a <details>, the <summary> must sit on one
    line. The <h2> inside gets normalized so the disclosure triangle stays

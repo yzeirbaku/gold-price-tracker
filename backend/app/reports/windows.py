@@ -87,7 +87,7 @@ def rolling_last_n_days(now: datetime, n: int) -> Window:
 
 
 def _format_label(prefix: str, start_dt: datetime, end_dt: datetime) -> str:
-    """Render '{prefix} Report (DD-MM-YYYY HH:MM -- DD-MM-YYYY HH:MM)' in CPH."""
+    """Render '{prefix} Report (DD-MM-YYYY HH:MM <--> DD-MM-YYYY HH:MM)' in CPH."""
     s = start_dt.astimezone(CPH).strftime("%d-%m-%Y %H:%M")
     e = end_dt.astimezone(CPH).strftime("%d-%m-%Y %H:%M")
-    return f"{prefix} Report ({s} -- {e})"
+    return f"{prefix} Report ({s} <--> {e})"

@@ -648,24 +648,37 @@ document.querySelectorAll('#listings th.sortable').forEach(th => {
   });
 });
 
-// Hamburger menu — opens dropdown with Reports / Settings.
+// Hamburger menu — slide-in drawer with backdrop.
+function isMenuOpen() {
+  return $('#menu-dropdown').classList.contains('is-open');
+}
 function setMenuOpen(open) {
-  const dropdown = $('#menu-dropdown');
-  const btn = $('#menu-btn');
-  dropdown.hidden = !open;
-  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  $('#menu-dropdown').classList.toggle('is-open', open);
+  $('#menu-backdrop').classList.toggle('is-open', open);
+  $('#menu-btn').setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 $('#menu-btn').addEventListener('click', (e) => {
   e.stopPropagation();
-  setMenuOpen($('#menu-dropdown').hidden);
+  setMenuOpen(!isMenuOpen());
 });
-document.addEventListener('click', (e) => {
-  if (!$('#menu-dropdown').hidden && !e.target.closest('.menu-wrapper')) {
-    setMenuOpen(false);
-  }
-});
+$('#menu-backdrop').addEventListener('click', () => setMenuOpen(false));
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$('#menu-dropdown').hidden) setMenuOpen(false);
+  if (e.key === 'Escape' && isMenuOpen()) setMenuOpen(false);
+});
+
+// Click the page title to go back to Prices with bars tab + 10g size.
+function goToPricesHome() {
+  setTab('bars');
+  navigate('/prices');
+  // Snap the size selector back to 10 g and refetch.
+  fetchPrices(10);
+}
+$('#header-title-link').addEventListener('click', goToPricesHome);
+$('#header-title-link').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    goToPricesHome();
+  }
 });
 $('#menu-dropdown').addEventListener('click', (e) => {
   const action = e.target.closest('.menu-item')?.dataset.action;

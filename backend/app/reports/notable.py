@@ -65,7 +65,8 @@ def detect_notable(
                 arrow = "\u2193" if delta < 0 else "\u2191"
                 day = t_curr.astimezone(CPH).strftime("%a %b %d")
                 text = (
-                    f"{dealer} {prod} premium {arrow}{abs(delta):.1f}pp on {day} "
+                    f"{dealer} {prod} premium {arrow}{abs(delta):.1f} "
+                    f"percentage points on {day} "
                     f"({p_prev:.1f}% \u2192 {p_curr:.1f}%)"
                 )
                 bullets.append(NotableBullet(text=text, magnitude=abs(delta)))
