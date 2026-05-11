@@ -5,7 +5,9 @@ from app.reports.renderer import render_report
 
 SAMPLE_CONTEXT = {
     "kind": "weekly",
-    "label": "Week of May 4 \u2013 May 10, 2026",
+    "label": "Weekly Report (04-05-2026 00:00 \u2192 11-05-2026 00:00)",
+    "kind_label": "Weekly Report",
+    "period_text": "04-05-2026 00:00 \u2192 11-05-2026 00:00",
     "period_start": "2026-05-04",
     "period_end": "2026-05-10",
     "generated_at": "2026-05-11T00:30:14.221Z",

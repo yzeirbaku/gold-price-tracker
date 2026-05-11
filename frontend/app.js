@@ -686,7 +686,16 @@ $('#menu-dropdown').addEventListener('click', (e) => {
   setMenuOpen(false);
   if (action === 'settings') openSettings();
   else if (action === 'reports') openReportsView();
-  else if (action === 'prices') showPricesView();
+  else if (action === 'prices') {
+    const wasOnReports = !$('#reports-view').hidden;
+    showPricesView();
+    // Refresh data when arriving from the Reports view so the bars
+    // (or coins) the user sees match the current market.
+    if (wasOnReports) {
+      if (currentTab === 'coins') fetchCoins();
+      else if (lastSize != null) fetchPrices(lastSize);
+    }
+  }
 });
 
 // Settings dialog — API key + theme. Backend URL from config.js.

@@ -19,7 +19,7 @@ def test_previous_calendar_week_from_wednesday() -> None:
     assert w.period_end == date(2026, 5, 10)    # Sun
     assert w.start_dt == datetime(2026, 5, 4, 0, 0, tzinfo=CPH)
     assert w.end_dt == datetime(2026, 5, 11, 0, 0, tzinfo=CPH)
-    assert w.label == "Weekly Report (04-05-2026 00:00 <--> 11-05-2026 00:00)"
+    assert w.label == "Weekly Report (04-05-2026 00:00 → 11-05-2026 00:00)"
     assert w.kind == "weekly"
 
 
@@ -40,7 +40,7 @@ def test_previous_calendar_month_from_mid_month() -> None:
     assert w.period_end == date(2026, 4, 30)
     assert w.start_dt == datetime(2026, 4, 1, 0, 0, tzinfo=CPH)
     assert w.end_dt == datetime(2026, 5, 1, 0, 0, tzinfo=CPH)
-    assert w.label == "Monthly Report (01-04-2026 00:00 <--> 01-05-2026 00:00)"
+    assert w.label == "Monthly Report (01-04-2026 00:00 → 01-05-2026 00:00)"
     assert w.kind == "monthly"
 
 
@@ -57,7 +57,7 @@ def test_previous_calendar_month_january_rolls_year() -> None:
     w = previous_calendar_month(now)
     assert w.period_start == date(2025, 12, 1)
     assert w.period_end == date(2025, 12, 31)
-    assert w.label == "Monthly Report (01-12-2025 00:00 <--> 01-01-2026 00:00)"
+    assert w.label == "Monthly Report (01-12-2025 00:00 → 01-01-2026 00:00)"
 
 
 def test_rolling_last_7_days() -> None:

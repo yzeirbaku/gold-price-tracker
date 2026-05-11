@@ -22,7 +22,9 @@ class Window:
     period_end: date    # inclusive (e.g. Sun for weekly, last-of-month for monthly)
     start_dt: datetime  # tz-aware, inclusive lower bound for snapshot queries
     end_dt: datetime    # tz-aware, exclusive upper bound for snapshot queries
-    label: str          # human-facing label for the report header
+    label: str          # full one-line label (kind + period text)
+    kind_label: str     # just the kind, e.g. "Weekly Report"
+    period_text: str    # just the range, e.g. "04-05-2026 18:04 \u2192 11-05-2026 18:04"
 
 
 def previous_calendar_week(now: datetime) -> Window:
@@ -40,7 +42,7 @@ def previous_calendar_week(now: datetime) -> Window:
         period_end=last_sunday.date(),
         start_dt=last_monday,
         end_dt=this_week_monday,
-        label=_format_label("Weekly", last_monday, this_week_monday),
+        **_label_fields("Weekly", last_monday, this_week_monday),
     )
 
 
@@ -61,7 +63,7 @@ def previous_calendar_month(now: datetime) -> Window:
         period_end=prev_end_date,
         start_dt=prev_start,
         end_dt=first_of_this_month,
-        label=_format_label("Monthly", prev_start, first_of_this_month),
+        **_label_fields("Monthly", prev_start, first_of_this_month),
     )
 
 
@@ -81,13 +83,26 @@ def rolling_last_n_days(now: datetime, n: int) -> Window:
         period_end=now_cph.date(),
         start_dt=start_dt,
         end_dt=now_cph,
-        label=_format_label("Weekly" if kind == "weekly" else "Monthly",
-                             start_dt, now_cph),
+        **_label_fields("Weekly" if kind == "weekly" else "Monthly",
+                         start_dt, now_cph),
     )
 
 
-def _format_label(prefix: str, start_dt: datetime, end_dt: datetime) -> str:
-    """Render '{prefix} Report (DD-MM-YYYY HH:MM <--> DD-MM-YYYY HH:MM)' in CPH."""
+def _label_fields(
+    prefix: str, start_dt: datetime, end_dt: datetime,
+) -> dict[str, str]:
+    """Build the three label fields (kind_label, period_text, label).
+
+    `period_text` uses a Unicode right-arrow (\u2192) instead of ASCII '<-->'
+    so the report header renders elegantly. `label` is the full one-line
+    form kept for backward-compat (filenames, archive list rows).
+    """
     s = start_dt.astimezone(CPH).strftime("%d-%m-%Y %H:%M")
     e = end_dt.astimezone(CPH).strftime("%d-%m-%Y %H:%M")
-    return f"{prefix} Report ({s} <--> {e})"
+    kind_label = f"{prefix} Report"
+    period_text = f"{s} \u2192 {e}"
+    return {
+        "kind_label": kind_label,
+        "period_text": period_text,
+        "label": f"{kind_label} ({period_text})",
+    }

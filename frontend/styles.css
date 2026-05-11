@@ -516,15 +516,15 @@ tr.history-row > td {
 
 /* Custom dropdown — replaces native <select> so the popup matches the rest
    of the UI (rounded, honey-accent hover) instead of OS-blue rectangles. */
-.dd { position: relative; display: inline-block; min-width: 9rem; }
+.dd { position: relative; display: inline-block; min-width: 7rem; }
 .dd-trigger {
   appearance: none; -webkit-appearance: none;
   background: var(--surface-2, var(--surface));
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.45rem 2rem 0.45rem 0.75rem;
-  font-size: 0.9rem; font-weight: 500;
+  border-radius: 7px;
+  padding: 0.35rem 1.7rem 0.35rem 0.65rem;
+  font-size: 0.85rem; font-weight: 500;
   cursor: pointer;
   width: 100%;
   text-align: left;
@@ -532,8 +532,8 @@ tr.history-row > td {
   transition: border-color 120ms ease, background 120ms ease;
   background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
                     linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position: calc(100% - 16px) center, calc(100% - 11px) center;
-  background-size: 5px 5px, 5px 5px;
+  background-position: calc(100% - 14px) center, calc(100% - 10px) center;
+  background-size: 4px 4px, 4px 4px;
   background-repeat: no-repeat;
 }
 .dd-trigger:hover, .dd.is-open .dd-trigger { border-color: var(--accent); }
@@ -544,25 +544,26 @@ tr.history-row > td {
   min-width: 100%;
   background: var(--surface-2, var(--surface));
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 7px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
-  list-style: none; padding: 0.3rem; margin: 0;
+  list-style: none; padding: 0.25rem; margin: 0;
   z-index: 50;
-  max-height: 16rem; overflow-y: auto;
+  max-height: 14rem; overflow-y: auto;
 }
 .dd-list[hidden] { display: none; }
 .dd-list li {
-  padding: 0.45rem 0.75rem;
-  border-radius: 6px;
+  padding: 0.35rem 0.65rem;
+  border-radius: 5px;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--fg);
-  transition: background 80ms ease, color 80ms ease;
+  transition: background 80ms ease;
 }
-.dd-list li:hover, .dd-list li.selected {
-  background: linear-gradient(180deg, var(--btn-active-top) 0%, var(--btn-active-bottom) 100%);
-  color: #1a1300;
-}
+/* Subtle honey tint on hover and current selection — much lighter than the
+   solid bar-size button gradient so the dropdown feels softer. */
+.dd-list li:hover { background: rgba(232, 185, 74, 0.18); }
+.dd-list li.selected { background: rgba(232, 185, 74, 0.28); }
+.dd-list li.selected:hover { background: rgba(232, 185, 74, 0.34); }
 
 /* When an archive section is a <details>, the <summary> must sit on one
    line. The <h2> inside gets normalized so the disclosure triangle stays

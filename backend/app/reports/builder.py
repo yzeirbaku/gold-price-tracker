@@ -41,6 +41,8 @@ async def build_report(conn: asyncpg.Connection | None, window: Window) -> str:
     context: dict[str, Any] = {
         "kind": window.kind,
         "label": window.label,
+        "kind_label": window.kind_label,
+        "period_text": window.period_text,
         "period_start": window.period_start.isoformat(),
         "period_end": window.period_end.isoformat(),
         "generated_at": datetime.now(tz=CPH).strftime("%Y-%m-%d %H:%M:%S"),
