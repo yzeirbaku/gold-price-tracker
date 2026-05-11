@@ -1,0 +1,101 @@
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from app.reports.analytics import (
+    CadenceStats,
+    WeekendActivity,
+    compute_cadence,
+    compute_weekend_activity,
+)
+from app.reports.loader import BarPoint
+
+CPH = ZoneInfo("Europe/Copenhagen")
+UTC = timezone.utc
+
+
+def _bar(t: datetime, dealer: str, size: float, price: float) -> BarPoint:
+    return BarPoint(
+        fetched_at=t, dealer=dealer, size_g=size,
+        status="ok", price_dkk=price, spot_dkk_per_g=950.0,
+    )
+
+
+def test_cadence_counts_consecutive_changes_per_product() -> None:
+    t0 = datetime(2026, 5, 5, 10, 0, tzinfo=UTC)
+    points = [
+        _bar(t0, "Tavex", 5.0, 5000.0),
+        _bar(t0 + timedelta(minutes=20), "Tavex", 5.0, 5000.0),  # no change
+        _bar(t0 + timedelta(minutes=40), "Tavex", 5.0, 5050.0),  # change #1
+        _bar(t0 + timedelta(hours=2), "Tavex", 5.0, 5050.0),     # no change
+        _bar(t0 + timedelta(hours=4), "Tavex", 5.0, 5025.0),     # change #2
+        # Different size \u2014 independent series
+        _bar(t0, "Tavex", 10.0, 10000.0),
+        _bar(t0 + timedelta(minutes=20), "Tavex", 10.0, 10100.0),  # change #3
+    ]
+    stats = compute_cadence("Tavex", points, weeks_in_period=1.0)
+    assert isinstance(stats, CadenceStats)
+    assert stats.total_changes == 3
+    assert stats.changes_per_week == 3.0
+    assert stats.latest_change is not None
+    assert stats.latest_change == t0 + timedelta(hours=4)
+    assert stats.median_interval_hours is not None
+
+
+def test_cadence_zero_when_no_changes() -> None:
+    t0 = datetime(2026, 5, 5, 10, 0, tzinfo=UTC)
+    points = [
+        _bar(t0, "Stickdealer", 5.0, 5000.0),
+        _bar(t0 + timedelta(hours=12), "Stickdealer", 5.0, 5000.0),
+        _bar(t0 + timedelta(hours=24), "Stickdealer", 5.0, 5000.0),
+    ]
+    stats = compute_cadence("Stickdealer", points, weeks_in_period=1.0)
+    assert stats.total_changes == 0
+    assert stats.changes_per_week == 0.0
+    assert stats.latest_change is None
+    assert stats.median_interval_hours is None
+
+
+def test_cadence_normalizes_per_week() -> None:
+    """4 changes across 4 weeks \u2192 1.0 changes/week, not 4.0."""
+    t0 = datetime(2026, 5, 1, 10, 0, tzinfo=UTC)
+    points = [
+        _bar(t0, "X", 5.0, 5000.0),
+        _bar(t0 + timedelta(days=7), "X", 5.0, 5050.0),
+        _bar(t0 + timedelta(days=14), "X", 5.0, 5100.0),
+        _bar(t0 + timedelta(days=21), "X", 5.0, 5150.0),
+        _bar(t0 + timedelta(days=28), "X", 5.0, 5200.0),
+    ]
+    stats = compute_cadence("X", points, weeks_in_period=4.0)
+    assert stats.total_changes == 4
+    assert stats.changes_per_week == 1.0
+
+
+def test_weekend_activity_detects_saturday_change() -> None:
+    # Sat May 9, 2026 in Europe/Copenhagen
+    sat = datetime(2026, 5, 9, 14, 0, tzinfo=CPH)
+    fri = datetime(2026, 5, 8, 22, 0, tzinfo=CPH)
+    sun = datetime(2026, 5, 10, 11, 0, tzinfo=CPH)
+    mon = datetime(2026, 5, 11, 9, 0, tzinfo=CPH)
+    points = [
+        _bar(fri.astimezone(UTC), "Tavex", 5.0, 5000.0),
+        _bar(sat.astimezone(UTC), "Tavex", 5.0, 5025.0),   # weekend change
+        _bar(sun.astimezone(UTC), "Tavex", 5.0, 5025.0),   # same price, no change
+        _bar(mon.astimezone(UTC), "Tavex", 5.0, 5050.0),
+    ]
+    wa = compute_weekend_activity("Tavex", points)
+    assert isinstance(wa, WeekendActivity)
+    assert wa.change_count == 1
+    assert len(wa.changes) == 1
+    assert wa.changes[0].at.astimezone(CPH).weekday() == 5  # Sat
+
+
+def test_weekend_activity_empty_when_only_weekday_changes() -> None:
+    mon = datetime(2026, 5, 11, 9, 0, tzinfo=CPH)
+    tue = datetime(2026, 5, 12, 9, 0, tzinfo=CPH)
+    points = [
+        _bar(mon.astimezone(UTC), "Tavex", 5.0, 5000.0),
+        _bar(tue.astimezone(UTC), "Tavex", 5.0, 5050.0),
+    ]
+    wa = compute_weekend_activity("Tavex", points)
+    assert wa.change_count == 0
+    assert wa.changes == []
