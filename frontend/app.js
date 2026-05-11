@@ -807,27 +807,75 @@ function populateArchiveFilters() {
   const monthlyYears = new Set(
     reportsArchive.monthly.map((r) => Number(r.period_start.split('-')[0])),
   );
-  fillSelect('#reports-weekly-year', [...weeklyYears].sort((a, b) => b - a));
-  fillSelect('#reports-weekly-month', [...weeklyMonths].sort((a, b) => a - b),
-              (m) => MONTH_NAMES[m - 1]);
-  fillSelect('#reports-monthly-year', [...monthlyYears].sort((a, b) => b - a));
+  fillDropdown('#reports-weekly-year', [...weeklyYears].sort((a, b) => b - a));
+  fillDropdown('#reports-weekly-month', [...weeklyMonths].sort((a, b) => a - b),
+                (m) => MONTH_NAMES[m - 1]);
+  fillDropdown('#reports-monthly-year', [...monthlyYears].sort((a, b) => b - a));
 }
 
 const MONTH_NAMES = ['January','February','March','April','May','June',
                      'July','August','September','October','November','December'];
 
-function fillSelect(selector, values, labelFn = (v) => v) {
-  const el = $(selector);
-  const current = el.value;  // preserve user's selection across refreshes
-  el.innerHTML = '<option value="">All</option>'
-    + values.map((v) => `<option value="${v}">${labelFn(v)}</option>`).join('');
-  if (values.map(String).includes(current)) el.value = current;
+function fillDropdown(selector, values, labelFn = (v) => String(v)) {
+  const root = $(selector);
+  const list = root.querySelector('.dd-list');
+  const current = root.dataset.value || '';  // preserve selection across refreshes
+  list.innerHTML = '<li data-value="">All</li>'
+    + values.map((v) => `<li data-value="${v}">${labelFn(v)}</li>`).join('');
+  const stillThere = values.map(String).includes(current);
+  setDropdownValue(root, stillThere ? current : '',
+                    stillThere ? labelFn(Number(current) || current) : 'All');
 }
 
+function setDropdownValue(root, value, label) {
+  root.dataset.value = value;
+  root.querySelector('.dd-trigger').textContent = label;
+  root.querySelectorAll('.dd-list li').forEach((li) => {
+    li.classList.toggle('selected', li.dataset.value === value);
+  });
+}
+
+function closeAllDropdowns(except) {
+  document.querySelectorAll('.dd.is-open').forEach((d) => {
+    if (d === except) return;
+    d.classList.remove('is-open');
+    d.querySelector('.dd-list').hidden = true;
+  });
+}
+
+document.addEventListener('click', (e) => {
+  // Trigger toggles its own dropdown; items inside the list close on selection.
+  const trigger = e.target.closest('.dd-trigger');
+  if (trigger) {
+    e.stopPropagation();
+    const root = trigger.closest('.dd');
+    const list = root.querySelector('.dd-list');
+    const willOpen = list.hidden;
+    closeAllDropdowns(root);
+    list.hidden = !willOpen;
+    root.classList.toggle('is-open', willOpen);
+    return;
+  }
+  const item = e.target.closest('.dd-list li');
+  if (item) {
+    const root = item.closest('.dd');
+    setDropdownValue(root, item.dataset.value, item.textContent);
+    root.querySelector('.dd-list').hidden = true;
+    root.classList.remove('is-open');
+    root.dispatchEvent(new CustomEvent('dd:change', { bubbles: true }));
+    return;
+  }
+  // Click outside any dropdown closes everything.
+  if (!e.target.closest('.dd')) closeAllDropdowns();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeAllDropdowns();
+});
+
 function renderArchives() {
-  const wYear = $('#reports-weekly-year').value;
-  const wMonth = $('#reports-weekly-month').value;
-  const mYear = $('#reports-monthly-year').value;
+  const wYear = $('#reports-weekly-year').dataset.value || '';
+  const wMonth = $('#reports-weekly-month').dataset.value || '';
+  const mYear = $('#reports-monthly-year').dataset.value || '';
 
   const weekly = reportsArchive.weekly.filter((r) => {
     if (!wYear && !wMonth) return true;
@@ -848,12 +896,13 @@ function renderArchives() {
   $('#reports-monthly-list').innerHTML = renderArchiveItems(monthly, 'monthly');
 }
 
-['#reports-weekly-year', '#reports-weekly-month', '#reports-monthly-year']
-  .forEach((sel) => {
-    document.addEventListener('change', (e) => {
-      if (e.target.matches(sel)) renderArchives();
-    });
-  });
+document.addEventListener('dd:change', (e) => {
+  if (e.target.matches(
+    '#reports-weekly-year, #reports-weekly-month, #reports-monthly-year',
+  )) {
+    renderArchives();
+  }
+});
 
 function renderArchiveItems(rows, kind) {
   if (!rows.length) {

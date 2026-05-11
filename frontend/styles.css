@@ -513,26 +513,56 @@ tr.history-row > td {
   font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
   color: var(--muted, #8a8a8a);
 }
-.archive-filters select {
+
+/* Custom dropdown — replaces native <select> so the popup matches the rest
+   of the UI (rounded, honey-accent hover) instead of OS-blue rectangles. */
+.dd { position: relative; display: inline-block; min-width: 9rem; }
+.dd-trigger {
   appearance: none; -webkit-appearance: none;
   background: var(--surface-2, var(--surface));
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.45rem 2rem 0.45rem 0.75rem;
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-size: 0.9rem; font-weight: 500;
   cursor: pointer;
+  width: 100%;
+  text-align: left;
+  position: relative;
   transition: border-color 120ms ease, background 120ms ease;
   background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
                     linear-gradient(135deg, currentColor 50%, transparent 50%);
   background-position: calc(100% - 16px) center, calc(100% - 11px) center;
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
-  min-width: 9rem;
 }
-.archive-filters select:hover { border-color: var(--accent); }
-.archive-filters select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dd-trigger:hover, .dd.is-open .dd-trigger { border-color: var(--accent); }
+.dd-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dd-list {
+  position: absolute;
+  top: calc(100% + 4px); left: 0;
+  min-width: 100%;
+  background: var(--surface-2, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  list-style: none; padding: 0.3rem; margin: 0;
+  z-index: 50;
+  max-height: 16rem; overflow-y: auto;
+}
+.dd-list[hidden] { display: none; }
+.dd-list li {
+  padding: 0.45rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--fg);
+  transition: background 80ms ease, color 80ms ease;
+}
+.dd-list li:hover, .dd-list li.selected {
+  background: linear-gradient(180deg, var(--btn-active-top) 0%, var(--btn-active-bottom) 100%);
+  color: #1a1300;
+}
 
 /* When an archive section is a <details>, the <summary> must sit on one
    line. The <h2> inside gets normalized so the disclosure triangle stays
@@ -540,17 +570,22 @@ tr.history-row > td {
 #reports-weekly > summary,
 #reports-monthly > summary {
   cursor: pointer; list-style: none;
+  display: flex; align-items: center; gap: 0.55rem;
 }
 #reports-weekly > summary::-webkit-details-marker,
 #reports-monthly > summary::-webkit-details-marker { display: none; }
 #reports-weekly > summary > h2,
 #reports-monthly > summary > h2 {
-  display: inline; font-size: 1.1rem; margin: 0;
+  display: inline; font-size: 1.1rem; margin: 0; line-height: 1;
 }
 #reports-weekly > summary::before,
 #reports-monthly > summary::before {
-  content: "\25B6"; display: inline-block; margin-right: 0.5rem;
-  font-size: 0.7em; color: var(--muted); transition: transform 0.15s;
+  content: "\25B6"; display: inline-block;
+  font-size: 0.7em; color: var(--muted);
+  transition: transform 0.15s;
+  /* Optical centering: the unicode triangle's bounding box puts the glyph
+     near the baseline. Nudge it up so it lines up with h2 text middle. */
+  position: relative; top: -1px;
 }
 #reports-weekly[open] > summary::before,
 #reports-monthly[open] > summary::before { transform: rotate(90deg); }

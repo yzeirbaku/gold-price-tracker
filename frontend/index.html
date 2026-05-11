@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=44" />
+  <link rel="stylesheet" href="styles.css?v=45" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
@@ -90,10 +90,16 @@
       <summary><h2>Weekly archive</h2></summary>
       <div class="archive-filters">
         <label>Year
-          <select id="reports-weekly-year"><option value="">All</option></select>
+          <div id="reports-weekly-year" class="dd" data-value="">
+            <button class="dd-trigger" type="button">All</button>
+            <ul class="dd-list" hidden></ul>
+          </div>
         </label>
         <label>Month
-          <select id="reports-weekly-month"><option value="">All</option></select>
+          <div id="reports-weekly-month" class="dd" data-value="">
+            <button class="dd-trigger" type="button">All</button>
+            <ul class="dd-list" hidden></ul>
+          </div>
         </label>
       </div>
       <div id="reports-weekly-list" class="archive-list"></div>
@@ -103,7 +109,10 @@
       <summary><h2>Monthly archive</h2></summary>
       <div class="archive-filters">
         <label>Year
-          <select id="reports-monthly-year"><option value="">All</option></select>
+          <div id="reports-monthly-year" class="dd" data-value="">
+            <button class="dd-trigger" type="button">All</button>
+            <ul class="dd-list" hidden></ul>
+          </div>
         </label>
       </div>
       <div id="reports-monthly-list" class="archive-list"></div>
@@ -159,7 +168,7 @@
 
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=44"></script>
-  <script src="app.js?v=44"></script>
+  <script src="config.js?v=45"></script>
+  <script src="app.js?v=45"></script>
 </body>
 </html>
