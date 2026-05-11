@@ -33,16 +33,23 @@ class TimeOfMonthRow:
     delta_pp: float                      # last week \u2212 first week
 
 
+_SPOT_GAP_TOLERANCE_SECONDS = 3600  # 1 hour — beyond this, spot context is misleading
+
+
 def _spot_at_or_nearest(
     spot_by_ts: dict[datetime, float], target: datetime,
 ) -> float | None:
     """Return the spot value at `target` if present, else the closest
-    timestamp's value (since snapshots are aligned, exact match is the norm)."""
+    timestamp's value — but only if it's within `_SPOT_GAP_TOLERANCE_SECONDS`.
+    Snapshots are nominally 20-min-aligned, so exact match is the norm; the
+    gap bound guards against missed-cron stretches (sometimes hours)."""
     if not spot_by_ts:
         return None
     if target in spot_by_ts:
         return spot_by_ts[target]
     nearest = min(spot_by_ts.keys(), key=lambda t: abs((t - target).total_seconds()))
+    if abs((nearest - target).total_seconds()) > _SPOT_GAP_TOLERANCE_SECONDS:
+        return None
     return spot_by_ts[nearest]
 
 

@@ -66,6 +66,7 @@ app.add_middleware(
     allow_origins=[_origin],
     allow_methods=["GET", "POST"],
     allow_headers=["X-API-Key", "Content-Type"],
+    expose_headers=["Content-Disposition"],
 )
 
 ALLOWED_SIZES = {2.5, 5.0, 10.0, 20.0}
@@ -434,11 +435,8 @@ async def reports_fetch(
         result = await fetch_report_html(conn, report_id)
     if result is None:
         raise HTTPException(status_code=404, detail="report not found")
-    html, kind, period_start, _period_end = result
-    if kind == "weekly":
-        filename = f"weekly-{period_start.isoformat()}.html"
-    else:
-        filename = f"monthly-{period_start.strftime('%Y-%m')}.html"
+    html, kind, period_start, period_end = result
+    filename = f"{kind}-report_{period_start.isoformat()}_to_{period_end.isoformat()}.html"
     return Response(
         content=html,
         media_type="text/html; charset=utf-8",
@@ -460,10 +458,10 @@ async def reports_generate(
     window = rolling_last_n_days(now, n)
     async with pool.acquire() as conn:
         html = await build_report(conn, window)
-    # Include H:M in the filename so two on-demand downloads on the same day
-    # don't collide in the user's downloads folder.
-    suffix = now.strftime("%Y-%m-%d_%H-%M")
-    filename = f"ondemand-{range}-{suffix}.html"
+    filename = (
+        f"{window.kind}-report_{window.period_start.isoformat()}"
+        f"_to_{window.period_end.isoformat()}.html"
+    )
     return Response(
         content=html,
         media_type="text/html; charset=utf-8",

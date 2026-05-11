@@ -335,6 +335,8 @@ def correlation_label(corr: float | None) -> str | None:
 def sensitivity_label(sens: float | None) -> str | None:
     if sens is None:
         return None
+    if sens < 0:
+        return "inverted"
     if 0.95 <= sens <= 1.05:
         return "1:1"
     if sens < 0.95:

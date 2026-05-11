@@ -62,7 +62,7 @@ def test_fetch_report_returns_html_attachment() -> None:
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/html")
     assert "attachment" in r.headers["content-disposition"]
-    assert "weekly-2026-05-04.html" in r.headers["content-disposition"]
+    assert "weekly-report_2026-05-04_to_2026-05-10.html" in r.headers["content-disposition"]
     assert r.text == "<html>body</html>"
 
 

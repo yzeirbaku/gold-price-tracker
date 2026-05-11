@@ -20,7 +20,7 @@
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-           line-height: 1.5; font-size: 15px; padding: 1rem; max-width: 920px;
+           line-height: 1.5; font-size: 15px; padding: 1rem; max-width: 1280px;
            margin: 0 auto; }
     h1 { font-size: 1.5rem; margin: 0; color: var(--accent); letter-spacing: 0.005em; }
     .period {
@@ -120,6 +120,10 @@
 
 <details id="section-fingerprints">
   <summary>Dealer behavior fingerprints</summary>
+  <div class="muted" style="margin: 0.5rem 0 0.75rem;">
+    <strong>Sensitivity</strong> = dealer's % price move per 1% spot move
+    (1.0× = matches spot, &lt;1 = muted, &gt;1 = amplified).
+  </div>
   {% for fp in fingerprints %}
   <div class="fp-dealer">
     <h3>{{ fp.dealer }}</h3>
@@ -155,16 +159,9 @@
       <div class="fp-line"><span class="label">Weekend:</span>
         <span>{{ cat.weekend.summary }}</span></div>
       <div class="fp-line"><span class="label">Spot tracking:</span>
-        <span>
-          {% if cat.spot_tracking.correlation is not none %}
-            Correlation: <strong>{{ cat.spot_tracking.correlation }}</strong>
-            {% if cat.spot_tracking.correlation_label %}({{ cat.spot_tracking.correlation_label }}){% endif %}
-            {% if cat.spot_tracking.sensitivity is not none %}
-              · Sensitivity: <strong>{{ cat.spot_tracking.sensitivity }}×</strong>
-              {% if cat.spot_tracking.sensitivity_label %}({{ cat.spot_tracking.sensitivity_label }}){% endif %}
-            {% endif %}
-          {% else %}insufficient data{% endif %}
-        </span>
+        <span>{% if cat.spot_tracking.correlation is not none -%}
+          Correlation: <strong>{{ cat.spot_tracking.correlation }}</strong>{% if cat.spot_tracking.correlation_label %} ({{ cat.spot_tracking.correlation_label }}){% endif %}{% if cat.spot_tracking.sensitivity is not none %} · Sensitivity: <strong>{{ cat.spot_tracking.sensitivity }}×</strong>{% if cat.spot_tracking.sensitivity_label %} ({{ cat.spot_tracking.sensitivity_label }}){% endif %}{% endif %}
+        {%- else %}insufficient data{% endif %}</span>
       </div>
       {% if cat.premium_band.p25 is not none %}
       <div class="fp-line"><span class="label">Premium band:</span>
