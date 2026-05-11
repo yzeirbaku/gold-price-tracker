@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=35" />
+  <link rel="stylesheet" href="styles.css?v=36" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
@@ -16,6 +16,7 @@
     <div class="menu-wrapper">
       <button id="menu-btn" class="icon-btn" aria-label="Menu" aria-haspopup="true" aria-expanded="false" type="button">☰</button>
       <div id="menu-dropdown" class="menu-dropdown" hidden role="menu">
+        <button class="menu-item" data-action="prices" role="menuitem" type="button">Prices</button>
         <button class="menu-item" data-action="reports" role="menuitem" type="button">Reports</button>
         <button class="menu-item" data-action="settings" role="menuitem" type="button">Settings</button>
       </div>
@@ -138,7 +139,7 @@
 
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=35"></script>
-  <script src="app.js?v=35"></script>
+  <script src="config.js?v=36"></script>
+  <script src="app.js?v=36"></script>
 </body>
 </html>

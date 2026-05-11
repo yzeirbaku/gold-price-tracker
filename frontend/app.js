@@ -604,7 +604,6 @@ function setTab(tab) {
   });
   $('#bars-view').hidden = tab !== 'bars';
   $('#coins-view').hidden = tab !== 'coins';
-  $('#reports-view').hidden = true;
   collapseHistory();  // stop a panel from sticking around when switching tabs
   if (tab === 'coins' && !lastCoinListings.length) fetchCoins();
 }
@@ -673,7 +672,8 @@ $('#menu-dropdown').addEventListener('click', (e) => {
   if (!action) return;
   setMenuOpen(false);
   if (action === 'settings') openSettings();
-  else if (action === 'reports') openReportsView();
+  else if (action === 'reports') navigate('/reports');
+  else if (action === 'prices') navigate('/prices');
 });
 
 // Settings dialog — API key + theme. Backend URL from config.js.
@@ -698,8 +698,9 @@ $('#settings-dialog').addEventListener('close', () => {
 fetchSpot();
 // Default size selection: load 10 g listings as soon as the page opens.
 fetchPrices(10);
-// Restore tab state from localStorage (defaults to 'bars').
+// Restore tab state from localStorage (defaults to 'bars'), then route from URL.
 setTab(currentTab);
+navigate(window.location.pathname, false);
 setInterval(() => {
   if (document.visibilityState === 'visible') fetchSpot();
 }, SPOT_REFRESH_MS);
@@ -712,22 +713,47 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('service-worker.js').catch(() => {});
 }
 
-// Reports view ——————————————————————————————————————————————————————————————
+// View switching + routing ————————————————————————————————————————————————————
+
+function showPricesView() {
+  $('#reports-view').hidden = true;
+  $('#spot').hidden = false;
+  $('#tab-strip').hidden = false;
+  // Restore the bars/coins tab the user was last on.
+  setTab(currentTab);
+}
 
 function showReportsView() {
   $('#bars-view').hidden = true;
   $('#coins-view').hidden = true;
   $('#reports-view').hidden = false;
+  $('#spot').hidden = true;
+  $('#tab-strip').hidden = true;
   document.querySelectorAll('#tab-strip button').forEach((b) => {
     b.classList.remove('active');
     b.setAttribute('aria-selected', 'false');
   });
 }
 
-async function openReportsView() {
-  showReportsView();
-  await loadReportsArchive();
+// Tiny pushState router. Paths: '/', '/prices', '/reports'. Anything else
+// falls back to prices. Bars/Coins tabs stay in localStorage (no URL impact).
+const ROUTES = { '/': 'prices', '/prices': 'prices', '/reports': 'reports' };
+
+function navigate(path, push = true) {
+  const view = ROUTES[path] ?? 'prices';
+  const canonical = view === 'reports' ? '/reports' : '/prices';
+  if (push && window.location.pathname !== canonical) {
+    history.pushState({}, '', canonical);
+  }
+  if (view === 'reports') {
+    showReportsView();
+    loadReportsArchive();
+  } else {
+    showPricesView();
+  }
 }
+
+window.addEventListener('popstate', () => navigate(window.location.pathname, false));
 
 async function loadReportsArchive() {
   const weeklyList = $('#reports-weekly-list');
