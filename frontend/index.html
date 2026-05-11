@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=43" />
+  <link rel="stylesheet" href="styles.css?v=44" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
@@ -37,7 +37,12 @@
       <h2>Spot price</h2>
       <div id="spot-updated" class="muted-tiny"></div>
     </div>
-    <div id="spot-content">Loading…</div>
+    <div id="spot-content">
+      <div class="loading-msg">
+        <div class="spinner"><span></span><span></span><span></span></div>
+        <div class="loading-text">Fetching spot…</div>
+      </div>
+    </div>
   </section>
 
   <div id="bars-view">
@@ -154,7 +159,7 @@
 
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=43"></script>
-  <script src="app.js?v=43"></script>
+  <script src="config.js?v=44"></script>
+  <script src="app.js?v=44"></script>
 </body>
 </html>
