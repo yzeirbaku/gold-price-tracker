@@ -40,13 +40,18 @@ backend/         FastAPI on Render free tier (Python 3.12)
     fixtures/          frozen HTML snapshots per dealer (one for bars, one for coins)
 
 frontend/        Static PWA on Cloudflare Pages (vanilla JS, no build)
-  index.html           Bars/Coins tab strip, both views' table cards, settings dialog
-  app.js               tabs + size picker (bars) + ranked list (coins) + inline history
+  index.html           ☰ slide-in nav (Prices / Reports / Settings), Bars/Coins
+                       tab strip, Prices and Reports views, settings dialog
+  app.js               menu drawer + tabs + size picker (bars) + ranked list
+                       (coins) + inline history + Reports archive UI
   config.js            window.BACKEND_URL — overwritten by CF Pages build script
   styles.css
   service-worker.js    minimal — required for iOS install, no caching
   manifest.webmanifest
 ```
+
+URL bar stays at `/` for every view — Prices ↔ Reports switch via the menu,
+no pushState/hash routing.
 
 Postgres tables (Neon in prod, local Docker in dev):
 - `bar_snapshots` (was `dealer_snapshots` until 2026-05-08; idempotent rename in `db.py`)
@@ -83,6 +88,44 @@ Skipped: **Silver Gold Bull DK** (JS-rendered React SPA + Algolia + dynamic pric
 Coin coverage is **bullion-only** via the static registry in `app/coins.py`: Krugerrand, Maple Leaf, Vienna Philharmonic, American Eagle, Britannia, Sovereign, Ducat, Panda, plus the Danish Scandinavian-Monetary-Union **20 kr** and **10 kr** (Christian IX, Christian X, Frederik VIII — same physical spec, tracked as separate `size_label`s so per-monarch premiums surface independently). Each entry pins `(gross_weight_g, purity)` per recognized size variant; `fine_gold_g = gross × purity` is the canonical size axis. Listings whose title doesn't match the registry are silently skipped — that's by design.
 
 The 20 g fine-gold cap excludes all 1 oz coins (1 oz Krugerrand/Eagle = 31.1 g fine, 1 oz Maple/Phil/Britannia = 31.1 g fine). Easy to lift later by raising `FINE_GOLD_CAP_G` in each coin scraper.
+
+**`GET /coins` is live, not snapshot-backed.** Every request fans out to all
+`ALL_COIN_SCRAPERS` + spot + FX in parallel and computes premiums against
+the just-fetched spot. The 20-min `POST /snapshot` cron still writes to
+`coin_snapshots` for `/history/coin/...` and for report aggregation; this
+endpoint just no longer reads from that table. Mirrors the way `/prices/{size}`
+works for bars.
+
+## Reports
+
+`POST /reports/cron?type=weekly|monthly` builds an HTML report from
+`bar_snapshots` + `coin_snapshots` + `spot_snapshots` over the previous
+calendar week (Mon–Sun) or month, in Europe/Copenhagen. The rendered HTML
+is upserted into `report_archive` keyed by (`report_type`, `period_start`)
+— re-running for the same period overwrites cleanly. `POST /reports/generate?range=week|month`
+is the on-demand variant: rolling last-7 / last-30 days, streamed back to
+the client, **not persisted**. `GET /reports` lists archived entries and
+`GET /reports/{id}` returns the stored HTML as a `Content-Disposition:
+attachment` download.
+
+Each report has eight sections — Header, Spot context, Dealer behavior
+fingerprints, Bars, Coins, Notable, Time-of-month drift (monthly only),
+and a hidden `<script type="application/json" id="report-data">` sidecar
+holding every numeric value for future programmatic extraction. The visual
+sections render as `<details>` elements (only Spot starts open). The title
+uses the format `Weekly Report (DD-MM-YYYY HH:MM <--> DD-MM-YYYY HH:MM)`.
+
+Backend module layout (`app/reports/`): `windows.py` (period boundary math),
+`loader.py` (typed dataclass loaders from DB), `analytics.py` (cadence,
+weekend activity, time-of-day, day-of-week, premium band IQR, spot tracking
+correlation/lag/sensitivity, fingerprint classifier), `tables.py` (per-size
+bar + per-coin-variant tables), `notable.py` (threshold-driven bullet
+generator + time-of-month drift), `renderer.py` (Jinja2), `builder.py`
+(orchestrator), `storage.py` (CRUD on `report_archive`), `templates/report.html`.
+
+`scripts/seed.py` truncates the four snapshot tables, fills 30 days of
+synthetic data, then calls `build_report` for previous-week + previous-month
+and upserts both so the local archive is non-empty on first PWA load.
 
 ## Local dev
 

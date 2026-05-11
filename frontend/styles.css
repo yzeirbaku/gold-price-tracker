@@ -165,6 +165,10 @@ main { max-width: 720px; margin: 0 auto; }
   display: flex; gap: 1.1rem;
   transform: translateY(2px);
 }
+/* The `hidden` HTML attribute sets `display: none` at attribute specificity,
+   which the `.tab-strip { display: flex }` rule above out-ranks. Restore
+   the override so showReportsView() can actually hide the tab strip. */
+.tab-strip[hidden] { display: none; }
 .tab-strip button {
   background: none; border: none;
   padding: 0.15rem 0; margin: 0;

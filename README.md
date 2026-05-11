@@ -68,7 +68,7 @@ cd frontend
 python -m http.server 5500
 ```
 
-Open `http://127.0.0.1:5500/`, click ⚙️, paste your API key. The backend URL is set in `frontend/config.js` (defaults to `http://127.0.0.1:8000` for local dev; Cloudflare Pages overwrites it at build time via the `BACKEND_URL` env var).
+Open `http://127.0.0.1:5500/`, click the ☰ hamburger menu → **Settings**, paste your API key. The backend URL is set in `frontend/config.js` (defaults to `http://127.0.0.1:8000` for local dev; Cloudflare Pages overwrites it at build time via the `BACKEND_URL` env var).
 
 ## Environment variables (Render)
 
@@ -84,9 +84,20 @@ Postgres (`report_archive` table). The frontend "Reports" hamburger menu
 lists archived reports and offers on-demand "Last week" / "Last month"
 generation that downloads a one-off report without archiving.
 
+The Reports view splits the archive into Weekly and Monthly sections —
+each collapsible, each with a filter dropdown (Year + Month for weekly,
+Year for monthly). A week straddling two calendar months shows in both.
+
 Each report is a self-contained HTML file with inline CSS, no external
 assets, and an embedded `<script type="application/json" id="report-data">`
-sidecar containing every numeric value for future processing.
+sidecar containing every numeric value for future processing. Inside the
+report, Spot context / Dealer fingerprints / Bars / Coins / Notable /
+Time-of-month drift each render as `<details>` so they can be expanded
+or collapsed individually; only Spot starts open. The title is rendered
+as `Weekly Report (DD-MM-YYYY HH:MM <--> DD-MM-YYYY HH:MM)` (Europe/Copenhagen).
+
+`scripts/seed.py` ends by generating one weekly + one monthly report into
+the local archive so the UI isn't empty on first open.
 
 ## Tests
 
