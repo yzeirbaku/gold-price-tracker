@@ -86,7 +86,7 @@ def test_cron_persists_to_archive() -> None:
          patch("app.main.build_report",
                new=AsyncMock(return_value="<html>cron</html>")), \
          patch("app.main.upsert_report", new=upsert_mock):
-        r = client.post("/reports/cron?type=weekly", headers=headers)
+        r = client.post("/reports/cron/weekly", headers=headers)
     assert r.status_code == 200
     upsert_mock.assert_called_once()
     body = r.json()
@@ -98,4 +98,4 @@ def test_endpoints_require_api_key() -> None:
     client, _ = _client_with_api_key()
     assert client.get("/reports").status_code == 401
     assert client.post("/reports/generate?range=week").status_code == 401
-    assert client.post("/reports/cron?type=weekly").status_code == 401
+    assert client.post("/reports/cron/weekly").status_code == 401

@@ -471,7 +471,7 @@ async def reports_generate(
     )
 
 
-@app.post("/reports/cron")
+@app.post("/reports/cron/{type}")
 async def reports_cron(
     type: str, _: None = Depends(require_api_key),
 ) -> JSONResponse:
