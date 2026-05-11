@@ -5,9 +5,9 @@ one-line change. The detector is deterministic and stateless; same inputs
 always produce the same bullets in the same order.
 """
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable
 from zoneinfo import ZoneInfo
 
 from app.reports.loader import BarPoint, CoinPoint
@@ -57,9 +57,9 @@ def detect_notable(
             (c.fetched_at, prem)
         )
 
-    for (kind, dealer, prod), series in by_key.items():
+    for (_kind, dealer, prod), series in by_key.items():
         series.sort(key=lambda t: t[0])
-        for (t_prev, p_prev), (t_curr, p_curr) in zip(series, series[1:]):
+        for (_t_prev, p_prev), (t_curr, p_curr) in zip(series, series[1:], strict=False):
             delta = p_curr - p_prev
             if abs(delta) >= premium_step_threshold_pp:
                 arrow = "\u2193" if delta < 0 else "\u2191"
@@ -137,17 +137,17 @@ def detect_time_of_month_drift(
     all_weeks: list[list[float]] = [[] for _ in range(weeks)]
     for dealer, bucket_list in by_dealer.items():
         weekly_avg: list[float] = []
-        for i, b in enumerate(bucket_list):
-            avg = round(sum(b) / len(b), 2) if b else 0.0
+        for i, bucket in enumerate(bucket_list):
+            avg = round(sum(bucket) / len(bucket), 2) if bucket else 0.0
             weekly_avg.append(avg)
-            all_weeks[i].extend(b)
+            all_weeks[i].extend(bucket)
         delta = round(weekly_avg[-1] - weekly_avg[0], 2)
         rows.append(TimeOfMonthRow(
             dealer=dealer, weekly_avg_premium_pct=weekly_avg, delta_pp=delta,
         ))
 
     rows.sort(key=lambda r: r.dealer)
-    market = [round(sum(b) / len(b), 2) if b else 0.0 for b in all_weeks]
+    market = [round(sum(bucket) / len(bucket), 2) if bucket else 0.0 for bucket in all_weeks]
     market_delta = round(market[-1] - market[0], 2) if market else 0.0
     rows.append(TimeOfMonthRow(
         dealer="Market", weekly_avg_premium_pct=market, delta_pp=market_delta,

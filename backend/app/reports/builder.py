@@ -3,7 +3,7 @@
 `build_report(conn, window)` is the single public entrypoint. Endpoints
 call it; tests patch the loader functions to inject synthetic data.
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
@@ -18,8 +18,12 @@ from app.reports.analytics import (
     compute_weekend_activity,
 )
 from app.reports.loader import (
-    BarPoint, CoinPoint, SpotPoint,
-    load_bars, load_coins, load_spot,
+    BarPoint,
+    CoinPoint,
+    SpotPoint,
+    load_bars,
+    load_coins,
+    load_spot,
 )
 from app.reports.notable import detect_notable, detect_time_of_month_drift
 from app.reports.renderer import render_report
@@ -29,9 +33,9 @@ from app.reports.windows import CPH, Window
 
 async def build_report(conn: asyncpg.Connection | None, window: Window) -> str:
     """Build the rendered HTML report covering the window."""
-    bars: list[BarPoint] = await load_bars(conn, window.start_dt, window.end_dt)  # type: ignore[arg-type]
-    coins: list[CoinPoint] = await load_coins(conn, window.start_dt, window.end_dt)  # type: ignore[arg-type]
-    spots: list[SpotPoint] = await load_spot(conn, window.start_dt, window.end_dt)  # type: ignore[arg-type]
+    bars: list[BarPoint] = await load_bars(conn, window.start_dt, window.end_dt)
+    coins: list[CoinPoint] = await load_coins(conn, window.start_dt, window.end_dt)
+    spots: list[SpotPoint] = await load_spot(conn, window.start_dt, window.end_dt)
 
     weeks = max(1.0, (window.end_dt - window.start_dt).total_seconds() / (7 * 86400))
     context: dict[str, Any] = {
@@ -39,7 +43,7 @@ async def build_report(conn: asyncpg.Connection | None, window: Window) -> str:
         "label": window.label,
         "period_start": window.period_start.isoformat(),
         "period_end": window.period_end.isoformat(),
-        "generated_at": datetime.now(tz=timezone.utc).isoformat(),
+        "generated_at": datetime.now(tz=UTC).isoformat(),
         "spot": _build_spot_section(spots),
         "fingerprints": _build_fingerprints(bars, coins, spots, weeks),
         "bars": _build_bars_section(bars),

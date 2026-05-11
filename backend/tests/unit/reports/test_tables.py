@@ -1,9 +1,7 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.reports.loader import BarPoint
 from app.reports.tables import BarSizeRow, build_bar_table, sparkline
-
-UTC = timezone.utc
 
 
 def _bar(t: datetime, dealer: str, size: float, price: float | None,

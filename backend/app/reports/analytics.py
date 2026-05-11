@@ -9,10 +9,10 @@ A "change" is any pair (snapshot[i-1], snapshot[i]) where price_dkk
 differs between non-null statuses.
 """
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from statistics import median
-from typing import Iterable
 from zoneinfo import ZoneInfo
 
 from app.reports.loader import BarPoint, CoinPoint
@@ -110,7 +110,7 @@ def compute_cadence(
     for ts_list in by_key.values():
         if len(ts_list) < 2:
             continue
-        for prev, curr in zip(ts_list, ts_list[1:]):
+        for prev, curr in zip(ts_list, ts_list[1:], strict=False):
             intervals_h.append((curr - prev).total_seconds() / 3600.0)
     return CadenceStats(
         total_changes=len(changes),

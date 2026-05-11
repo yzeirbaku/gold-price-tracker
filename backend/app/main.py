@@ -2,16 +2,25 @@ import asyncio
 import logging
 import os
 import sys
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
 
 from app.auth import require_api_key
 from app.db import close_pool, get_pool
 from app.fx import fetch_usd_to
 from app.models import CoinListing, PriceResponse
 from app.orchestrator import run
+from app.reports.builder import build_report
+from app.reports.storage import fetch_report_html, list_reports, upsert_report
+from app.reports.windows import (
+    previous_calendar_month,
+    previous_calendar_week,
+    rolling_last_n_days,
+)
 from app.scrapers.base import DEFAULT_HEADERS, DealerScraper, now_utc
 from app.scrapers.registry import ALL_COIN_SCRAPERS, ALL_SCRAPERS
 from app.spot import fetch_spot_usd_per_gram
@@ -395,6 +404,89 @@ async def get_coin_history(
             for r in rows
         ],
     }
+
+
+@app.get("/reports")
+async def reports_list(_: None = Depends(require_api_key)) -> list[dict[str, object]]:
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    async with pool.acquire() as conn:
+        rows = await list_reports(conn)
+    return [
+        {**r, "period_start": r["period_start"].isoformat(),
+         "period_end": r["period_end"].isoformat()}
+        for r in rows
+    ]
+
+
+@app.get("/reports/{report_id}")
+async def reports_fetch(
+    report_id: int, _: None = Depends(require_api_key),
+) -> Response:
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    async with pool.acquire() as conn:
+        result = await fetch_report_html(conn, report_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="report not found")
+    html, kind, period_start, _period_end = result
+    if kind == "weekly":
+        filename = f"weekly-{period_start.isoformat()}.html"
+    else:
+        filename = f"monthly-{period_start.strftime('%Y-%m')}.html"
+    return Response(
+        content=html,
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/reports/generate")
+async def reports_generate(
+    range: str, _: None = Depends(require_api_key),
+) -> Response:
+    if range not in {"week", "month"}:
+        raise HTTPException(status_code=400, detail="range must be 'week' or 'month'")
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    n = 7 if range == "week" else 30
+    window = rolling_last_n_days(datetime.now(tz=UTC), n)
+    async with pool.acquire() as conn:
+        html = await build_report(conn, window)
+    suffix = window.period_end.isoformat()
+    filename = f"ondemand-{range}-{suffix}.html"
+    return Response(
+        content=html,
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/reports/cron")
+async def reports_cron(
+    type: str, _: None = Depends(require_api_key),
+) -> JSONResponse:
+    if type not in {"weekly", "monthly"}:
+        raise HTTPException(status_code=400, detail="type must be 'weekly' or 'monthly'")
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    now = datetime.now(tz=UTC)
+    window = (previous_calendar_week(now) if type == "weekly"
+              else previous_calendar_month(now))
+    async with pool.acquire() as conn:
+        html = await build_report(conn, window)
+        rid = await upsert_report(
+            conn, type, window.period_start, window.period_end, html,
+        )
+    return JSONResponse({
+        "id": rid, "type": type,
+        "period_start": window.period_start.isoformat(),
+        "period_end": window.period_end.isoformat(),
+    })
 
 
 @app.get("/health")

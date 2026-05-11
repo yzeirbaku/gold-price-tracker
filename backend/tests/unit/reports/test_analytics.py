@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.reports.analytics import (
@@ -10,7 +10,6 @@ from app.reports.analytics import (
 from app.reports.loader import BarPoint
 
 CPH = ZoneInfo("Europe/Copenhagen")
-UTC = timezone.utc
 
 
 def _bar(t: datetime, dealer: str, size: float, price: float) -> BarPoint:

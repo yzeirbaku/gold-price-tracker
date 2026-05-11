@@ -3,7 +3,6 @@ import re
 
 from app.reports.renderer import render_report
 
-
 SAMPLE_CONTEXT = {
     "kind": "weekly",
     "label": "Week of May 4 \u2013 May 10, 2026",

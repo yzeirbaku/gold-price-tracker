@@ -4,7 +4,7 @@ We bypass `load_bars`/`load_coins`/`load_spot` (which hit the DB) by patching
 them to return pre-built lists, then assert the builder produces a valid
 HTML report with the expected section markers.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,8 +12,6 @@ import pytest
 from app.reports.builder import build_report
 from app.reports.loader import BarPoint, SpotPoint
 from app.reports.windows import previous_calendar_week
-
-UTC = timezone.utc
 
 
 def _synthetic_bars() -> list[BarPoint]:

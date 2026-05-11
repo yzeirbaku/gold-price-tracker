@@ -6,10 +6,10 @@ in pp), % time held cheapest, plus a unicode-block sparkline of the median
 premium binned across `bins` equal-width time slices.
 """
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from statistics import median
-from typing import Iterable
 
 from app.reports.loader import BarPoint, CoinPoint
 
@@ -110,7 +110,7 @@ def build_bar_table(
             by_ts[p.fetched_at].append((p.dealer, prem))
     cheapest_counts: dict[str, int] = defaultdict(int)
     total_ts = 0
-    for ts, entries in by_ts.items():
+    for _ts, entries in by_ts.items():
         if not entries:
             continue
         min_prem = min(e[1] for e in entries)

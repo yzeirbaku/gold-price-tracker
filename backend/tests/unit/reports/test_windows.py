@@ -4,7 +4,6 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.reports.windows import (
-    Window,
     previous_calendar_month,
     previous_calendar_week,
     rolling_last_n_days,
@@ -84,5 +83,5 @@ def test_rolling_last_30_days() -> None:
 def test_window_dataclass_is_frozen() -> None:
     now = datetime(2026, 5, 13, 14, 0, tzinfo=CPH)
     w = previous_calendar_week(now)
-    with pytest.raises(Exception):
+    with pytest.raises(AttributeError):
         w.label = "changed"  # type: ignore[misc]

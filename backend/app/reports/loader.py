@@ -4,9 +4,9 @@ The DB returns asyncpg Records with Decimal numerics. Analytics code wants
 plain floats, so we normalize at load time. Pure functions (no DB calls) so
 they're trivially testable on in-memory dicts.
 """
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable, Mapping
 
 import asyncpg
 

@@ -6,7 +6,9 @@ import pytest
 
 from app.db import SCHEMA_SQL
 from app.reports.storage import (
-    fetch_report_html, list_reports, upsert_report,
+    fetch_report_html,
+    list_reports,
+    upsert_report,
 )
 
 LOCAL_DSN = os.environ.get("TEST_DATABASE_URL")

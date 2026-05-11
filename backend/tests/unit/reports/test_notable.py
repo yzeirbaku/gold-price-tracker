@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.reports.loader import BarPoint
 from app.reports.notable import (
@@ -6,8 +6,6 @@ from app.reports.notable import (
     detect_notable,
     detect_time_of_month_drift,
 )
-
-UTC = timezone.utc
 
 
 def _bar(t: datetime, dealer: str, size: float, price: float | None,

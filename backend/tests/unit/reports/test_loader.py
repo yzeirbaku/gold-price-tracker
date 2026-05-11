@@ -1,13 +1,17 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.reports.loader import (
-    BarPoint, CoinPoint, SpotPoint,
-    rows_to_bars, rows_to_coins, rows_to_spot,
+    BarPoint,
+    CoinPoint,
+    SpotPoint,
+    rows_to_bars,
+    rows_to_coins,
+    rows_to_spot,
 )
 
 
 def test_rows_to_bars_filters_status_and_casts_decimals() -> None:
-    ts = datetime(2026, 5, 5, 12, 0, tzinfo=timezone.utc)
+    ts = datetime(2026, 5, 5, 12, 0, tzinfo=UTC)
     rows = [
         {"fetched_at": ts, "dealer": "Tavex", "size_g": 5.0,
          "status": "ok", "price_dkk": "5345.50", "spot_gold_dkk_per_g": "964.20"},
@@ -24,7 +28,7 @@ def test_rows_to_bars_filters_status_and_casts_decimals() -> None:
 
 
 def test_rows_to_coins_extracts_all_fields() -> None:
-    ts = datetime(2026, 5, 5, 12, 0, tzinfo=timezone.utc)
+    ts = datetime(2026, 5, 5, 12, 0, tzinfo=UTC)
     rows = [{
         "fetched_at": ts, "dealer": "Tavex",
         "coin_type": "Krugerrand", "size_label": "1/4 oz",
@@ -41,7 +45,7 @@ def test_rows_to_coins_extracts_all_fields() -> None:
 
 
 def test_rows_to_spot_decimal_cast() -> None:
-    ts = datetime(2026, 5, 5, 12, 0, tzinfo=timezone.utc)
+    ts = datetime(2026, 5, 5, 12, 0, tzinfo=UTC)
     rows = [{
         "fetched_at": ts,
         "gold_dkk_per_g": "964.20",
