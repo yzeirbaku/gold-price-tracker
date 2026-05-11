@@ -688,13 +688,11 @@ $('#menu-dropdown').addEventListener('click', (e) => {
   else if (action === 'reports') openReportsView();
   else if (action === 'prices') {
     const wasOnReports = !$('#reports-view').hidden;
-    showPricesView();
-    // Refresh data when arriving from the Reports view so the bars
-    // (or coins) the user sees match the current market.
-    if (wasOnReports) {
-      if (currentTab === 'coins') fetchCoins();
-      else if (lastSize != null) fetchPrices(lastSize);
-    }
+    // Coming from Reports: snap back to the canonical home — Bars tab at
+    // 10 g. Coming from the Prices view already: leave the user's current
+    // tab/size alone (clicking Prices in that case is effectively a no-op).
+    if (wasOnReports) goToPricesHome();
+    else showPricesView();
   }
 });
 
