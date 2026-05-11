@@ -742,8 +742,9 @@ const ROUTES = { '/': 'prices', '/prices': 'prices', '/reports': 'reports' };
 function navigate(path, push = true) {
   const view = ROUTES[path] ?? 'prices';
   const canonical = view === 'reports' ? '/reports' : '/prices';
-  if (push && window.location.pathname !== canonical) {
-    history.pushState({}, '', canonical);
+  if (window.location.pathname !== canonical) {
+    if (push) history.pushState({}, '', canonical);
+    else history.replaceState({}, '', canonical);
   }
   if (view === 'reports') {
     showReportsView();
