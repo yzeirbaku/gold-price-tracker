@@ -3,7 +3,7 @@
 `build_report(conn, window)` is the single public entrypoint. Endpoints
 call it; tests patch the loader functions to inject synthetic data.
 """
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 import asyncpg
@@ -43,7 +43,7 @@ async def build_report(conn: asyncpg.Connection | None, window: Window) -> str:
         "label": window.label,
         "period_start": window.period_start.isoformat(),
         "period_end": window.period_end.isoformat(),
-        "generated_at": datetime.now(tz=UTC).isoformat(),
+        "generated_at": datetime.now(tz=CPH).strftime("%Y-%m-%d %H:%M:%S"),
         "spot": _build_spot_section(spots),
         "fingerprints": _build_fingerprints(bars, coins, spots, weeks),
         "bars": _build_bars_section(bars),
@@ -172,7 +172,6 @@ def _build_bars_section(bars: list[BarPoint]) -> list[dict[str, Any]]:
                     "median_premium_pct": r.median_premium_pct,
                     "spread_pp": r.spread_pp,
                     "pct_time_cheapest": r.pct_time_cheapest,
-                    "sparkline": r.sparkline,
                 }
                 for r in build_bar_table(bars, size_g=s, bins=7)
             ],
@@ -201,7 +200,6 @@ def _build_coins_section(coins: list[CoinPoint]) -> list[dict[str, Any]]:
                     "median_premium_pct": r.median_premium_pct,
                     "spread_pp": r.spread_pp,
                     "pct_time_cheapest": r.pct_time_cheapest,
-                    "sparkline": r.sparkline,
                 }
                 for r in rows
             ],

@@ -40,8 +40,7 @@ def previous_calendar_week(now: datetime) -> Window:
         period_end=last_sunday.date(),
         start_dt=last_monday,
         end_dt=this_week_monday,
-        label=f"Week of {_label_md(last_monday.date())} \u2013 "
-              f"{_label_md(last_sunday.date())}, {last_sunday.year}",
+        label=_format_label("Weekly", last_monday, this_week_monday),
     )
 
 
@@ -62,7 +61,7 @@ def previous_calendar_month(now: datetime) -> Window:
         period_end=prev_end_date,
         start_dt=prev_start,
         end_dt=first_of_this_month,
-        label=f"{prev_start.strftime('%B')} {prev_start.year}",
+        label=_format_label("Monthly", prev_start, first_of_this_month),
     )
 
 
@@ -82,13 +81,13 @@ def rolling_last_n_days(now: datetime, n: int) -> Window:
         period_end=now_cph.date(),
         start_dt=start_dt,
         end_dt=now_cph,
-        label=f"Last {n} days (through {_label_md(now_cph.date())} {now_cph.year})",
+        label=_format_label("Weekly" if kind == "weekly" else "Monthly",
+                             start_dt, now_cph),
     )
 
 
-_MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-
-def _label_md(d: date) -> str:
-    return f"{_MONTHS[d.month]} {d.day}"
+def _format_label(prefix: str, start_dt: datetime, end_dt: datetime) -> str:
+    """Render '{prefix} Report (DD-MM-YYYY HH:MM -- DD-MM-YYYY HH:MM)' in CPH."""
+    s = start_dt.astimezone(CPH).strftime("%d-%m-%Y %H:%M")
+    e = end_dt.astimezone(CPH).strftime("%d-%m-%Y %H:%M")
+    return f"{prefix} Report ({s} -- {e})"

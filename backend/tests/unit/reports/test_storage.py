@@ -27,6 +27,9 @@ async def conn():
     try:
         yield c
     finally:
+        # Don't leak placeholder rows into the user's local DB across test
+        # runs — clean up after the test, not just before.
+        await c.execute("DELETE FROM report_archive")
         await c.close()
 
 

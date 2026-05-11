@@ -23,8 +23,6 @@
            line-height: 1.5; font-size: 15px; padding: 1rem; max-width: 920px;
            margin: 0 auto; }
     h1 { font-size: 1.5rem; margin: 0 0 0.25rem; color: var(--accent); }
-    h2 { font-size: 1.15rem; margin: 1.8rem 0 0.5rem; border-bottom: 1px solid var(--border);
-         padding-bottom: 0.25rem; }
     h3 { font-size: 1rem; margin: 1.2rem 0 0.4rem; }
     .muted { color: var(--muted); font-size: 0.85rem; }
     table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 0.5rem 0; }
@@ -32,26 +30,44 @@
     th { font-weight: 600; color: var(--muted); }
     td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
     tr.market td { border-top: 2px solid var(--border); font-style: italic; color: var(--muted); }
-    .spark { font-family: "SF Mono", Consolas, monospace; letter-spacing: -1px; }
     .tag { display: inline-block; padding: 0.1rem 0.5rem; border: 1px solid var(--accent);
            color: var(--accent); border-radius: 12px; font-size: 0.8rem; }
     ul.bullets { padding-left: 1.2rem; }
     ul.bullets li { margin: 0.25rem 0; }
-    .fp-block { padding: 0.7rem 0; border-bottom: 1px dashed var(--border); }
+    details { margin: 1.2rem 0; }
+    details > summary {
+      cursor: pointer; font-size: 1.15rem; font-weight: 600;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid var(--border);
+      list-style: none;
+    }
+    details > summary::before {
+      content: "\25B6"; display: inline-block; margin-right: 0.5rem;
+      transition: transform 0.15s; font-size: 0.7em;
+      color: var(--muted);
+    }
+    details[open] > summary::before { transform: rotate(90deg); }
+    details > summary::-webkit-details-marker { display: none; }
+    .fp-grid {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.5rem 1.5rem; padding-top: 0.5rem;
+    }
+    @media (max-width: 600px) { .fp-grid { grid-template-columns: 1fr; } }
+    .fp-block { padding: 0.5rem 0; border-bottom: 1px dashed var(--border); }
     .fp-block:last-of-type { border-bottom: none; }
-    .fp-line { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-    .fp-line .label { color: var(--muted); min-width: 7.5rem; }
+    .fp-line { display: flex; gap: 0.5rem; flex-wrap: wrap; font-size: 0.92rem; }
+    .fp-line .label { color: var(--muted); min-width: 6.5rem; }
   </style>
 </head>
 <body>
 
 <section id="section-header">
   <h1>{{ label }}</h1>
-  <div class="muted">{{ kind | capitalize }} report · generated {{ generated_at }}</div>
+  <div class="muted">Generated {{ generated_at }}</div>
 </section>
 
-<section id="section-spot">
-  <h2>Spot context</h2>
+<details id="section-spot" open>
+  <summary>Spot context</summary>
   <table>
     <thead>
       <tr><th></th><th class="num">Open</th><th class="num">Close</th>
@@ -82,10 +98,11 @@
     <div class="muted">Spot was flat over the weekend (no FX or spot updates), as expected.</div>
   {% endif %}
   {% if spot.fx_note %}<div class="muted">{{ spot.fx_note }}</div>{% endif %}
-</section>
+</details>
 
-<section id="section-fingerprints">
-  <h2>Dealer behavior fingerprints</h2>
+<details id="section-fingerprints" open>
+  <summary>Dealer behavior fingerprints</summary>
+  <div class="fp-grid">
   {% for fp in fingerprints %}
   <div class="fp-block">
     <h3>{{ fp.dealer }}</h3>
@@ -98,22 +115,18 @@
       </span>
     </div>
     {% if fp.cadence.latest_change %}
-    <div class="fp-line"><span class="label">Latest change:</span>
+    <div class="fp-line"><span class="label">Latest:</span>
       <span>{{ fp.cadence.latest_change }}</span></div>
     {% endif %}
     {% if kind == "monthly" %}
     <div class="fp-line"><span class="label">Time of day:</span>
-      <span class="spark">
-        morn {{ "%-3d"|format(fp.time_of_day.morning) }}
-        · aft {{ "%-3d"|format(fp.time_of_day.afternoon) }}
-        · eve {{ "%-3d"|format(fp.time_of_day.evening) }}
-        · night {{ "%-3d"|format(fp.time_of_day.night) }}
-      </span>
+      <span>morn {{ fp.time_of_day.morning }} ·
+        aft {{ fp.time_of_day.afternoon }} ·
+        eve {{ fp.time_of_day.evening }} ·
+        night {{ fp.time_of_day.night }}</span>
     </div>
     <div class="fp-line"><span class="label">Day of week:</span>
-      <span class="spark">
-        {% for n in fp.day_of_week %}{{ ["M","T","W","Th","F","Sa","Su"][loop.index0] }}{{ n }} {% endfor %}
-      </span>
+      <span>{% for n in fp.day_of_week %}{{ ["M","T","W","Th","F","Sa","Su"][loop.index0] }}{{ n }} {% endfor %}</span>
     </div>
     {% endif %}
     <div class="fp-line"><span class="label">Weekend:</span>
@@ -135,16 +148,17 @@
       <span class="tag">{{ fp.fingerprint_tag }}</span></div>
   </div>
   {% endfor %}
-</section>
+  </div>
+</details>
 
-<section id="section-bars">
-  <h2>Bars</h2>
+<details id="section-bars">
+  <summary>Bars</summary>
   {% for slice in bars %}
   <h3>{{ slice.size_g }} g bars</h3>
   <table>
     <thead>
       <tr><th>Dealer</th><th class="num">Median DKK</th><th class="num">Med. premium</th>
-          <th class="num">Spread (pp)</th><th class="num">% cheapest</th><th>Trend</th></tr>
+          <th class="num">Spread (pp)</th><th class="num">% cheapest</th></tr>
     </thead>
     <tbody>
     {% for r in slice.rows %}
@@ -154,23 +168,22 @@
         <td class="num">{{ "%.2f"|format(r.median_premium_pct) if r.median_premium_pct is not none else "—" }}%</td>
         <td class="num">{{ "%.2f"|format(r.spread_pp) if r.spread_pp is not none else "—" }}</td>
         <td class="num">{{ "%.1f"|format(r.pct_time_cheapest) if r.pct_time_cheapest is not none else "—" }}%</td>
-        <td class="spark">{{ r.sparkline }}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
   {% endfor %}
-</section>
+</details>
 
-<section id="section-coins">
-  <h2>Coins</h2>
+<details id="section-coins">
+  <summary>Coins</summary>
   {% if coins %}
     {% for slice in coins %}
     <h3>{{ slice.coin_type }} · {{ slice.size_label }}</h3>
     <table>
       <thead>
         <tr><th>Dealer</th><th class="num">Median DKK</th><th class="num">Med. premium</th>
-            <th class="num">Spread (pp)</th><th class="num">% cheapest</th><th>Trend</th></tr>
+            <th class="num">Spread (pp)</th><th class="num">% cheapest</th></tr>
       </thead>
       <tbody>
       {% for r in slice.rows %}
@@ -180,7 +193,6 @@
           <td class="num">{{ "%.2f"|format(r.median_premium_pct) if r.median_premium_pct is not none else "—" }}%</td>
           <td class="num">{{ "%.2f"|format(r.spread_pp) if r.spread_pp is not none else "—" }}</td>
           <td class="num">{{ "%.1f"|format(r.pct_time_cheapest) if r.pct_time_cheapest is not none else "—" }}%</td>
-          <td class="spark">{{ r.sparkline }}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -189,10 +201,10 @@
   {% else %}
     <div class="muted">No coin observations in this period.</div>
   {% endif %}
-</section>
+</details>
 
-<section id="section-notable">
-  <h2>Notable this period</h2>
+<details id="section-notable" open>
+  <summary>Notable this period</summary>
   {% if notable %}
   <ul class="bullets">
   {% for b in notable %}<li>{{ b.text }}</li>{% endfor %}
@@ -200,11 +212,11 @@
   {% else %}
   <div class="muted">Nothing crossed the threshold this period.</div>
   {% endif %}
-</section>
+</details>
 
 {% if time_of_month %}
-<section id="section-time-of-month">
-  <h2>Time-of-month drift</h2>
+<details id="section-time-of-month" open>
+  <summary>Time-of-month drift</summary>
   <table>
     <thead>
       <tr><th>Dealer</th>{% for i in range(time_of_month[0].weekly_avg_premium_pct|length) %}<th class="num">W{{ i + 1 }}</th>{% endfor %}<th class="num">Δ (last − first)</th></tr>
@@ -219,7 +231,7 @@
     {% endfor %}
     </tbody>
   </table>
-</section>
+</details>
 {% endif %}
 
 <script type="application/json" id="report-data">

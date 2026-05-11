@@ -19,7 +19,7 @@ def test_previous_calendar_week_from_wednesday() -> None:
     assert w.period_end == date(2026, 5, 10)    # Sun
     assert w.start_dt == datetime(2026, 5, 4, 0, 0, tzinfo=CPH)
     assert w.end_dt == datetime(2026, 5, 11, 0, 0, tzinfo=CPH)
-    assert w.label == "Week of May 4 \u2013 May 10, 2026"
+    assert w.label == "Weekly Report (04-05-2026 00:00 -- 11-05-2026 00:00)"
     assert w.kind == "weekly"
 
 
@@ -40,7 +40,7 @@ def test_previous_calendar_month_from_mid_month() -> None:
     assert w.period_end == date(2026, 4, 30)
     assert w.start_dt == datetime(2026, 4, 1, 0, 0, tzinfo=CPH)
     assert w.end_dt == datetime(2026, 5, 1, 0, 0, tzinfo=CPH)
-    assert w.label == "April 2026"
+    assert w.label == "Monthly Report (01-04-2026 00:00 -- 01-05-2026 00:00)"
     assert w.kind == "monthly"
 
 
@@ -57,7 +57,7 @@ def test_previous_calendar_month_january_rolls_year() -> None:
     w = previous_calendar_month(now)
     assert w.period_start == date(2025, 12, 1)
     assert w.period_end == date(2025, 12, 31)
-    assert w.label == "December 2025"
+    assert w.label == "Monthly Report (01-12-2025 00:00 -- 01-01-2026 00:00)"
 
 
 def test_rolling_last_7_days() -> None:
@@ -69,7 +69,9 @@ def test_rolling_last_7_days() -> None:
     assert w.period_start == date(2026, 5, 4)
     assert w.period_end == date(2026, 5, 11)
     assert w.kind == "weekly"  # on-demand week rolls in as "weekly" type
-    assert "Last 7 days" in w.label
+    assert w.label.startswith("Weekly Report (")
+    assert "04-05-2026 14:30" in w.label
+    assert "11-05-2026 14:30" in w.label
 
 
 def test_rolling_last_30_days() -> None:
@@ -77,7 +79,9 @@ def test_rolling_last_30_days() -> None:
     w = rolling_last_n_days(now, 30)
     assert w.start_dt == datetime(2026, 4, 11, 14, 30, tzinfo=CPH)
     assert w.kind == "monthly"
-    assert "Last 30 days" in w.label
+    assert w.label.startswith("Monthly Report (")
+    assert "11-04-2026 14:30" in w.label
+    assert "11-05-2026 14:30" in w.label
 
 
 def test_window_dataclass_is_frozen() -> None:

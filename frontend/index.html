@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=38" />
+  <link rel="stylesheet" href="styles.css?v=39" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
@@ -79,15 +79,28 @@
       <div id="reports-gen-status" class="muted-tiny"></div>
     </section>
 
-    <section id="reports-weekly" class="card">
-      <h2>Weekly archive</h2>
+    <details id="reports-weekly" class="card" open>
+      <summary><h2>Weekly archive</h2></summary>
+      <div class="archive-filters">
+        <label>Year
+          <select id="reports-weekly-year"><option value="">All</option></select>
+        </label>
+        <label>Month
+          <select id="reports-weekly-month"><option value="">All</option></select>
+        </label>
+      </div>
       <div id="reports-weekly-list" class="archive-list"></div>
-    </section>
+    </details>
 
-    <section id="reports-monthly" class="card">
-      <h2>Monthly archive</h2>
+    <details id="reports-monthly" class="card" open>
+      <summary><h2>Monthly archive</h2></summary>
+      <div class="archive-filters">
+        <label>Year
+          <select id="reports-monthly-year"><option value="">All</option></select>
+        </label>
+      </div>
       <div id="reports-monthly-list" class="archive-list"></div>
-    </section>
+    </details>
   </div>
 
   <div id="coins-view" hidden>
@@ -139,7 +152,7 @@
 
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=38"></script>
-  <script src="app.js?v=38"></script>
+  <script src="config.js?v=39"></script>
+  <script src="app.js?v=39"></script>
 </body>
 </html>

@@ -760,6 +760,10 @@ window.addEventListener('popstate', () => navigate(window.location.pathname, fal
 // Initial route — must come AFTER `const ROUTES` above (TDZ).
 navigate(window.location.pathname, false);
 
+// All archive rows from the latest fetch — kept so filters can re-render
+// without hitting the network on every dropdown change.
+let reportsArchive = { weekly: [], monthly: [] };
+
 async function loadReportsArchive() {
   const weeklyList = $('#reports-weekly-list');
   const monthlyList = $('#reports-monthly-list');
@@ -778,11 +782,86 @@ async function loadReportsArchive() {
     monthlyList.innerHTML = '';
     return;
   }
-  const weekly = rows.filter((r) => r.type === 'weekly');
-  const monthly = rows.filter((r) => r.type === 'monthly');
-  weeklyList.innerHTML = renderArchiveItems(weekly, 'weekly');
-  monthlyList.innerHTML = renderArchiveItems(monthly, 'monthly');
+  reportsArchive.weekly = rows.filter((r) => r.type === 'weekly');
+  reportsArchive.monthly = rows.filter((r) => r.type === 'monthly');
+  populateArchiveFilters();
+  renderArchives();
 }
+
+// A weekly report [period_start, period_end] (inclusive) can touch up to
+// two calendar months and two calendar years. Yield every (year, month)
+// pair the week overlaps.
+function weeklyTouches(row) {
+  const out = [];
+  const a = new Date(row.period_start + 'T00:00:00Z');
+  const b = new Date(row.period_end + 'T00:00:00Z');
+  for (let d = new Date(a); d <= b; d.setUTCDate(d.getUTCDate() + 1)) {
+    const key = `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}`;
+    if (!out.length || out[out.length - 1] !== key) out.push(key);
+  }
+  return out;
+}
+
+function populateArchiveFilters() {
+  const weeklyYears = new Set();
+  const weeklyMonths = new Set();
+  for (const r of reportsArchive.weekly) {
+    for (const ym of weeklyTouches(r)) {
+      const [y, m] = ym.split('-').map(Number);
+      weeklyYears.add(y);
+      weeklyMonths.add(m);
+    }
+  }
+  const monthlyYears = new Set(
+    reportsArchive.monthly.map((r) => Number(r.period_start.split('-')[0])),
+  );
+  fillSelect('#reports-weekly-year', [...weeklyYears].sort((a, b) => b - a));
+  fillSelect('#reports-weekly-month', [...weeklyMonths].sort((a, b) => a - b),
+              (m) => MONTH_NAMES[m - 1]);
+  fillSelect('#reports-monthly-year', [...monthlyYears].sort((a, b) => b - a));
+}
+
+const MONTH_NAMES = ['January','February','March','April','May','June',
+                     'July','August','September','October','November','December'];
+
+function fillSelect(selector, values, labelFn = (v) => v) {
+  const el = $(selector);
+  const current = el.value;  // preserve user's selection across refreshes
+  el.innerHTML = '<option value="">All</option>'
+    + values.map((v) => `<option value="${v}">${labelFn(v)}</option>`).join('');
+  if (values.map(String).includes(current)) el.value = current;
+}
+
+function renderArchives() {
+  const wYear = $('#reports-weekly-year').value;
+  const wMonth = $('#reports-weekly-month').value;
+  const mYear = $('#reports-monthly-year').value;
+
+  const weekly = reportsArchive.weekly.filter((r) => {
+    if (!wYear && !wMonth) return true;
+    const touches = weeklyTouches(r);
+    return touches.some((ym) => {
+      const [y, m] = ym.split('-');
+      if (wYear && y !== wYear) return false;
+      if (wMonth && m !== wMonth) return false;
+      return true;
+    });
+  });
+  const monthly = reportsArchive.monthly.filter((r) => {
+    if (!mYear) return true;
+    return r.period_start.startsWith(`${mYear}-`);
+  });
+
+  $('#reports-weekly-list').innerHTML = renderArchiveItems(weekly, 'weekly');
+  $('#reports-monthly-list').innerHTML = renderArchiveItems(monthly, 'monthly');
+}
+
+['#reports-weekly-year', '#reports-weekly-month', '#reports-monthly-year']
+  .forEach((sel) => {
+    document.addEventListener('change', (e) => {
+      if (e.target.matches(sel)) renderArchives();
+    });
+  });
 
 function renderArchiveItems(rows, kind) {
   if (!rows.length) {

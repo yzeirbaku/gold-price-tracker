@@ -479,3 +479,38 @@ tr.history-row > td {
 .archive-download { margin: 0; }
 #reports-gen-status { margin-top: 0.4rem; }
 
+.archive-filters {
+  display: flex; gap: 0.75rem; flex-wrap: wrap;
+  margin: 0.25rem 0 0.75rem;
+}
+.archive-filters label {
+  display: flex; gap: 0.4rem; align-items: center;
+  font-size: 0.85rem; color: var(--muted);
+}
+.archive-filters select {
+  background: var(--surface); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 0.25rem 0.4rem;
+}
+
+/* When an archive section is a <details>, the <summary> must sit on one
+   line. The <h2> inside gets normalized so the disclosure triangle stays
+   aligned with the heading text. */
+#reports-weekly > summary,
+#reports-monthly > summary {
+  cursor: pointer; list-style: none;
+}
+#reports-weekly > summary::-webkit-details-marker,
+#reports-monthly > summary::-webkit-details-marker { display: none; }
+#reports-weekly > summary > h2,
+#reports-monthly > summary > h2 {
+  display: inline; font-size: 1.1rem; margin: 0;
+}
+#reports-weekly > summary::before,
+#reports-monthly > summary::before {
+  content: "\25B6"; display: inline-block; margin-right: 0.5rem;
+  font-size: 0.7em; color: var(--muted); transition: transform 0.15s;
+}
+#reports-weekly[open] > summary::before,
+#reports-monthly[open] > summary::before { transform: rotate(90deg); }
+

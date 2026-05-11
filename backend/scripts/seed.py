@@ -22,6 +22,9 @@ from urllib.parse import urlparse
 import asyncpg
 
 from app.db import SCHEMA_SQL
+from app.reports.builder import build_report
+from app.reports.storage import upsert_report
+from app.reports.windows import previous_calendar_month, previous_calendar_week
 
 # Typical premiums per dealer × size. Reverse-engineered from a few live
 # /prices snapshots — small bars carry higher per-gram premium than large
@@ -153,7 +156,8 @@ async def main() -> None:
         # Bootstrap schema (idempotent) and wipe any previous seed.
         await conn.execute(SCHEMA_SQL)
         await conn.execute(
-            "TRUNCATE bar_snapshots, coin_snapshots, spot_snapshots RESTART IDENTITY"
+            "TRUNCATE bar_snapshots, coin_snapshots, spot_snapshots, "
+            "report_archive RESTART IDENTITY"
         )
 
         # End at "now" (microsecond-stripped) and step backwards in 30-min
@@ -253,6 +257,19 @@ async def main() -> None:
             f"seeded {len(spot_rows)} spot rows + {len(dealer_rows)} bar rows "
             f"+ {len(coin_rows)} coin rows ({DAYS_BACK} days × {ticks} ticks)"
         )
+
+        # Build a sample weekly + monthly report so the archive isn't empty
+        # on first load — this is what the user opens to inspect.
+        now = datetime.now(UTC)
+        for window in (previous_calendar_week(now), previous_calendar_month(now)):
+            html = await build_report(conn, window)
+            rid = await upsert_report(
+                conn, window.kind, window.period_start, window.period_end, html,
+            )
+            print(
+                f"  + {window.kind} report id={rid} for "
+                f"{window.period_start} - {window.period_end} ({len(html):,} bytes)"
+            )
 
     await pool.close()
 
