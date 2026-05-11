@@ -31,6 +31,7 @@ backend/         FastAPI on Render free tier (Python 3.12)
       seroguld.py / seroguld_coins.py          (same WAF)
       nyfortuna.py / nyfortuna_coins.py
       janjorgensen.py / janjorgensen_coins.py
+    reports/           HTML report generation (windows, loader, analytics, tables, notable, renderer, builder, storage)
   scripts/
     seed.py            local-only: 30 days of fake bar+spot data into local Postgres
   tests/
@@ -51,6 +52,7 @@ Postgres tables (Neon in prod, local Docker in dev):
 - `bar_snapshots` (was `dealer_snapshots` until 2026-05-08; idempotent rename in `db.py`)
 - `coin_snapshots`
 - `spot_snapshots`
+- `report_archive` — rendered HTML reports, keyed by (`report_type`, `period_start`), upsert on conflict
 
 ## Endpoints
 
@@ -63,6 +65,10 @@ Postgres tables (Neon in prod, local Docker in dev):
 | GET  | `/history/bar/{dealer}/{size}` | `X-API-Key` | bar price/premium time series (`?range=24h\|7d\|30d`) |
 | GET  | `/history/coin/{dealer}/{coin_type}/{fine_gold_g}` | `X-API-Key` | coin price/premium time series |
 | POST | `/snapshot` | `X-API-Key` | runs all scrapers + spot + coins, writes to Postgres (cron-only) |
+| GET  | `/reports` | `X-API-Key` | list archived weekly + monthly reports (no html column) |
+| GET  | `/reports/{id}` | `X-API-Key` | download a stored report as .html attachment |
+| POST | `/reports/generate?range=week\|month` | `X-API-Key` | on-demand report, streamed back, not persisted |
+| POST | `/reports/cron?type=weekly\|monthly` | `X-API-Key` | cron-only — generate + upsert into `report_archive` |
 | GET  | `/health` | `X-API-Key` | runs every bar scraper at 5 g, returns per-dealer pass/fail |
 
 ## Dealers
