@@ -39,7 +39,7 @@ Coin coverage is bullion-only via a static registry in `backend/app/coins.py`: K
 | GET  | `/reports`                                                   | list archived weekly + monthly reports |
 | GET  | `/reports/{id}`                                              | download a stored report as .html attachment |
 | POST | `/reports/generate?range=week\|month`                         | on-demand report (not persisted) |
-| POST | `/reports/cron?type=weekly\|monthly`                          | cron-only — generate + persist to archive |
+| POST | `/reports/cron/{type}` (`weekly` or `monthly`)                | cron-only — generate + persist to archive |
 | GET  | `/health`                                                    | per-scraper pass/fail summary |
 
 ## Local dev
@@ -102,6 +102,15 @@ wouldn't map to real Mon–Sun weeks.
 
 `scripts/seed.py` ends by generating one weekly + one monthly report into
 the local archive so the UI isn't empty on first open.
+
+## Cron
+
+Upstash QStash drives the three cron-only endpoints: `/snapshot` every 20
+minutes, `/reports/cron/weekly` on Sundays at 22:30 UTC, and
+`/reports/cron/monthly` on the 1st of each month at 00:30 UTC. Free tier
+covers ~75 messages/day with a 2-minute delivery timeout (handles Render
+free-tier cold starts). Previously these were driven by GitHub Actions,
+which was dropping runs on the free tier.
 
 ## Tests
 

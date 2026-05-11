@@ -73,7 +73,7 @@ Postgres tables (Neon in prod, local Docker in dev):
 | GET  | `/reports` | `X-API-Key` | list archived weekly + monthly reports (no html column) |
 | GET  | `/reports/{id}` | `X-API-Key` | download a stored report as .html attachment |
 | POST | `/reports/generate?range=week\|month` | `X-API-Key` | on-demand report, streamed back, not persisted |
-| POST | `/reports/cron?type=weekly\|monthly` | `X-API-Key` | cron-only — generate + upsert into `report_archive` |
+| POST | `/reports/cron/{type}` (`weekly`\|`monthly`) | `X-API-Key` | cron-only — generate + upsert into `report_archive` |
 | GET  | `/health` | `X-API-Key` | runs every bar scraper at 5 g, returns per-dealer pass/fail |
 
 ## Dealers
@@ -98,7 +98,7 @@ works for bars.
 
 ## Reports
 
-`POST /reports/cron?type=weekly|monthly` builds an HTML report from
+`POST /reports/cron/{type}` (`weekly`|`monthly`) builds an HTML report from
 `bar_snapshots` + `coin_snapshots` + `spot_snapshots` over the previous
 calendar week (Mon–Sun) or month, in Europe/Copenhagen. The rendered HTML
 is upserted into `report_archive` keyed by (`report_type`, `period_start`)
@@ -130,6 +130,25 @@ generator + time-of-month drift), `renderer.py` (Jinja2), `builder.py`
 `scripts/seed.py` truncates the four snapshot tables, fills 30 days of
 synthetic data, then calls `build_report` for previous-week + previous-month
 and upserts both so the local archive is non-empty on first PWA load.
+
+## Cron
+
+Three schedules in **Upstash QStash** drive the cron-only endpoints:
+
+| Schedule | Cron (UTC) | Target |
+|---|---|---|
+| Snapshot | `*/20 * * * *` | `POST /snapshot` |
+| Weekly report | `30 22 * * 0` (Sun 22:30 UTC ≈ Mon 00:30 CPH) | `POST /reports/cron/weekly` |
+| Monthly report | `30 0 1 * *` (1st of month at 00:30 UTC) | `POST /reports/cron/monthly` |
+
+QStash forwards the `X-Api-Key` header via `Upstash-Forward-X-Api-Key` set
+on the schedule. Free tier covers our ~75 messages/day; 2-min delivery
+timeout absorbs Render free-tier cold starts. Managed via the QStash REST
+API (the dashboard UI didn't expose custom headers when we set this up).
+
+The previous GitHub Actions–based scheduler (`.github/workflows/snapshot.yml`)
+was removed on 2026-05-11 because GH Actions cron is best-effort on free
+tier and was dropping runs.
 
 ## Local dev
 
