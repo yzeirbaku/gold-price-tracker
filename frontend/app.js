@@ -699,8 +699,9 @@ fetchSpot();
 // Default size selection: load 10 g listings as soon as the page opens.
 fetchPrices(10);
 // Restore tab state from localStorage (defaults to 'bars'), then route from URL.
+// `navigate` and `ROUTES` are defined below; this call must run AFTER their
+// `const` declarations execute, so it's moved to the very end of the file.
 setTab(currentTab);
-navigate(window.location.pathname, false);
 setInterval(() => {
   if (document.visibilityState === 'visible') fetchSpot();
 }, SPOT_REFRESH_MS);
@@ -755,6 +756,9 @@ function navigate(path, push = true) {
 }
 
 window.addEventListener('popstate', () => navigate(window.location.pathname, false));
+
+// Initial route — must come AFTER `const ROUTES` above (TDZ).
+navigate(window.location.pathname, false);
 
 async function loadReportsArchive() {
   const weeklyList = $('#reports-weekly-list');
