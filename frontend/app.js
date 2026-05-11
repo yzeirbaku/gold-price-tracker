@@ -1,10 +1,20 @@
 const API_KEY_STORAGE = 'gold-tracker-api-key';
+const THEME_STORAGE = 'gold-tracker-theme';
 const BACKEND_URL = (window.BACKEND_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const SPOT_REFRESH_MS = 20000;
 const $ = (s) => document.querySelector(s);
 
 function loadApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ''; }
 function saveApiKey(k) { localStorage.setItem(API_KEY_STORAGE, k); }
+
+function loadTheme() { return localStorage.getItem(THEME_STORAGE) || 'dark'; }
+function saveTheme(t) { localStorage.setItem(THEME_STORAGE, t); }
+function applyTheme(t) {
+  if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+}
+// Apply persisted theme before first paint to avoid a flash of dark on light.
+applyTheme(loadTheme());
 
 function fmtNum(n, decimals, locale = 'en-US') {
   return new Intl.NumberFormat(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n);
@@ -638,14 +648,47 @@ document.querySelectorAll('#listings th.sortable').forEach(th => {
   });
 });
 
-// Settings dialog (API key only — backend URL comes from config.js)
-$('#settings-btn').addEventListener('click', () => {
-  $('#api-key').value = loadApiKey();
-  $('#settings-dialog').showModal();
+// Hamburger menu — opens dropdown with Reports / Settings.
+function setMenuOpen(open) {
+  const dropdown = $('#menu-dropdown');
+  const btn = $('#menu-btn');
+  dropdown.hidden = !open;
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+$('#menu-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  setMenuOpen($('#menu-dropdown').hidden);
 });
+document.addEventListener('click', (e) => {
+  if (!$('#menu-dropdown').hidden && !e.target.closest('.menu-wrapper')) {
+    setMenuOpen(false);
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#menu-dropdown').hidden) setMenuOpen(false);
+});
+$('#menu-dropdown').addEventListener('click', (e) => {
+  const action = e.target.closest('.menu-item')?.dataset.action;
+  if (!action) return;
+  setMenuOpen(false);
+  if (action === 'settings') openSettings();
+  // 'reports' is a placeholder — no-op for now.
+});
+
+// Settings dialog — API key + theme. Backend URL from config.js.
+function openSettings() {
+  $('#api-key').value = loadApiKey();
+  const theme = loadTheme();
+  const themeRadio = document.querySelector(`input[name="theme"][value="${theme}"]`);
+  if (themeRadio) themeRadio.checked = true;
+  $('#settings-dialog').showModal();
+}
 $('#settings-dialog').addEventListener('close', () => {
   if ($('#settings-dialog').returnValue === 'save') {
     saveApiKey($('#api-key').value);
+    const theme = document.querySelector('input[name="theme"]:checked')?.value || 'dark';
+    saveTheme(theme);
+    applyTheme(theme);
     fetchSpot();   // immediately try with the new key
   }
 });

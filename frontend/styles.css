@@ -8,11 +8,49 @@
   --muted: #8a8a90;
   --accent: #e2c054;
   --accent-2: #b8932a;
+  --accent-title-mid: #f5e2a4;
   --error: #e07a5f;
   --ok: #7dc8a4;
   --radius: 14px;
   --radius-sm: 10px;
   --shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 8px 24px rgba(0,0,0,0.25);
+  --header-bg: rgba(15,15,16,0.85);
+  --hover-bg: #2a2a2d;
+  --row-hover: rgba(255,255,255,0.02);
+  --row-hover-strong: rgba(255,255,255,0.03);
+  --bg-glow-1: rgba(226,192,84,0.06);
+  --bg-glow-2: rgba(184,147,42,0.05);
+  --history-border-top: rgba(0,0,0,0.4);
+  /* Active-button gradient — dark mode uses the already-bright accent. */
+  --btn-active-top: var(--accent);
+  --btn-active-bottom: var(--accent-2);
+}
+[data-theme="light"] {
+  --bg: #f7f6f2;
+  --surface: #ffffff;
+  --surface-2: #f0eee7;
+  --border: #e3e0d6;
+  --fg: #1a1a1c;
+  --fg-soft: #3a3a3e;
+  --muted: #6b6b70;
+  /* Title gradient + dealer links use the Brass palette. */
+  --accent: #b58915;
+  --accent-2: #8a6510;
+  --accent-title-mid: #e0a833;
+  --bg-glow-1: rgba(181,137,21,0.06);
+  --bg-glow-2: rgba(138,101,16,0.04);
+  --error: #b04428;
+  --ok: #3a8a5c;
+  --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 6px 18px rgba(0,0,0,0.06);
+  --header-bg: rgba(247,246,242,0.85);
+  --hover-bg: #ebe8de;
+  --row-hover: rgba(0,0,0,0.025);
+  --row-hover-strong: rgba(0,0,0,0.04);
+  --history-border-top: rgba(0,0,0,0.08);
+  /* Active-button highlight uses the brighter Honey gradient so it pops
+     against white without going as dark as the Brass title tones. */
+  --btn-active-top: #e8b94a;
+  --btn-active-bottom: #c8941f;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -23,8 +61,8 @@ body {
   font-size: 16px; line-height: 1.45;
   color: var(--fg);
   background:
-    radial-gradient(1100px 600px at 80% -10%, rgba(226,192,84,0.06), transparent 60%),
-    radial-gradient(900px 500px at -10% 0%, rgba(184,147,42,0.05), transparent 60%),
+    radial-gradient(1100px 600px at 80% -10%, var(--bg-glow-1), transparent 60%),
+    radial-gradient(900px 500px at -10% 0%, var(--bg-glow-2), transparent 60%),
     var(--bg);
   background-attachment: fixed;
   padding-bottom: env(safe-area-inset-bottom);
@@ -32,12 +70,14 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+  transition: background-color 200ms ease, color 200ms ease;
 }
 
 header {
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center;
+  gap: 0.5rem;
   padding: 1rem 1.25rem; border-bottom: 1px solid var(--border);
-  background: rgba(15,15,16,0.85);
+  background: var(--header-bg);
   backdrop-filter: saturate(140%) blur(8px);
   -webkit-backdrop-filter: saturate(140%) blur(8px);
   position: sticky; top: 0; z-index: 10;
@@ -45,9 +85,38 @@ header {
 header h1 {
   margin: 0;
   font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em;
-  background: linear-gradient(90deg, var(--accent) 0%, #f5e2a4 50%, var(--accent-2) 100%);
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-title-mid) 50%, var(--accent-2) 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
+
+/* Hamburger menu — anchored next to the title, dropdown appears below. */
+.menu-wrapper { position: relative; flex: 0 0 auto; }
+.menu-dropdown {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: 0.35rem;
+  z-index: 20;
+}
+.menu-dropdown[hidden] { display: none; }
+.menu-item {
+  display: block; width: 100%;
+  background: transparent; border: none;
+  padding: 0.55rem 0.75rem;
+  color: var(--fg-soft);
+  font: inherit; font-size: 0.9rem;
+  text-align: left; cursor: pointer;
+  border-radius: 6px;
+  transition: background 100ms ease, color 100ms ease;
+}
+.menu-item:hover { background: var(--hover-bg); color: var(--fg); }
+.menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+#menu-btn { font-size: 1.25rem; }
 .icon-btn {
   background: transparent; border: 1px solid transparent;
   color: var(--fg-soft); width: 46px; height: 46px;
@@ -119,11 +188,11 @@ main { max-width: 720px; margin: 0 auto; }
   font-size: 0.95rem; font-weight: 500; cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
-.buttons button:hover { background: #2a2a2d; color: var(--fg); }
+.buttons button:hover { background: var(--hover-bg); color: var(--fg); }
 .buttons button:active { transform: scale(0.98); }
 .buttons button.active {
-  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
-  color: #1a1300; border-color: var(--accent-2);
+  background: linear-gradient(180deg, var(--btn-active-top) 0%, var(--btn-active-bottom) 100%);
+  color: #1a1300; border-color: var(--btn-active-bottom);
   box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 6px 16px rgba(184,147,42,0.18);
 }
 
@@ -169,7 +238,7 @@ th.sortable.active { color: var(--accent); }
 th .sort-indicator { font-size: 0.85em; }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr { transition: background 120ms ease; }
-tbody tr:hover { background: rgba(255,255,255,0.02); }
+tbody tr:hover { background: var(--row-hover); }
 tr.error td { color: var(--error); }
 tr.unavailable td { color: var(--muted); }
 tr.out_of_stock td { color: var(--muted); }
@@ -241,6 +310,30 @@ dialog input {
   font: inherit;
 }
 dialog input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(226,192,84,0.18); }
+.settings-field {
+  margin: 0.75rem 0 0; padding: 0.65rem 0.8rem;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.settings-field:first-of-type { margin-top: 0; }
+.settings-field legend {
+  padding: 0 0.35rem; font-size: 0.78rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.settings-field input[type="password"],
+.settings-field input[type="text"] {
+  /* No top margin — legend already provides the label/input gap. */
+  margin-top: 0.1rem;
+}
+.theme-option {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  margin: 0.35rem 1rem 0.1rem 0;
+  font-size: 0.9rem; color: var(--fg-soft); cursor: pointer;
+}
+.theme-option input[type="radio"] {
+  accent-color: var(--accent);
+  margin: 0; width: auto;
+}
 dialog menu {
   display: flex; gap: 0.5rem; justify-content: flex-end;
   margin: 1rem 0 0; padding: 0;
@@ -252,10 +345,10 @@ dialog menu button {
   font: inherit; cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
-dialog menu button:hover { background: #2a2a2d; color: var(--fg); }
+dialog menu button:hover { background: var(--hover-bg); color: var(--fg); }
 dialog menu button[value="save"] {
-  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
-  color: #1a1300; border-color: var(--accent-2); font-weight: 600;
+  background: linear-gradient(180deg, var(--btn-active-top) 0%, var(--btn-active-bottom) 100%);
+  color: #1a1300; border-color: var(--btn-active-bottom); font-weight: 600;
 }
 
 .spot-row {
@@ -282,7 +375,7 @@ dialog menu button[value="save"] {
 
 /* Inline history panel ———————————————————————————————————————————————— */
 tr.row-clickable { cursor: pointer; }
-tr.row-clickable:hover { background: rgba(255,255,255,0.03); }
+tr.row-clickable:hover { background: var(--row-hover-strong); }
 tr.row-expanded { background: rgba(226,192,84,0.05); }
 tr.row-expanded td { border-bottom-color: transparent; }
 
@@ -296,7 +389,7 @@ tr.history-row > td {
      so it reads as a secondary detail panel. Horizontal padding kept
      small so charts fill nearly the full card width. */
   background: var(--bg);
-  border-top: 1px solid rgba(0,0,0,0.4);
+  border-top: 1px solid var(--history-border-top);
   box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset;
   padding: 0.85rem 0.6rem 0.95rem;
 }
@@ -319,7 +412,7 @@ tr.history-row > td {
   font-size: 0.78rem; font-weight: 500; cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
-.range-toggle button:hover { background: #2a2a2d; color: var(--fg); }
+.range-toggle button:hover { background: var(--hover-bg); color: var(--fg); }
 .range-toggle button.active {
   background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
   color: #1a1300; border-color: var(--accent-2);
