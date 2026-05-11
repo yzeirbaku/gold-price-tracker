@@ -604,6 +604,7 @@ function setTab(tab) {
   });
   $('#bars-view').hidden = tab !== 'bars';
   $('#coins-view').hidden = tab !== 'coins';
+  $('#reports-view').hidden = true;
   collapseHistory();  // stop a panel from sticking around when switching tabs
   if (tab === 'coins' && !lastCoinListings.length) fetchCoins();
 }
@@ -672,7 +673,7 @@ $('#menu-dropdown').addEventListener('click', (e) => {
   if (!action) return;
   setMenuOpen(false);
   if (action === 'settings') openSettings();
-  // 'reports' is a placeholder — no-op for now.
+  else if (action === 'reports') openReportsView();
 });
 
 // Settings dialog — API key + theme. Backend URL from config.js.
@@ -710,3 +711,124 @@ document.addEventListener('visibilitychange', () => {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('service-worker.js').catch(() => {});
 }
+
+// Reports view ——————————————————————————————————————————————————————————————
+
+function showReportsView() {
+  $('#bars-view').hidden = true;
+  $('#coins-view').hidden = true;
+  $('#reports-view').hidden = false;
+  document.querySelectorAll('#tab-strip button').forEach((b) => {
+    b.classList.remove('active');
+    b.setAttribute('aria-selected', 'false');
+  });
+}
+
+async function openReportsView() {
+  showReportsView();
+  await loadReportsArchive();
+}
+
+async function loadReportsArchive() {
+  const weeklyList = $('#reports-weekly-list');
+  const monthlyList = $('#reports-monthly-list');
+  weeklyList.innerHTML = '<div class="muted-tiny">Loading…</div>';
+  monthlyList.innerHTML = '<div class="muted-tiny">Loading…</div>';
+
+  let rows = [];
+  try {
+    const res = await fetch(`${BACKEND_URL}/reports`, {
+      headers: { 'X-API-Key': loadApiKey() },
+    });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    rows = await res.json();
+  } catch (e) {
+    weeklyList.innerHTML = `<div class="muted-tiny">Error: ${e.message}</div>`;
+    monthlyList.innerHTML = '';
+    return;
+  }
+  const weekly = rows.filter((r) => r.type === 'weekly');
+  const monthly = rows.filter((r) => r.type === 'monthly');
+  weeklyList.innerHTML = renderArchiveItems(weekly, 'weekly');
+  monthlyList.innerHTML = renderArchiveItems(monthly, 'monthly');
+}
+
+function renderArchiveItems(rows, kind) {
+  if (!rows.length) {
+    return `<div class="muted-tiny">No ${kind} reports archived yet.</div>`;
+  }
+  return rows.map((r) => {
+    const label = kind === 'weekly'
+      ? `Week of ${r.period_start} – ${r.period_end}`
+      : monthLabel(r.period_start);
+    return `
+      <div class="archive-item" data-id="${r.id}">
+        <span class="archive-label">${label}</span>
+        <button class="archive-download icon-btn" aria-label="Download" type="button">↓</button>
+      </div>`;
+  }).join('');
+}
+
+function monthLabel(periodStart) {
+  const [y, m] = periodStart.split('-');
+  const names = ['January','February','March','April','May','June',
+                 'July','August','September','October','November','December'];
+  return `${names[parseInt(m, 10) - 1]} ${y}`;
+}
+
+async function downloadReport(id) {
+  const res = await fetch(`${BACKEND_URL}/reports/${id}`, {
+    headers: { 'X-API-Key': loadApiKey() },
+  });
+  if (!res.ok) {
+    alert(`Download failed: status ${res.status}`);
+    return;
+  }
+  await streamToFileFromResponse(res);
+}
+
+async function generateOnDemand(range, button) {
+  const status = $('#reports-gen-status');
+  status.textContent = 'Generating…';
+  button.disabled = true;
+  try {
+    const res = await fetch(
+      `${BACKEND_URL}/reports/generate?range=${range}`,
+      { method: 'POST', headers: { 'X-API-Key': loadApiKey() } },
+    );
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    await streamToFileFromResponse(res);
+    status.textContent = '';
+  } catch (e) {
+    status.textContent = `Error: ${e.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function streamToFileFromResponse(res) {
+  const blob = await res.blob();
+  const cd = res.headers.get('content-disposition') || '';
+  const m = cd.match(/filename="([^"]+)"/);
+  const filename = m ? m[1] : 'report.html';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+$('#reports-gen-week').addEventListener('click', (e) => {
+  generateOnDemand('week', e.currentTarget);
+});
+$('#reports-gen-month').addEventListener('click', (e) => {
+  generateOnDemand('month', e.currentTarget);
+});
+$('#reports-view').addEventListener('click', (e) => {
+  const item = e.target.closest('.archive-item');
+  if (!item) return;
+  downloadReport(parseInt(item.dataset.id, 10));
+});

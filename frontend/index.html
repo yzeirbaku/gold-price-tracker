@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=34" />
+  <link rel="stylesheet" href="styles.css?v=35" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
@@ -68,6 +68,27 @@
     </section>
   </div>
 
+  <div id="reports-view" hidden>
+    <section id="reports-generate" class="card">
+      <h2>Generate now</h2>
+      <div class="buttons">
+        <button id="reports-gen-week" type="button">Last week</button>
+        <button id="reports-gen-month" type="button">Last month</button>
+      </div>
+      <div id="reports-gen-status" class="muted-tiny"></div>
+    </section>
+
+    <section id="reports-weekly" class="card">
+      <h2>Weekly archive</h2>
+      <div id="reports-weekly-list" class="archive-list"></div>
+    </section>
+
+    <section id="reports-monthly" class="card">
+      <h2>Monthly archive</h2>
+      <div id="reports-monthly-list" class="archive-list"></div>
+    </section>
+  </div>
+
   <div id="coins-view" hidden>
     <section id="coins" class="card">
       <div class="results-head">
@@ -117,7 +138,7 @@
 
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=34"></script>
-  <script src="app.js?v=34"></script>
+  <script src="config.js?v=35"></script>
+  <script src="app.js?v=35"></script>
 </body>
 </html>

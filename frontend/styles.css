@@ -465,3 +465,17 @@ tr.history-row > td {
   #coin-listings td:nth-child(3) { display: none; }
 }
 
+.archive-list { display: flex; flex-direction: column; gap: 0.35rem; }
+.archive-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.55rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.archive-item:hover { border-color: var(--accent); }
+.archive-label { font-size: 0.95rem; }
+.archive-download { margin: 0; }
+#reports-gen-status { margin-top: 0.4rem; }
+
