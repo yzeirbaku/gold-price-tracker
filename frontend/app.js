@@ -949,7 +949,11 @@ async function downloadReport(id) {
 
 async function generateOnDemand(range, button) {
   const status = $('#reports-gen-status');
-  status.textContent = 'Generating…';
+  status.innerHTML = `
+    <div class="loading-msg">
+      <div class="spinner"><span></span><span></span><span></span></div>
+      <div class="loading-text">Generating report…</div>
+    </div>`;
   button.disabled = true;
   try {
     const res = await fetch(
@@ -958,7 +962,7 @@ async function generateOnDemand(range, button) {
     );
     if (!res.ok) throw new Error(`status ${res.status}`);
     await streamToFileFromResponse(res);
-    status.textContent = '';
+    status.innerHTML = '';
   } catch (e) {
     status.textContent = `Error: ${e.message}`;
   } finally {

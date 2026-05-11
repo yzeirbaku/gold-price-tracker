@@ -567,9 +567,9 @@ tr.history-row > td {
 /* Subtle yellow tint on hover and current selection — much lighter than the
    solid bar-size button gradient so the dropdown feels softer, and shifted
    toward true yellow (rather than honey/beige) for more visual punch. */
-.dd-list li:hover { background: rgba(247, 213, 50, 0.18); }
-.dd-list li.selected { background: rgba(247, 213, 50, 0.28); }
-.dd-list li.selected:hover { background: rgba(247, 213, 50, 0.34); }
+.dd-list li:hover { background: rgba(255, 224, 32, 0.20); }
+.dd-list li.selected { background: rgba(255, 224, 32, 0.32); }
+.dd-list li.selected:hover { background: rgba(255, 224, 32, 0.40); }
 
 /* When an archive section is a <details>, the <summary> must sit on one
    line. The <h2> inside gets normalized so the disclosure triangle stays
