@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en" data-kind="{{ kind }}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gold Dealer Report — {{ label }}</title>
+  <style>
+    :root {
+      --bg: #ffffff; --fg: #1a1a1a; --muted: #6a6a6a;
+      --accent: #b58915; --border: #e5e1d6;
+      --row-alt: #faf8f2;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #15140f; --fg: #f0ece0; --muted: #9a9a9a;
+        --accent: #e8b94a; --border: #2c2a22;
+        --row-alt: #1c1b14;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           line-height: 1.5; font-size: 15px; padding: 1rem; max-width: 920px;
+           margin: 0 auto; }
+    h1 { font-size: 1.5rem; margin: 0 0 0.25rem; color: var(--accent); }
+    h2 { font-size: 1.15rem; margin: 1.8rem 0 0.5rem; border-bottom: 1px solid var(--border);
+         padding-bottom: 0.25rem; }
+    h3 { font-size: 1rem; margin: 1.2rem 0 0.4rem; }
+    .muted { color: var(--muted); font-size: 0.85rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 0.5rem 0; }
+    th, td { padding: 0.4rem 0.6rem; text-align: left; border-bottom: 1px solid var(--border); }
+    th { font-weight: 600; color: var(--muted); }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tr.market td { border-top: 2px solid var(--border); font-style: italic; color: var(--muted); }
+    .spark { font-family: "SF Mono", Consolas, monospace; letter-spacing: -1px; }
+    .tag { display: inline-block; padding: 0.1rem 0.5rem; border: 1px solid var(--accent);
+           color: var(--accent); border-radius: 12px; font-size: 0.8rem; }
+    ul.bullets { padding-left: 1.2rem; }
+    ul.bullets li { margin: 0.25rem 0; }
+    .fp-block { padding: 0.7rem 0; border-bottom: 1px dashed var(--border); }
+    .fp-block:last-of-type { border-bottom: none; }
+    .fp-line { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .fp-line .label { color: var(--muted); min-width: 7.5rem; }
+  </style>
+</head>
+<body>
+
+<section id="section-header">
+  <h1>{{ label }}</h1>
+  <div class="muted">{{ kind | capitalize }} report · generated {{ generated_at }}</div>
+</section>
+
+<section id="section-spot">
+  <h2>Spot context</h2>
+  <table>
+    <thead>
+      <tr><th></th><th class="num">Open</th><th class="num">Close</th>
+          <th class="num">High</th><th class="num">Low</th><th class="num">Δ</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Gold (DKK/g)</td>
+        <td class="num">{{ "%.2f"|format(spot.gold.open) }}</td>
+        <td class="num">{{ "%.2f"|format(spot.gold.close) }}</td>
+        <td class="num">{{ "%.2f"|format(spot.gold.high) }}</td>
+        <td class="num">{{ "%.2f"|format(spot.gold.low) }}</td>
+        <td class="num">{{ "%+.2f"|format(spot.gold.delta_dkk_per_g) }}
+            ({{ "%+.2f"|format(spot.gold.delta_pct) }}%)</td>
+      </tr>
+      <tr>
+        <td>Silver (DKK/g)</td>
+        <td class="num">{{ "%.2f"|format(spot.silver.open) }}</td>
+        <td class="num">{{ "%.2f"|format(spot.silver.close) }}</td>
+        <td class="num">{{ "%.2f"|format(spot.silver.high) }}</td>
+        <td class="num">{{ "%.2f"|format(spot.silver.low) }}</td>
+        <td class="num">{{ "%+.2f"|format(spot.silver.delta_dkk_per_g) }}
+            ({{ "%+.2f"|format(spot.silver.delta_pct) }}%)</td>
+      </tr>
+    </tbody>
+  </table>
+  {% if spot.weekend_flat %}
+    <div class="muted">Spot was flat over the weekend (no FX or spot updates), as expected.</div>
+  {% endif %}
+  {% if spot.fx_note %}<div class="muted">{{ spot.fx_note }}</div>{% endif %}
+</section>
+
+<section id="section-fingerprints">
+  <h2>Dealer behavior fingerprints</h2>
+  {% for fp in fingerprints %}
+  <div class="fp-block">
+    <h3>{{ fp.dealer }}</h3>
+    <div class="fp-line"><span class="label">Updates:</span>
+      <span>{{ fp.cadence.total_changes }} total
+        · {{ fp.cadence.changes_per_week }}/week
+        {% if fp.cadence.median_interval_hours %}
+        · median interval {{ fp.cadence.median_interval_hours }}h
+        {% endif %}
+      </span>
+    </div>
+    {% if fp.cadence.latest_change %}
+    <div class="fp-line"><span class="label">Latest change:</span>
+      <span>{{ fp.cadence.latest_change }}</span></div>
+    {% endif %}
+    {% if kind == "monthly" %}
+    <div class="fp-line"><span class="label">Time of day:</span>
+      <span class="spark">
+        morn {{ "%-3d"|format(fp.time_of_day.morning) }}
+        · aft {{ "%-3d"|format(fp.time_of_day.afternoon) }}
+        · eve {{ "%-3d"|format(fp.time_of_day.evening) }}
+        · night {{ "%-3d"|format(fp.time_of_day.night) }}
+      </span>
+    </div>
+    <div class="fp-line"><span class="label">Day of week:</span>
+      <span class="spark">
+        {% for n in fp.day_of_week %}{{ ["M","T","W","Th","F","Sa","Su"][loop.index0] }}{{ n }} {% endfor %}
+      </span>
+    </div>
+    {% endif %}
+    <div class="fp-line"><span class="label">Weekend:</span>
+      <span>{{ fp.weekend.summary }}</span></div>
+    <div class="fp-line"><span class="label">Spot tracking:</span>
+      <span>
+        {% if fp.spot_tracking.correlation is not none %}
+          corr {{ fp.spot_tracking.correlation }}
+          {% if fp.spot_tracking.lag_hours %}, lag {{ fp.spot_tracking.lag_hours }}h{% endif %}
+          {% if fp.spot_tracking.sensitivity is not none %}, sensitivity {{ fp.spot_tracking.sensitivity }}×{% endif %}
+        {% else %}insufficient data{% endif %}
+      </span>
+    </div>
+    {% if fp.premium_band.p25 is not none %}
+    <div class="fp-line"><span class="label">Premium band:</span>
+      <span>{{ fp.premium_band.p25 }}% – {{ fp.premium_band.p75 }}% (IQR)</span></div>
+    {% endif %}
+    <div class="fp-line"><span class="label">Fingerprint:</span>
+      <span class="tag">{{ fp.fingerprint_tag }}</span></div>
+  </div>
+  {% endfor %}
+</section>
+
+<section id="section-bars">
+  <h2>Bars</h2>
+  {% for slice in bars %}
+  <h3>{{ slice.size_g }} g bars</h3>
+  <table>
+    <thead>
+      <tr><th>Dealer</th><th class="num">Median DKK</th><th class="num">Med. premium</th>
+          <th class="num">Spread (pp)</th><th class="num">% cheapest</th><th>Trend</th></tr>
+    </thead>
+    <tbody>
+    {% for r in slice.rows %}
+      <tr class="{{ 'market' if r.dealer == 'Market' else '' }}">
+        <td>{{ r.dealer }}</td>
+        <td class="num">{{ "%.2f"|format(r.median_price_dkk) if r.median_price_dkk is not none else "—" }}</td>
+        <td class="num">{{ "%.2f"|format(r.median_premium_pct) if r.median_premium_pct is not none else "—" }}%</td>
+        <td class="num">{{ "%.2f"|format(r.spread_pp) if r.spread_pp is not none else "—" }}</td>
+        <td class="num">{{ "%.1f"|format(r.pct_time_cheapest) if r.pct_time_cheapest is not none else "—" }}%</td>
+        <td class="spark">{{ r.sparkline }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endfor %}
+</section>
+
+<section id="section-coins">
+  <h2>Coins</h2>
+  {% if coins %}
+    {% for slice in coins %}
+    <h3>{{ slice.coin_type }} · {{ slice.size_label }}</h3>
+    <table>
+      <thead>
+        <tr><th>Dealer</th><th class="num">Median DKK</th><th class="num">Med. premium</th>
+            <th class="num">Spread (pp)</th><th class="num">% cheapest</th><th>Trend</th></tr>
+      </thead>
+      <tbody>
+      {% for r in slice.rows %}
+        <tr class="{{ 'market' if r.dealer == 'Market' else '' }}">
+          <td>{{ r.dealer }}</td>
+          <td class="num">{{ "%.2f"|format(r.median_price_dkk) if r.median_price_dkk is not none else "—" }}</td>
+          <td class="num">{{ "%.2f"|format(r.median_premium_pct) if r.median_premium_pct is not none else "—" }}%</td>
+          <td class="num">{{ "%.2f"|format(r.spread_pp) if r.spread_pp is not none else "—" }}</td>
+          <td class="num">{{ "%.1f"|format(r.pct_time_cheapest) if r.pct_time_cheapest is not none else "—" }}%</td>
+          <td class="spark">{{ r.sparkline }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endfor %}
+  {% else %}
+    <div class="muted">No coin observations in this period.</div>
+  {% endif %}
+</section>
+
+<section id="section-notable">
+  <h2>Notable this period</h2>
+  {% if notable %}
+  <ul class="bullets">
+  {% for b in notable %}<li>{{ b.text }}</li>{% endfor %}
+  </ul>
+  {% else %}
+  <div class="muted">Nothing crossed the threshold this period.</div>
+  {% endif %}
+</section>
+
+{% if time_of_month %}
+<section id="section-time-of-month">
+  <h2>Time-of-month drift</h2>
+  <table>
+    <thead>
+      <tr><th>Dealer</th>{% for i in range(time_of_month[0].weekly_avg_premium_pct|length) %}<th class="num">W{{ i + 1 }}</th>{% endfor %}<th class="num">Δ (last − first)</th></tr>
+    </thead>
+    <tbody>
+    {% for r in time_of_month %}
+      <tr class="{{ 'market' if r.dealer == 'Market' else '' }}">
+        <td>{{ r.dealer }}</td>
+        {% for v in r.weekly_avg_premium_pct %}<td class="num">{{ "%.2f"|format(v) }}%</td>{% endfor %}
+        <td class="num">{{ "%+.2f"|format(r.delta_pp) }}pp</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<script type="application/json" id="report-data">
+{{ json_sidecar | safe }}
+</script>
+
+</body>
+</html>
