@@ -8,26 +8,24 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=31" />
+  <link rel="stylesheet" href="styles.css?v=34" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
   <header>
-    <div class="header-inner">
-      <div class="menu-wrapper">
-        <button id="menu-btn" class="icon-btn" aria-label="Menu" aria-haspopup="true" aria-expanded="false" type="button">☰</button>
-        <div id="menu-dropdown" class="menu-dropdown" hidden role="menu">
-          <button class="menu-item" data-action="reports" role="menuitem" type="button">Reports</button>
-          <button class="menu-item" data-action="settings" role="menuitem" type="button">Settings</button>
-        </div>
+    <div class="menu-wrapper">
+      <button id="menu-btn" class="icon-btn" aria-label="Menu" aria-haspopup="true" aria-expanded="false" type="button">☰</button>
+      <div id="menu-dropdown" class="menu-dropdown" hidden role="menu">
+        <button class="menu-item" data-action="reports" role="menuitem" type="button">Reports</button>
+        <button class="menu-item" data-action="settings" role="menuitem" type="button">Settings</button>
       </div>
-      <div class="header-title">
-        <h1>Danish Market Gold Prices</h1>
-        <nav id="tab-strip" class="tab-strip" role="tablist">
-          <button data-tab="bars" class="active" type="button" role="tab" aria-selected="true">Bars</button>
-          <button data-tab="coins" type="button" role="tab" aria-selected="false">Coins</button>
-        </nav>
-      </div>
+    </div>
+    <div class="header-title">
+      <h1>Danish Market Gold Prices</h1>
+      <nav id="tab-strip" class="tab-strip" role="tablist">
+        <button data-tab="bars" class="active" type="button" role="tab" aria-selected="true">Bars</button>
+        <button data-tab="coins" type="button" role="tab" aria-selected="false">Coins</button>
+      </nav>
     </div>
   </header>
 
@@ -119,7 +117,7 @@
 
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=31"></script>
-  <script src="app.js?v=31"></script>
+  <script src="config.js?v=34"></script>
+  <script src="app.js?v=34"></script>
 </body>
 </html>
