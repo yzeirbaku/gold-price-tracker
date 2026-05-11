@@ -28,6 +28,9 @@ def test_build_bar_table_aggregates_per_dealer() -> None:
     assert isinstance(tavex, BarSizeRow)
     assert tavex.median_price_dkk is not None
     assert tavex.median_premium_pct is not None
+    # Tavex premiums: 7% and 8% \u2192 min 7, max 8
+    assert tavex.min_premium_pct == 7.0
+    assert tavex.max_premium_pct == 8.0
     # Vitus Guld is the cheapest in every snapshot \u2192 100%
     vitus = by_dealer["Vitus Guld"]
     assert vitus.pct_time_cheapest == 100.0

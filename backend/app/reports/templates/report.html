@@ -59,13 +59,16 @@
     }
     details[open] > summary::before { transform: rotate(90deg); }
     details > summary::-webkit-details-marker { display: none; }
+    .fp-dealer { padding: 0.75rem 0; border-bottom: 1px solid var(--border); }
+    .fp-dealer:last-of-type { border-bottom: none; }
+    .fp-dealer > h3 { margin: 0.2rem 0 0.5rem; }
     .fp-grid {
       display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0.5rem 1.5rem; padding-top: 0.5rem;
+      gap: 0.5rem 1.5rem;
     }
     @media (max-width: 600px) { .fp-grid { grid-template-columns: 1fr; } }
-    .fp-block { padding: 0.5rem 0; border-bottom: 1px dashed var(--border); }
-    .fp-block:last-of-type { border-bottom: none; }
+    .fp-block { padding: 0.5rem 0.75rem; background: var(--row-alt); border-radius: 6px; }
+    .fp-cat-label { font-weight: 600; color: var(--accent); margin-bottom: 0.35rem; font-size: 0.9rem; }
     .fp-line { display: flex; gap: 0.5rem; flex-wrap: wrap; font-size: 0.92rem; }
     .fp-line .label { color: var(--muted); min-width: 6.5rem; }
   </style>
@@ -117,53 +120,63 @@
 
 <details id="section-fingerprints">
   <summary>Dealer behavior fingerprints</summary>
-  <div class="fp-grid">
   {% for fp in fingerprints %}
-  <div class="fp-block">
+  <div class="fp-dealer">
     <h3>{{ fp.dealer }}</h3>
-    <div class="fp-line"><span class="label">Updates:</span>
-      <span>{{ fp.cadence.total_changes }} total
-        · {{ fp.cadence.changes_per_week }}/week
-        {% if fp.cadence.median_interval_hours %}
-        · median interval {{ fp.cadence.median_interval_hours }}h
-        {% endif %}
-      </span>
+    <div class="fp-grid">
+    {% for cat in fp.categories %}
+    <div class="fp-block">
+      <div class="fp-cat-label">{{ cat.name }}</div>
+      <div class="fp-line"><span class="label">Updates:</span>
+        <span>{{ cat.cadence.total_changes }} total
+          {% if kind == "monthly" %}
+          · {{ cat.cadence.changes_per_week }}/week
+          {% endif %}
+          {% if cat.cadence.median_interval_hours %}
+          · median interval {{ cat.cadence.median_interval_hours }}h
+          {% endif %}
+        </span>
+      </div>
+      {% if cat.cadence.latest_change %}
+      <div class="fp-line"><span class="label">Latest:</span>
+        <span>{{ cat.cadence.latest_change }}</span></div>
+      {% endif %}
+      {% if kind == "monthly" %}
+      <div class="fp-line"><span class="label">Time of day:</span>
+        <span>morn {{ cat.time_of_day.morning }} ·
+          aft {{ cat.time_of_day.afternoon }} ·
+          eve {{ cat.time_of_day.evening }} ·
+          night {{ cat.time_of_day.night }}</span>
+      </div>
+      <div class="fp-line"><span class="label">Day of week:</span>
+        <span>{% for n in cat.day_of_week %}{{ ["M","T","W","Th","F","Sa","Su"][loop.index0] }}{{ n }} {% endfor %}</span>
+      </div>
+      {% endif %}
+      <div class="fp-line"><span class="label">Weekend:</span>
+        <span>{{ cat.weekend.summary }}</span></div>
+      <div class="fp-line"><span class="label">Spot tracking:</span>
+        <span>
+          {% if cat.spot_tracking.correlation is not none %}
+            Correlation: <strong>{{ cat.spot_tracking.correlation }}</strong>
+            {% if cat.spot_tracking.correlation_label %}({{ cat.spot_tracking.correlation_label }}){% endif %}
+            {% if cat.spot_tracking.sensitivity is not none %}
+              · Sensitivity: <strong>{{ cat.spot_tracking.sensitivity }}×</strong>
+              {% if cat.spot_tracking.sensitivity_label %}({{ cat.spot_tracking.sensitivity_label }}){% endif %}
+            {% endif %}
+          {% else %}insufficient data{% endif %}
+        </span>
+      </div>
+      {% if cat.premium_band.p25 is not none %}
+      <div class="fp-line"><span class="label">Premium band:</span>
+        <span>{{ cat.premium_band.p25 }}% – {{ cat.premium_band.p75 }}% (IQR)</span></div>
+      {% endif %}
+      <div class="fp-line"><span class="label">Fingerprint:</span>
+        <span class="tag">{{ cat.fingerprint_tag }}</span></div>
     </div>
-    {% if fp.cadence.latest_change %}
-    <div class="fp-line"><span class="label">Latest:</span>
-      <span>{{ fp.cadence.latest_change }}</span></div>
-    {% endif %}
-    {% if kind == "monthly" %}
-    <div class="fp-line"><span class="label">Time of day:</span>
-      <span>morn {{ fp.time_of_day.morning }} ·
-        aft {{ fp.time_of_day.afternoon }} ·
-        eve {{ fp.time_of_day.evening }} ·
-        night {{ fp.time_of_day.night }}</span>
+    {% endfor %}
     </div>
-    <div class="fp-line"><span class="label">Day of week:</span>
-      <span>{% for n in fp.day_of_week %}{{ ["M","T","W","Th","F","Sa","Su"][loop.index0] }}{{ n }} {% endfor %}</span>
-    </div>
-    {% endif %}
-    <div class="fp-line"><span class="label">Weekend:</span>
-      <span>{{ fp.weekend.summary }}</span></div>
-    <div class="fp-line"><span class="label">Spot tracking:</span>
-      <span>
-        {% if fp.spot_tracking.correlation is not none %}
-          corr {{ fp.spot_tracking.correlation }}
-          {% if fp.spot_tracking.lag_hours is not none %}, lag {{ fp.spot_tracking.lag_hours }}h{% endif %}
-          {% if fp.spot_tracking.sensitivity is not none %}, sensitivity {{ fp.spot_tracking.sensitivity }}×{% endif %}
-        {% else %}insufficient data{% endif %}
-      </span>
-    </div>
-    {% if fp.premium_band.p25 is not none %}
-    <div class="fp-line"><span class="label">Premium band:</span>
-      <span>{{ fp.premium_band.p25 }}% – {{ fp.premium_band.p75 }}% (IQR)</span></div>
-    {% endif %}
-    <div class="fp-line"><span class="label">Fingerprint:</span>
-      <span class="tag">{{ fp.fingerprint_tag }}</span></div>
   </div>
   {% endfor %}
-  </div>
 </details>
 
 <details id="section-bars">
@@ -173,7 +186,7 @@
   <table>
     <thead>
       <tr><th>Dealer</th><th class="num">Median DKK</th><th class="num">Med. premium</th>
-          <th class="num">Spread (pp)</th><th class="num">% cheapest</th></tr>
+          <th class="num">Min%</th><th class="num">Max%</th><th class="num">% cheapest</th></tr>
     </thead>
     <tbody>
     {% for r in slice.rows %}
@@ -181,7 +194,8 @@
         <td>{{ r.dealer }}</td>
         <td class="num">{{ "%.2f"|format(r.median_price_dkk) if r.median_price_dkk is not none else "—" }}</td>
         <td class="num">{{ "%.2f"|format(r.median_premium_pct) if r.median_premium_pct is not none else "—" }}%</td>
-        <td class="num">{{ "%.2f"|format(r.spread_pp) if r.spread_pp is not none else "—" }}</td>
+        <td class="num">{{ "%.2f"|format(r.min_premium_pct) if r.min_premium_pct is not none else "—" }}%</td>
+        <td class="num">{{ "%.2f"|format(r.max_premium_pct) if r.max_premium_pct is not none else "—" }}%</td>
         <td class="num">{{ "%.1f"|format(r.pct_time_cheapest) if r.pct_time_cheapest is not none else "—" }}%</td>
       </tr>
     {% endfor %}
@@ -191,30 +205,13 @@
 </details>
 
 <details id="section-coins">
-  <summary>Coins</summary>
-  {% if coins %}
-    {% for slice in coins %}
-    <h3>{{ slice.coin_type }} · {{ slice.size_label }}</h3>
-    <table>
-      <thead>
-        <tr><th>Dealer</th><th class="num">Median DKK</th><th class="num">Med. premium</th>
-            <th class="num">Spread (pp)</th><th class="num">% cheapest</th></tr>
-      </thead>
-      <tbody>
-      {% for r in slice.rows %}
-        <tr class="{{ 'market' if r.dealer == 'Market' else '' }}">
-          <td>{{ r.dealer }}</td>
-          <td class="num">{{ "%.2f"|format(r.median_price_dkk) if r.median_price_dkk is not none else "—" }}</td>
-          <td class="num">{{ "%.2f"|format(r.median_premium_pct) if r.median_premium_pct is not none else "—" }}%</td>
-          <td class="num">{{ "%.2f"|format(r.spread_pp) if r.spread_pp is not none else "—" }}</td>
-          <td class="num">{{ "%.1f"|format(r.pct_time_cheapest) if r.pct_time_cheapest is not none else "—" }}%</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% endfor %}
+  <summary>Coin highlights</summary>
+  {% if coin_highlights %}
+  <ul class="bullets">
+  {% for b in coin_highlights %}<li>{{ b.text }}</li>{% endfor %}
+  </ul>
   {% else %}
-    <div class="muted">No coin observations in this period.</div>
+  <div class="muted">No coin observations in this period.</div>
   {% endif %}
 </details>
 

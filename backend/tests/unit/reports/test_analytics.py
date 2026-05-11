@@ -233,7 +233,6 @@ def test_spot_tracking_low_correlation_when_dealer_is_decoupled() -> None:
 def test_spot_tracking_returns_none_with_insufficient_data() -> None:
     st = compute_spot_tracking("Empty", [], [])
     assert st.correlation is None
-    assert st.lag_hours is None
     assert st.sensitivity is None
 
 

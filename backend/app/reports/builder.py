@@ -14,8 +14,11 @@ from app.reports.analytics import (
     compute_day_of_week,
     compute_premium_band,
     compute_spot_tracking,
+    compute_spot_tracking_coins,
     compute_time_of_day,
     compute_weekend_activity,
+    correlation_label,
+    sensitivity_label,
 )
 from app.reports.loader import (
     BarPoint,
@@ -25,10 +28,16 @@ from app.reports.loader import (
     load_coins,
     load_spot,
 )
-from app.reports.notable import detect_notable, detect_time_of_month_drift
+from app.reports.notable import (
+    detect_best_coin_deals,
+    detect_notable,
+    detect_time_of_month_drift,
+)
 from app.reports.renderer import render_report
-from app.reports.tables import build_bar_table, build_coin_table
+from app.reports.tables import build_bar_table
 from app.reports.windows import CPH, Window
+
+MIN_OBSERVATIONS_FOR_FINGERPRINT = 10
 
 
 async def build_report(conn: asyncpg.Connection | None, window: Window) -> str:
@@ -49,10 +58,12 @@ async def build_report(conn: asyncpg.Connection | None, window: Window) -> str:
         "spot": _build_spot_section(spots),
         "fingerprints": _build_fingerprints(bars, coins, spots, weeks),
         "bars": _build_bars_section(bars),
-        "coins": _build_coins_section(coins),
+        "coin_highlights": [
+            {"text": b.text} for b in detect_best_coin_deals(coins)
+        ],
         "notable": [
             {"text": b.text, "magnitude": b.magnitude}
-            for b in detect_notable(bars, coins)
+            for b in detect_notable(bars, coins, spots)
         ],
         # Time-of-month drift only makes sense on canonical calendar-month
         # windows where week 1..N actually map to real Mon-Sun weeks. Rolling
@@ -122,48 +133,75 @@ def _build_fingerprints(
     dealers = sorted({b.dealer for b in bars} | {c.dealer for c in coins})
     out: list[dict[str, Any]] = []
     for d in dealers:
-        cad = compute_cadence(d, bars, weeks_in_period=weeks, coins=coins)
-        wa = compute_weekend_activity(d, bars, coins=coins)
-        tod = compute_time_of_day(d, bars, coins=coins)
-        dow = compute_day_of_week(d, bars, coins=coins)
-        st = compute_spot_tracking(d, bars, spots)
-        pb = compute_premium_band(d, bars, coins=coins)
-        tag = classify_fingerprint(
-            changes_per_week=cad.changes_per_week,
-            spot_correlation=st.correlation,
-            weekend_change_count=wa.change_count,
-        )
-        out.append({
-            "dealer": d,
-            "cadence": {
-                "total_changes": cad.total_changes,
-                "changes_per_week": cad.changes_per_week,
-                "median_interval_hours": cad.median_interval_hours,
-                "latest_change": (
-                    cad.latest_change.isoformat() if cad.latest_change else None
-                ),
-            },
-            "time_of_day": {
-                "morning": tod.morning, "afternoon": tod.afternoon,
-                "evening": tod.evening, "night": tod.night,
-            },
-            "day_of_week": dow.by_day,
-            "weekend": {
-                "change_count": wa.change_count,
-                "summary": (
-                    f"{wa.change_count} change(s) on the weekend"
-                    if wa.change_count else "no weekend changes"
-                ),
-            },
-            "spot_tracking": {
-                "correlation": st.correlation,
-                "lag_hours": st.lag_hours,
-                "sensitivity": st.sensitivity,
-            },
-            "premium_band": {"p25": pb.p25, "p75": pb.p75},
-            "fingerprint_tag": tag,
-        })
+        categories: list[dict[str, Any]] = []
+        bar_obs = sum(1 for b in bars if b.dealer == d)
+        coin_obs = sum(1 for c in coins if c.dealer == d)
+        if bar_obs >= MIN_OBSERVATIONS_FOR_FINGERPRINT:
+            categories.append(_build_category_card(
+                "Bars", d, bars=bars, coins=[],
+                spot_tracking=compute_spot_tracking(d, bars, spots),
+                weeks=weeks,
+            ))
+        if coin_obs >= MIN_OBSERVATIONS_FOR_FINGERPRINT:
+            categories.append(_build_category_card(
+                "Coins", d, bars=[], coins=coins,
+                spot_tracking=compute_spot_tracking_coins(d, coins, spots),
+                weeks=weeks,
+            ))
+        if categories:
+            out.append({"dealer": d, "categories": categories})
     return out
+
+
+def _build_category_card(
+    name: str,
+    dealer: str,
+    bars: list[BarPoint],
+    coins: list[CoinPoint],
+    spot_tracking: Any,
+    weeks: float,
+) -> dict[str, Any]:
+    cad = compute_cadence(dealer, bars, weeks_in_period=weeks, coins=coins)
+    wa = compute_weekend_activity(dealer, bars, coins=coins)
+    tod = compute_time_of_day(dealer, bars, coins=coins)
+    dow = compute_day_of_week(dealer, bars, coins=coins)
+    pb = compute_premium_band(dealer, bars, coins=coins)
+    tag = classify_fingerprint(
+        changes_per_week=cad.changes_per_week,
+        spot_correlation=spot_tracking.correlation,
+        weekend_change_count=wa.change_count,
+    )
+    return {
+        "name": name,
+        "cadence": {
+            "total_changes": cad.total_changes,
+            "changes_per_week": cad.changes_per_week,
+            "median_interval_hours": cad.median_interval_hours,
+            "latest_change": (
+                cad.latest_change.isoformat() if cad.latest_change else None
+            ),
+        },
+        "time_of_day": {
+            "morning": tod.morning, "afternoon": tod.afternoon,
+            "evening": tod.evening, "night": tod.night,
+        },
+        "day_of_week": dow.by_day,
+        "weekend": {
+            "change_count": wa.change_count,
+            "summary": (
+                f"{wa.change_count} change(s) on the weekend"
+                if wa.change_count else "no weekend changes"
+            ),
+        },
+        "spot_tracking": {
+            "correlation": spot_tracking.correlation,
+            "correlation_label": correlation_label(spot_tracking.correlation),
+            "sensitivity": spot_tracking.sensitivity,
+            "sensitivity_label": sensitivity_label(spot_tracking.sensitivity),
+        },
+        "premium_band": {"p25": pb.p25, "p75": pb.p75},
+        "fingerprint_tag": tag,
+    }
 
 
 def _build_bars_section(bars: list[BarPoint]) -> list[dict[str, Any]]:
@@ -178,7 +216,8 @@ def _build_bars_section(bars: list[BarPoint]) -> list[dict[str, Any]]:
                     "dealer": r.dealer,
                     "median_price_dkk": r.median_price_dkk,
                     "median_premium_pct": r.median_premium_pct,
-                    "spread_pp": r.spread_pp,
+                    "min_premium_pct": r.min_premium_pct,
+                    "max_premium_pct": r.max_premium_pct,
                     "pct_time_cheapest": r.pct_time_cheapest,
                 }
                 for r in build_bar_table(bars, size_g=s)
@@ -186,30 +225,3 @@ def _build_bars_section(bars: list[BarPoint]) -> list[dict[str, Any]]:
         }
         for s in sizes
     ]
-
-
-def _build_coins_section(coins: list[CoinPoint]) -> list[dict[str, Any]]:
-    if not coins:
-        return []
-    variants: dict[tuple[str, str], None] = {}
-    for c in coins:
-        if c.coin_type and c.size_label:
-            variants[(c.coin_type, c.size_label)] = None
-    out: list[dict[str, Any]] = []
-    for coin_type, size_label in sorted(variants):
-        rows = build_coin_table(coins, coin_type, size_label)
-        out.append({
-            "coin_type": coin_type,
-            "size_label": size_label,
-            "rows": [
-                {
-                    "dealer": r.dealer,
-                    "median_price_dkk": r.median_price_dkk,
-                    "median_premium_pct": r.median_premium_pct,
-                    "spread_pp": r.spread_pp,
-                    "pct_time_cheapest": r.pct_time_cheapest,
-                }
-                for r in rows
-            ],
-        })
-    return out

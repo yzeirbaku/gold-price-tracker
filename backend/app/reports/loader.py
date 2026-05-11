@@ -10,6 +10,11 @@ from datetime import datetime
 
 import asyncpg
 
+# Dealers excluded from reports (kept on prices view). Sparse stock + high
+# premiums on these two skew aggregates and ranks — they're not useful for
+# behavior analysis. Filter applied in load_bars/load_coins.
+EXCLUDED_REPORT_DEALERS = frozenset({"Plaza", "Jan Jørgensen"})
+
 
 @dataclass(frozen=True)
 class BarPoint:
@@ -103,7 +108,7 @@ async def load_bars(
         """,
         start_dt, end_dt,
     )
-    return rows_to_bars(rows)
+    return [b for b in rows_to_bars(rows) if b.dealer not in EXCLUDED_REPORT_DEALERS]
 
 
 async def load_coins(
@@ -120,7 +125,7 @@ async def load_coins(
         """,
         start_dt, end_dt,
     )
-    return rows_to_coins(rows)
+    return [c for c in rows_to_coins(rows) if c.dealer not in EXCLUDED_REPORT_DEALERS]
 
 
 async def load_spot(

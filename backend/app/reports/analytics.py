@@ -230,11 +230,10 @@ from app.reports.loader import SpotPoint  # noqa: E402
 @dataclass(frozen=True)
 class SpotTracking:
     correlation: float | None
-    lag_hours: float | None
     sensitivity: float | None
 
 
-def _build_dealer_avg_series(
+def _build_dealer_avg_series_from_bars(
     dealer: str, bars: Iterable[BarPoint],
 ) -> dict[datetime, float]:
     """At each fetched_at, average the dealer's ok-status bar prices
@@ -249,52 +248,41 @@ def _build_dealer_avg_series(
     return {ts: sum(vs) / len(vs) for ts, vs in by_ts.items()}
 
 
-def compute_spot_tracking(
-    dealer: str,
-    bars: Iterable[BarPoint],
+def _build_dealer_avg_series_from_coins(
+    dealer: str, coins: Iterable[CoinPoint],
+) -> dict[datetime, float]:
+    """At each fetched_at, average the dealer's ok-status coin prices
+    normalized per-gram-of-fine-gold (price_dkk / fine_gold_g)."""
+    by_ts: dict[datetime, list[float]] = defaultdict(list)
+    for c in coins:
+        if c.dealer != dealer or c.status != "ok" or c.price_dkk is None:
+            continue
+        if c.fine_gold_g is None or c.fine_gold_g <= 0:
+            continue
+        by_ts[c.fetched_at].append(c.price_dkk / c.fine_gold_g)
+    return {ts: sum(vs) / len(vs) for ts, vs in by_ts.items()}
+
+
+def _correlate_against_spot(
+    dealer_avg: dict[datetime, float],
     spots: Iterable[SpotPoint],
 ) -> SpotTracking:
-    """Pearson correlation + lag + sensitivity on matched snapshot pairs."""
-    dealer_avg = _build_dealer_avg_series(dealer, bars)
     spot_by_ts = {
         s.fetched_at: s.gold_dkk_per_g
         for s in spots if s.gold_dkk_per_g is not None
     }
     matched_ts = sorted(set(dealer_avg) & set(spot_by_ts))
     if len(matched_ts) < 5:
-        return SpotTracking(correlation=None, lag_hours=None, sensitivity=None)
+        return SpotTracking(correlation=None, sensitivity=None)
 
     dealer_arr = np.array([dealer_avg[ts] for ts in matched_ts], dtype=float)
     spot_arr = np.array([spot_by_ts[ts] for ts in matched_ts], dtype=float)
 
     if np.std(dealer_arr) == 0 or np.std(spot_arr) == 0:
-        return SpotTracking(correlation=None, lag_hours=None, sensitivity=None)
+        return SpotTracking(correlation=None, sensitivity=None)
 
     corr = float(np.corrcoef(dealer_arr, spot_arr)[0, 1])
 
-    # Lag: shift the dealer series by k in {-12..12}, pick the k that maximizes
-    # the correlation. Snapshots are nominally 20 minutes apart.
-    best_corr = corr
-    best_k = 0
-    n = len(matched_ts)
-    for k in range(-12, 13):
-        if k == 0 or n - abs(k) < 5:
-            continue
-        if k > 0:
-            d = dealer_arr[k:]
-            s = spot_arr[:n - k]
-        else:
-            d = dealer_arr[:n + k]
-            s = spot_arr[-k:]
-        if np.std(d) == 0 or np.std(s) == 0:
-            continue
-        c = float(np.corrcoef(d, s)[0, 1])
-        if c > best_corr:
-            best_corr = c
-            best_k = k
-    lag_hours = best_k * (20 / 60.0) if best_k != 0 else 0.0
-
-    # Sensitivity: OLS slope of pct-change(dealer) vs pct-change(spot).
     pct_d = np.diff(dealer_arr) / dealer_arr[:-1]
     pct_s = np.diff(spot_arr) / spot_arr[:-1]
     mask = np.abs(pct_s) > 1e-9
@@ -307,9 +295,51 @@ def compute_spot_tracking(
 
     return SpotTracking(
         correlation=round(corr, 3),
-        lag_hours=round(lag_hours, 2),
         sensitivity=sensitivity,
     )
+
+
+def compute_spot_tracking(
+    dealer: str,
+    bars: Iterable[BarPoint],
+    spots: Iterable[SpotPoint],
+) -> SpotTracking:
+    """Pearson correlation + sensitivity between this dealer's avg bar
+    per-gram price and gold spot, on matched snapshot timestamps."""
+    return _correlate_against_spot(
+        _build_dealer_avg_series_from_bars(dealer, bars), spots,
+    )
+
+
+def compute_spot_tracking_coins(
+    dealer: str,
+    coins: Iterable[CoinPoint],
+    spots: Iterable[SpotPoint],
+) -> SpotTracking:
+    """Same as compute_spot_tracking but for coin prices (per fine-gold gram)."""
+    return _correlate_against_spot(
+        _build_dealer_avg_series_from_coins(dealer, coins), spots,
+    )
+
+
+def correlation_label(corr: float | None) -> str | None:
+    if corr is None:
+        return None
+    if corr > 0.85:
+        return "tight"
+    if corr >= 0.5:
+        return "loose"
+    return "decoupled"
+
+
+def sensitivity_label(sens: float | None) -> str | None:
+    if sens is None:
+        return None
+    if 0.95 <= sens <= 1.05:
+        return "1:1"
+    if sens < 0.95:
+        return "muted"
+    return "amplified"
 
 
 def classify_fingerprint(

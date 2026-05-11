@@ -26,19 +26,25 @@ SAMPLE_CONTEXT = {
     "fingerprints": [
         {
             "dealer": "Tavex",
-            "cadence": {
-                "total_changes": 32, "changes_per_week": 8.0,
-                "median_interval_hours": 18.7,
-                "latest_change": "2026-05-07T14:23:00+02:00",
-            },
-            "time_of_day": {"morning": 4, "afternoon": 12, "evening": 1, "night": 0},
-            "day_of_week": [3, 5, 8, 6, 3, 0, 7],
-            "weekend": {"change_count": 1, "summary": "1 change Sun May 10"},
-            "spot_tracking": {
-                "correlation": 0.91, "lag_hours": 0.33, "sensitivity": 0.87,
-            },
-            "premium_band": {"p25": 5.2, "p75": 6.1},
-            "fingerprint_tag": "high-cadence \u00b7 tight-tracking \u00b7 weekend-active",
+            "categories": [
+                {
+                    "name": "Bars",
+                    "cadence": {
+                        "total_changes": 32, "changes_per_week": 8.0,
+                        "median_interval_hours": 18.7,
+                        "latest_change": "2026-05-07T14:23:00+02:00",
+                    },
+                    "time_of_day": {"morning": 4, "afternoon": 12, "evening": 1, "night": 0},
+                    "day_of_week": [3, 5, 8, 6, 3, 0, 7],
+                    "weekend": {"change_count": 1, "summary": "1 change Sun May 10"},
+                    "spot_tracking": {
+                        "correlation": 0.91, "correlation_label": "tight",
+                        "sensitivity": 0.87, "sensitivity_label": "muted",
+                    },
+                    "premium_band": {"p25": 5.2, "p75": 6.1},
+                    "fingerprint_tag": "high-cadence \u00b7 tight-tracking \u00b7 weekend-active",
+                },
+            ],
         },
     ],
     "bars": [
@@ -46,17 +52,19 @@ SAMPLE_CONTEXT = {
             "size_g": 5.0,
             "rows": [
                 {"dealer": "Nordisk Guld", "median_price_dkk": 4585.0,
-                 "median_premium_pct": 4.6, "spread_pp": 0.4,
-                 "pct_time_cheapest": 42.0, "sparkline": "\u2581\u2582\u2583\u2584"},
+                 "median_premium_pct": 4.6, "min_premium_pct": 4.2,
+                 "max_premium_pct": 5.0, "pct_time_cheapest": 42.0},
                 {"dealer": "Market", "median_price_dkk": 4602.0,
-                 "median_premium_pct": 6.2, "spread_pp": 3.1,
-                 "pct_time_cheapest": None, "sparkline": ""},
+                 "median_premium_pct": 6.2, "min_premium_pct": 3.1,
+                 "max_premium_pct": 7.3, "pct_time_cheapest": None},
             ],
         },
     ],
-    "coins": [],
+    "coin_highlights": [
+        {"text": "Cheapest Krugerrand 1/4 oz: Vitus Guld @ 4.2% premium (Tue May 6 14:30)"},
+    ],
     "notable": [
-        {"text": "Tavex 10g premium \u21931.8pp on Wed May 6 (7.2% \u2192 5.4%)",
+        {"text": "Tavex 10g premium \u21931.8pp at Wed May 6 14:20 (7.2% \u2192 5.4%)",
          "magnitude": 1.8},
     ],
     "time_of_month": None,

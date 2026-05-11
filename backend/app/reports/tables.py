@@ -1,8 +1,8 @@
 """Per-size and per-coin aggregation tables for reports.
 
 A "row" describes one dealer's stats for one (size_g) or (coin_type, size_label)
-slice over the period: median price, median premium %, spread (max\u2212min premium
-in pp), and % time held cheapest.
+slice over the period: median price, median premium %, min/max premium %,
+and % time held cheapest.
 """
 from collections import defaultdict
 from collections.abc import Iterable
@@ -17,7 +17,8 @@ class BarSizeRow:
     dealer: str
     median_price_dkk: float | None
     median_premium_pct: float | None
-    spread_pp: float | None
+    min_premium_pct: float | None
+    max_premium_pct: float | None
     pct_time_cheapest: float | None
 
 
@@ -26,7 +27,8 @@ class CoinVariantRow:
     dealer: str
     median_price_dkk: float | None
     median_premium_pct: float | None
-    spread_pp: float | None
+    min_premium_pct: float | None
+    max_premium_pct: float | None
     pct_time_cheapest: float | None
 
 
@@ -87,13 +89,15 @@ def build_bar_table(
                   if p.status == "ok" and p.price_dkk is not None]
         med_price = round(median(prices), 2) if prices else None
         med_prem = round(median(prems), 2) if prems else None
-        spread = round(max(prems) - min(prems), 2) if len(prems) >= 2 else None
+        min_premium = round(min(prems), 2) if prems else None
+        max_premium = round(max(prems), 2) if prems else None
         pct = (
             round(cheapest_counts[dealer] / total_ts * 100, 1) if total_ts > 0 else None
         )
         rows.append(BarSizeRow(
             dealer=dealer, median_price_dkk=med_price,
-            median_premium_pct=med_prem, spread_pp=spread,
+            median_premium_pct=med_prem,
+            min_premium_pct=min_premium, max_premium_pct=max_premium,
             pct_time_cheapest=pct,
         ))
 
@@ -104,16 +108,16 @@ def build_bar_table(
 
     all_prems = [pr for p in pts for pr in [_premium_for_bar(p)] if pr is not None]
     market_med = round(median(all_prems), 2) if all_prems else None
-    market_spread = (
-        round(max(all_prems) - min(all_prems), 2) if len(all_prems) >= 2 else None
-    )
+    market_min = round(min(all_prems), 2) if all_prems else None
+    market_max = round(max(all_prems), 2) if all_prems else None
     market_med_price = round(
         median([p.price_dkk for p in pts
                 if p.status == "ok" and p.price_dkk is not None]), 2,
     ) if any(p.status == "ok" and p.price_dkk is not None for p in pts) else None
     rows.append(BarSizeRow(
         dealer="Market", median_price_dkk=market_med_price,
-        median_premium_pct=market_med, spread_pp=market_spread,
+        median_premium_pct=market_med,
+        min_premium_pct=market_min, max_premium_pct=market_max,
         pct_time_cheapest=None,
     ))
     return rows
@@ -155,11 +159,13 @@ def build_coin_table(
                   if p.status == "ok" and p.price_dkk is not None]
         med_price = round(median(prices), 2) if prices else None
         med_prem = round(median(prems), 2) if prems else None
-        spread = round(max(prems) - min(prems), 2) if len(prems) >= 2 else None
+        min_premium = round(min(prems), 2) if prems else None
+        max_premium = round(max(prems), 2) if prems else None
         pct = round(cheapest_counts[dealer] / total_ts * 100, 1) if total_ts > 0 else None
         rows.append(CoinVariantRow(
             dealer=dealer, median_price_dkk=med_price,
-            median_premium_pct=med_prem, spread_pp=spread,
+            median_premium_pct=med_prem,
+            min_premium_pct=min_premium, max_premium_pct=max_premium,
             pct_time_cheapest=pct,
         ))
 
@@ -170,16 +176,16 @@ def build_coin_table(
 
     all_prems = [pr for p in pts for pr in [_premium_for_coin(p)] if pr is not None]
     market_med = round(median(all_prems), 2) if all_prems else None
-    market_spread = (
-        round(max(all_prems) - min(all_prems), 2) if len(all_prems) >= 2 else None
-    )
+    market_min = round(min(all_prems), 2) if all_prems else None
+    market_max = round(max(all_prems), 2) if all_prems else None
     market_med_price = round(
         median([p.price_dkk for p in pts
                 if p.status == "ok" and p.price_dkk is not None]), 2,
     ) if any(p.status == "ok" and p.price_dkk is not None for p in pts) else None
     rows.append(CoinVariantRow(
         dealer="Market", median_price_dkk=market_med_price,
-        median_premium_pct=market_med, spread_pp=market_spread,
+        median_premium_pct=market_med,
+        min_premium_pct=market_min, max_premium_pct=market_max,
         pct_time_cheapest=None,
     ))
     return rows

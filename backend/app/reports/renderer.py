@@ -57,7 +57,7 @@ def _build_sidecar_payload(context: dict[str, Any]) -> dict[str, Any]:
         "spot": context.get("spot"),
         "fingerprints": context.get("fingerprints", []),
         "bars": context.get("bars", []),
-        "coins": context.get("coins", []),
+        "coin_highlights": context.get("coin_highlights", []),
         "notable": context.get("notable", []),
         "time_of_month": context.get("time_of_month"),
     }

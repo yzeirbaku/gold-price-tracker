@@ -10,13 +10,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from app.reports.loader import BarPoint, CoinPoint
+from app.reports.loader import BarPoint, CoinPoint, SpotPoint
 from app.reports.tables import _premium_for_bar, _premium_for_coin
 
 CPH = ZoneInfo("Europe/Copenhagen")
 
 DEFAULT_PREMIUM_STEP_PP = 1.0
 DEFAULT_MAX_BULLETS = 10
+DEFAULT_MAX_COIN_HIGHLIGHTS = 10
 
 
 @dataclass(frozen=True)
@@ -32,15 +33,33 @@ class TimeOfMonthRow:
     delta_pp: float                      # last week \u2212 first week
 
 
+def _spot_at_or_nearest(
+    spot_by_ts: dict[datetime, float], target: datetime,
+) -> float | None:
+    """Return the spot value at `target` if present, else the closest
+    timestamp's value (since snapshots are aligned, exact match is the norm)."""
+    if not spot_by_ts:
+        return None
+    if target in spot_by_ts:
+        return spot_by_ts[target]
+    nearest = min(spot_by_ts.keys(), key=lambda t: abs((t - target).total_seconds()))
+    return spot_by_ts[nearest]
+
+
 def detect_notable(
     bars: Iterable[BarPoint],
     coins: Iterable[CoinPoint],
+    spots: Iterable[SpotPoint] = (),
     premium_step_threshold_pp: float = DEFAULT_PREMIUM_STEP_PP,
     max_bullets: int = DEFAULT_MAX_BULLETS,
 ) -> list[NotableBullet]:
     bullets: list[NotableBullet] = []
     bars_list = list(bars)
     coins_list = list(coins)
+    spot_by_ts: dict[datetime, float] = {
+        s.fetched_at: s.gold_dkk_per_g for s in spots
+        if s.gold_dkk_per_g is not None
+    }
 
     # 1. Premium step changes per (dealer, size_g)
     by_key: dict[tuple[str, str, str], list[tuple[datetime, float]]] = defaultdict(list)
@@ -59,15 +78,24 @@ def detect_notable(
 
     for (_kind, dealer, prod), series in by_key.items():
         series.sort(key=lambda t: t[0])
-        for (_t_prev, p_prev), (t_curr, p_curr) in zip(series, series[1:], strict=False):
+        for (t_prev, p_prev), (t_curr, p_curr) in zip(series, series[1:], strict=False):
             delta = p_curr - p_prev
             if abs(delta) >= premium_step_threshold_pp:
                 arrow = "\u2193" if delta < 0 else "\u2191"
-                day = t_curr.astimezone(CPH).strftime("%a %b %d")
+                when = t_curr.astimezone(CPH).strftime("%a %b %d %H:%M")
+                spot_before = _spot_at_or_nearest(spot_by_ts, t_prev)
+                spot_after = _spot_at_or_nearest(spot_by_ts, t_curr)
+                spot_clause = ""
+                if spot_before is not None and spot_after is not None:
+                    spot_delta = spot_after - spot_before
+                    spot_pct = (spot_delta / spot_before * 100) if spot_before else 0.0
+                    spot_clause = (
+                        f"; spot {spot_before:.2f} \u2192 {spot_after:.2f} DKK/g"
+                        f" ({spot_pct:+.2f}%)"
+                    )
                 text = (
-                    f"{dealer} {prod} premium {arrow}{abs(delta):.1f} "
-                    f"percentage points on {day} "
-                    f"({p_prev:.1f}% \u2192 {p_curr:.1f}%)"
+                    f"{dealer} {prod} premium {arrow}{abs(delta):.1f}pp at {when} "
+                    f"({p_prev:.1f}% \u2192 {p_curr:.1f}%{spot_clause})"
                 )
                 bullets.append(NotableBullet(text=text, magnitude=abs(delta)))
 
@@ -90,9 +118,9 @@ def detect_notable(
                 continue
             winner = min(entries, key=lambda e: e[1])[0]
             if prev_winner is not None and winner != prev_winner:
-                day = ts.astimezone(CPH).strftime("%a %b %d")
+                when = ts.astimezone(CPH).strftime("%a %b %d %H:%M")
                 text = (
-                    f"{winner} took the cheapest crown for {size_key} bars on {day} "
+                    f"{winner} took the cheapest crown for {size_key} bars at {when} "
                     f"(from {prev_winner})"
                 )
                 bullets.append(NotableBullet(text=text, magnitude=0.5))
@@ -101,6 +129,35 @@ def detect_notable(
     # Sort by magnitude desc, cap, return
     bullets.sort(key=lambda b: b.magnitude, reverse=True)
     return bullets[:max_bullets]
+
+
+def detect_best_coin_deals(
+    coins: Iterable[CoinPoint],
+    max_highlights: int = DEFAULT_MAX_COIN_HIGHLIGHTS,
+) -> list[NotableBullet]:
+    """For each (coin_type, size_label) variant observed in the period,
+    find the single cheapest-premium observation and return it as a bullet.
+    Sorted by premium ascending (best deals first), capped at max_highlights."""
+    by_variant: dict[tuple[str, str], list[tuple[datetime, str, float]]] = defaultdict(list)
+    for c in coins:
+        prem = _premium_for_coin(c)
+        if prem is None or c.coin_type is None or c.size_label is None:
+            continue
+        by_variant[(c.coin_type, c.size_label)].append((c.fetched_at, c.dealer, prem))
+
+    bullets: list[NotableBullet] = []
+    for (coin_type, size_label), entries in by_variant.items():
+        ts, dealer, prem = min(entries, key=lambda e: e[2])
+        when = ts.astimezone(CPH).strftime("%a %b %d %H:%M")
+        text = (
+            f"Cheapest {coin_type} {size_label}: {dealer} @ {prem:.1f}% premium "
+            f"({when})"
+        )
+        # Lower premium = better deal = higher rank. Magnitude is the inverse.
+        bullets.append(NotableBullet(text=text, magnitude=-prem))
+
+    bullets.sort(key=lambda b: b.magnitude, reverse=True)
+    return bullets[:max_highlights]
 
 
 def detect_time_of_month_drift(
