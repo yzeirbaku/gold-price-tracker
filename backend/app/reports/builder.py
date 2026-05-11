@@ -54,6 +54,10 @@ async def build_report(conn: asyncpg.Connection | None, window: Window) -> str:
             {"text": b.text, "magnitude": b.magnitude}
             for b in detect_notable(bars, coins)
         ],
+        # Time-of-month drift only makes sense on canonical calendar-month
+        # windows where week 1..N actually map to real Mon-Sun weeks. Rolling
+        # last-30-days slices weeks arbitrarily; showing W1..W4 over those is
+        # misleading. Also requires \u22652 weeks of data to be meaningful.
         "time_of_month": (
             [
                 {
@@ -65,7 +69,9 @@ async def build_report(conn: asyncpg.Connection | None, window: Window) -> str:
                     bars, coins, window.start_dt, window.end_dt,
                 )
             ]
-            if window.kind == "monthly" else None
+            if (window.kind == "monthly" and window.is_calendar_aligned
+                and (window.end_dt - window.start_dt).days >= 14)
+            else None
         ),
     }
     return render_report(context)
@@ -175,7 +181,7 @@ def _build_bars_section(bars: list[BarPoint]) -> list[dict[str, Any]]:
                     "spread_pp": r.spread_pp,
                     "pct_time_cheapest": r.pct_time_cheapest,
                 }
-                for r in build_bar_table(bars, size_g=s, bins=7)
+                for r in build_bar_table(bars, size_g=s)
             ],
         }
         for s in sizes
@@ -191,7 +197,7 @@ def _build_coins_section(coins: list[CoinPoint]) -> list[dict[str, Any]]:
             variants[(c.coin_type, c.size_label)] = None
     out: list[dict[str, Any]] = []
     for coin_type, size_label in sorted(variants):
-        rows = build_coin_table(coins, coin_type, size_label, bins=7)
+        rows = build_coin_table(coins, coin_type, size_label)
         out.append({
             "coin_type": coin_type,
             "size_label": size_label,

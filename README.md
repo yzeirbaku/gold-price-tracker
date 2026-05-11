@@ -93,8 +93,12 @@ assets, and an embedded `<script type="application/json" id="report-data">`
 sidecar containing every numeric value for future processing. Inside the
 report, Spot context / Dealer fingerprints / Bars / Coins / Notable /
 Time-of-month drift each render as `<details>` so they can be expanded
-or collapsed individually; only Spot starts open. The title is rendered
-as `Weekly Report (DD-MM-YYYY HH:MM <--> DD-MM-YYYY HH:MM)` (Europe/Copenhagen).
+or collapsed individually; only Spot starts open. The header shows
+"Weekly Report" (or "Monthly Report") on one line, with the period
+"DD-MM-YYYY HH:MM → DD-MM-YYYY HH:MM" below it (Europe/Copenhagen).
+Time-of-month drift only renders for canonical calendar-month windows —
+rolling 30-day on-demand reports omit it, since the W1..W4 buckets
+wouldn't map to real Mon–Sun weeks.
 
 `scripts/seed.py` ends by generating one weekly + one monthly report into
 the local archive so the UI isn't empty on first open.

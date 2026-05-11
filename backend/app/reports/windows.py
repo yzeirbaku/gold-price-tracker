@@ -25,6 +25,7 @@ class Window:
     label: str          # full one-line label (kind + period text)
     kind_label: str     # just the kind, e.g. "Weekly Report"
     period_text: str    # just the range, e.g. "04-05-2026 18:04 \u2192 11-05-2026 18:04"
+    is_calendar_aligned: bool  # True for previous_calendar_*; False for rolling
 
 
 def previous_calendar_week(now: datetime) -> Window:
@@ -42,6 +43,7 @@ def previous_calendar_week(now: datetime) -> Window:
         period_end=last_sunday.date(),
         start_dt=last_monday,
         end_dt=this_week_monday,
+        is_calendar_aligned=True,
         **_label_fields("Weekly", last_monday, this_week_monday),
     )
 
@@ -63,6 +65,7 @@ def previous_calendar_month(now: datetime) -> Window:
         period_end=prev_end_date,
         start_dt=prev_start,
         end_dt=first_of_this_month,
+        is_calendar_aligned=True,
         **_label_fields("Monthly", prev_start, first_of_this_month),
     )
 
@@ -83,6 +86,7 @@ def rolling_last_n_days(now: datetime, n: int) -> Window:
         period_end=now_cph.date(),
         start_dt=start_dt,
         end_dt=now_cph,
+        is_calendar_aligned=False,
         **_label_fields("Weekly" if kind == "weekly" else "Monthly",
                          start_dt, now_cph),
     )

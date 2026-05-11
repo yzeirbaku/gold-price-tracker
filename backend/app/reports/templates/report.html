@@ -150,7 +150,7 @@
       <span>
         {% if fp.spot_tracking.correlation is not none %}
           corr {{ fp.spot_tracking.correlation }}
-          {% if fp.spot_tracking.lag_hours %}, lag {{ fp.spot_tracking.lag_hours }}h{% endif %}
+          {% if fp.spot_tracking.lag_hours is not none %}, lag {{ fp.spot_tracking.lag_hours }}h{% endif %}
           {% if fp.spot_tracking.sensitivity is not none %}, sensitivity {{ fp.spot_tracking.sensitivity }}×{% endif %}
         {% else %}insufficient data{% endif %}
       </span>

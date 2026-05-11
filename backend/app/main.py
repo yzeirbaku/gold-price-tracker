@@ -456,10 +456,13 @@ async def reports_generate(
     if pool is None:
         raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
     n = 7 if range == "week" else 30
-    window = rolling_last_n_days(datetime.now(tz=UTC), n)
+    now = datetime.now(tz=UTC)
+    window = rolling_last_n_days(now, n)
     async with pool.acquire() as conn:
         html = await build_report(conn, window)
-    suffix = window.period_end.isoformat()
+    # Include H:M in the filename so two on-demand downloads on the same day
+    # don't collide in the user's downloads folder.
+    suffix = now.strftime("%Y-%m-%d_%H-%M")
     filename = f"ondemand-{range}-{suffix}.html"
     return Response(
         content=html,

@@ -109,11 +109,15 @@ the client, **not persisted**. `GET /reports` lists archived entries and
 attachment` download.
 
 Each report has eight sections — Header, Spot context, Dealer behavior
-fingerprints, Bars, Coins, Notable, Time-of-month drift (monthly only),
-and a hidden `<script type="application/json" id="report-data">` sidecar
-holding every numeric value for future programmatic extraction. The visual
-sections render as `<details>` elements (only Spot starts open). The title
-uses the format `Weekly Report (DD-MM-YYYY HH:MM <--> DD-MM-YYYY HH:MM)`.
+fingerprints, Bars, Coins, Notable, Time-of-month drift (monthly only;
+gated on `window.is_calendar_aligned` so rolling 30-day on-demand reports
+omit it), and a hidden `<script type="application/json" id="report-data">`
+sidecar holding every numeric value for future programmatic extraction.
+The visual sections render as `<details>` elements (only Spot starts open).
+The header shows "Weekly Report" / "Monthly Report" on the first line with
+"DD-MM-YYYY HH:MM → DD-MM-YYYY HH:MM" below it. The sidecar JSON is
+`</`-escaped before injection so dealer-controlled strings can't break out
+of the `<script>` block.
 
 Backend module layout (`app/reports/`): `windows.py` (period boundary math),
 `loader.py` (typed dataclass loaders from DB), `analytics.py` (cadence,

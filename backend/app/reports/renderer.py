@@ -30,9 +30,14 @@ def render_report(context: dict[str, Any]) -> str:
     don't have to. The sidecar excludes itself (no recursion).
     """
     sidecar_payload = _build_sidecar_payload(context)
+    # Escape '</' so a stray "</script>" in any dealer-controlled string
+    # (coin_type, error message, etc.) can't break out of the <script> block
+    # in the rendered report.
+    sidecar_json = json.dumps(sidecar_payload, separators=(",", ":"))
+    sidecar_json = sidecar_json.replace("</", "<\\/")
     full_context = {
         **context,
-        "json_sidecar": json.dumps(sidecar_payload, separators=(",", ":")),
+        "json_sidecar": sidecar_json,
     }
     template = _env.get_template("report.html")
     return template.render(**full_context)
