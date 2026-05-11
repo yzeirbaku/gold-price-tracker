@@ -227,7 +227,7 @@ $('#refresh').addEventListener('click', () => { if (lastSize != null) fetchPrice
 // historyState is shaped as { key, titleText, historyUrlBuilder, range } —
 // the URL builder is a closure over the row's identity, so the same expand
 // logic works for both bars (/history/bar/...) and coins (/history/coin/...).
-let historyState = { key: null, titleText: '', historyUrlBuilder: null, range: '30d' };
+let historyState = { key: null, titleText: '', historyUrlBuilder: null, range: '7d' };
 const historyCharts = { price: null, premium: null };
 
 function destroyHistoryCharts() {
@@ -245,7 +245,7 @@ function collapseHistory() {
 
 function expandHistory(rowEl, config) {
   collapseHistory();
-  historyState = { ...config, range: '30d' };
+  historyState = { ...config, range: '7d' };
   rowEl.classList.add('row-expanded');
 
   const colspan = rowEl.children.length;
@@ -258,8 +258,8 @@ function expandHistory(rowEl, config) {
           <h3>${escapeHtml(config.titleText)}</h3>
           <div class="range-toggle" role="tablist">
             <button data-range="24h" type="button">24h</button>
-            <button data-range="7d" type="button">7d</button>
-            <button data-range="30d" class="active" type="button">30d</button>
+            <button data-range="7d" class="active" type="button">7d</button>
+            <button data-range="30d" type="button">30d</button>
           </div>
         </div>
         <div class="history-status loading-msg">Loading…</div>

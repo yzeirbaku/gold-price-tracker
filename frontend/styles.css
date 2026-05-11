@@ -445,8 +445,8 @@ tr.history-row > td {
 }
 .range-toggle button:hover { background: var(--hover-bg); color: var(--fg); }
 .range-toggle button.active {
-  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
-  color: #1a1300; border-color: var(--accent-2);
+  background: linear-gradient(180deg, var(--btn-active-top) 0%, var(--btn-active-bottom) 100%);
+  color: #1a1300; border-color: var(--btn-active-bottom);
 }
 
 .charts-grid {
