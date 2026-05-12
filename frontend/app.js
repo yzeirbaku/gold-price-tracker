@@ -324,16 +324,12 @@ function renderBuyContext(el, ctx) {
   const iqrLo = ctx.iqr_low_premium_pct.toFixed(2);
   const iqrHi = ctx.iqr_high_premium_pct.toFixed(2);
   const minPrem = ctx.min_premium_pct.toFixed(2);
-  const minAt = new Date(ctx.min_premium_at).toLocaleDateString('en-GB', {
-    day: '2-digit', month: 'short',
+  const minAt = new Date(ctx.min_premium_at).toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
   });
   const latestAgo = relativeTimeFrom(ctx.today_premium_at);
   const newLowPill = ctx.is_new_low
     ? `<span class="bc-new-low">New 30-day low</span>` : '';
-  const minValue = ctx.is_new_low ? `${minPrem}% (today)` : `${minPrem}%`;
-  const minNote = ctx.is_new_low
-    ? `The latest snapshot beats the prior 30-day low.`
-    : `That low was set on ${minAt}.`;
   el.innerHTML = `
     <h4>Buy now or wait? ${newLowPill}</h4>
     <div class="bc-stats">
@@ -342,9 +338,9 @@ function renderBuyContext(el, ctx) {
       <div class="bc-stat"><span class="bc-label">Typical band (30d IQR)</span>
         <span class="bc-value">${iqrLo}% – ${iqrHi}%</span></div>
       <div class="bc-stat"><span class="bc-label">Lowest in 30d</span>
-        <span class="bc-value">${minValue}</span></div>
+        <span class="bc-value">${minPrem}% <span class="bc-ago">(${minAt})</span></span></div>
     </div>
-    <p class="bc-verdict">Latest snapshot is <strong>${ctx.verdict}</strong> for this dealer. ${minNote}</p>
+    <p class="bc-verdict">Latest snapshot is <strong>${ctx.verdict}</strong> for this dealer.</p>
   `;
 }
 

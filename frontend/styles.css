@@ -496,6 +496,7 @@ tr.history-row > td {
   margin-top: 1rem;
   padding-top: 0.85rem;
   border-top: 1px solid var(--border);
+  text-align: left;
 }
 .buy-context:empty { display: none; }
 .buy-context h4 {
