@@ -6,7 +6,12 @@ import httpx
 from selectolax.parser import HTMLParser, Node
 
 from app.models import Listing
-from app.scrapers.base import make_html_parser, now_utc, parse_dkk_price
+from app.scrapers.base import (
+    make_html_parser,
+    normalize_brand,
+    now_utc,
+    parse_dkk_price,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,13 +124,14 @@ def _read_sell_price(card: Node) -> float | None:
 
 
 def _extract_brand(title: str, size_token: str) -> str | None:
-    # Title shape: "<size_token> <BRAND> Guldbarre" or
-    #             "<size_token> Guldbarre (forskellige mærker)" (mixed).
-    # Strip the leading "X gram " then trailing "guldbarre" (case-insensitive).
+    # Title shape: "<size_token> <BRAND> Guldbarre" or e.g.
+    #   "<size_token> Guldbarre (forskellige mærker)" / "Guldbarre Blandede Mærker"
+    # for mixed-brand pools. Strip the leading "X gram " then the bare
+    # "guldbarre" token (case-insensitive), then collapse mixed-brand
+    # descriptors via the shared normalizer.
     tl = title.lower()
     idx = tl.find(size_token.lower())
     rest = title[idx + len(size_token):].strip() if idx != -1 else title
-    if "forskellige mærker" in rest.lower():
-        return "Mixed"
-    rest = re.sub(r"\s*guldbarre\s*$", "", rest, flags=re.IGNORECASE).strip()
-    return rest or None
+    rest = re.sub(r"\bguldbarre\b", "", rest, flags=re.IGNORECASE).strip()
+    rest = re.sub(r"[()]", "", rest).strip()
+    return normalize_brand(rest)

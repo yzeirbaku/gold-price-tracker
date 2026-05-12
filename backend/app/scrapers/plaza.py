@@ -4,7 +4,12 @@ import httpx
 from selectolax.parser import HTMLParser, Node
 
 from app.models import Listing
-from app.scrapers.base import make_html_parser, now_utc, parse_dkk_price
+from app.scrapers.base import (
+    make_html_parser,
+    normalize_brand,
+    now_utc,
+    parse_dkk_price,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +83,8 @@ class PlazaScraper:
             if price is None:
                 continue
             in_stock = card.css_first(".price ins") is not None
-            brand = title.split(needle, 1)[1].strip() if needle in title else None
-            candidates.append((price, in_stock, brand or None, card))
+            raw_brand = title.split(needle, 1)[1] if needle in title else ""
+            candidates.append((price, in_stock, normalize_brand(raw_brand), card))
 
         if not candidates:
             return None

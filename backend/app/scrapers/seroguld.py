@@ -5,7 +5,12 @@ import httpx
 from selectolax.parser import HTMLParser, Node
 
 from app.models import Listing
-from app.scrapers.base import make_html_parser, now_utc, parse_dkk_price
+from app.scrapers.base import (
+    make_html_parser,
+    normalize_brand,
+    now_utc,
+    parse_dkk_price,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +100,9 @@ class SeroGuldScraper:
 
 def _extract_brand(title: str) -> str | None:
     # Title shape: "<BRAND> guldbarre <size>g" (case varies).
-    # Take everything before "guldbarre" as brand.
+    # Take everything before "guldbarre" as brand, then route through
+    # normalize_brand so Danish mixed-brand descriptors collapse to "Mixed".
     m = re.match(r"^(.*?)\s+guldbarre\s+", title, flags=re.IGNORECASE)
     if not m:
         return None
-    return m.group(1).strip() or None
+    return normalize_brand(m.group(1))

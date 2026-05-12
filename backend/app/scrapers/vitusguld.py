@@ -4,7 +4,12 @@ import httpx
 from selectolax.parser import HTMLParser, Node
 
 from app.models import Listing
-from app.scrapers.base import make_html_parser, now_utc, parse_dkk_price
+from app.scrapers.base import (
+    make_html_parser,
+    normalize_brand,
+    now_utc,
+    parse_dkk_price,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,11 +146,7 @@ class VitusGuldScraper:
 
 def _extract_brand(title: str) -> str | None:
     # Title shape: "<size> gr. Guldbarre[, fineness], <BRAND>" (varying punctuation).
-    # The brand is the last comma-separated chunk; strip leading/trailing whitespace.
-    # "Vilkårlige LBMA producenter" → "Mixed".
+    # The brand is the last comma-separated chunk; mixed-brand descriptors
+    # like "Vilkårlige LBMA producenter" collapse to "Mixed" via normalize_brand.
     last = title.rsplit(",", 1)[-1].strip()
-    if not last:
-        return None
-    if "vilkårlige" in last.lower():
-        return "Mixed"
-    return last or None
+    return normalize_brand(last)

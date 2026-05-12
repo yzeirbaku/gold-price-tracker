@@ -86,3 +86,40 @@ def parse_dkk_price(text: str) -> float | None:
 
 def make_html_parser(html: str) -> HTMLParser:
     return HTMLParser(html)
+
+
+# Danish/English descriptors dealers use when a bar is from a mixed/unspecified
+# brand pool ("we'll ship whatever's in stock"). All of these collapse to a
+# single canonical "Mixed" label so the UI never surfaces Danish copy.
+# Patterns are checked as case-insensitive substrings.
+_MIXED_BRAND_PATTERNS: tuple[str, ...] = (
+    "blandede mærker",
+    "blandede merker",
+    "forskellige mærker",
+    "forskellige merker",
+    "diverse mærker",
+    "diverse merker",
+    "div. mærker",
+    "div. merker",
+    "vilkårlige",
+    "various brands",
+    "mixed brands",
+)
+
+
+def normalize_brand(raw: str | None) -> str | None:
+    """Return canonical brand label for a raw title fragment.
+
+    Empty/None input → None. Known mixed-brand descriptors → "Mixed".
+    Anything else is returned trimmed and unchanged.
+    """
+    if not raw:
+        return None
+    stripped = raw.strip()
+    if not stripped:
+        return None
+    lowered = stripped.lower()
+    for pattern in _MIXED_BRAND_PATTERNS:
+        if pattern in lowered:
+            return "Mixed"
+    return stripped

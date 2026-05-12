@@ -4,7 +4,12 @@ import httpx
 from selectolax.parser import HTMLParser, Node
 
 from app.models import Listing
-from app.scrapers.base import make_html_parser, now_utc, parse_dkk_price
+from app.scrapers.base import (
+    make_html_parser,
+    normalize_brand,
+    now_utc,
+    parse_dkk_price,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +109,9 @@ class NyfortunaScraper:
 
 def _extract_brand(title: str) -> str | None:
     # Titles split by an en-dash with surrounding spaces: "Brand – size gram type".
-    # Some entries use a regular dash; handle both.
+    # Some entries use a regular dash; handle both. normalize_brand collapses
+    # any "Blandede Mærker" / "Forskellige Mærker" variants into "Mixed".
     for sep in (" – ", " - "):
         if sep in title:
-            return title.split(sep, 1)[0].strip() or None
+            return normalize_brand(title.split(sep, 1)[0])
     return None

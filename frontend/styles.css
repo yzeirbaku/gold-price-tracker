@@ -492,6 +492,43 @@ tr.history-row > td {
   color: var(--muted); font-size: 0.85rem;
 }
 
+.buy-context {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+.buy-context:empty { display: none; }
+.buy-context h4 {
+  margin: 0 0 0.6rem;
+  font-size: 0.95rem;
+  display: flex; align-items: center; gap: 0.6rem;
+}
+.bc-stats {
+  display: flex; gap: 1.5rem; flex-wrap: wrap;
+  margin-bottom: 0.55rem;
+}
+.bc-stat { display: flex; flex-direction: column; gap: 0.1rem; }
+.bc-label {
+  font-size: 0.7rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.bc-value { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.bc-ago { font-size: 0.75rem; color: var(--muted); font-weight: normal; }
+.bc-verdict { margin: 0; font-size: 0.9rem; color: var(--muted); }
+.bc-verdict strong { color: var(--fg); }
+.bc-muted { color: var(--muted); font-size: 0.85rem; }
+.bc-new-low {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  background: linear-gradient(135deg, #e2c054, #e8b94a);
+  color: #1a1a1a;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 /* Phone — stack the two charts vertically. 600px breakpoint catches all
    phones in portrait and most in landscape. Each chart can stay shorter on
    mobile since vertical space is at a premium and the whole panel scrolls. */

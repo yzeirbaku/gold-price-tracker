@@ -10,6 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from app.auth import require_api_key
+from app.buy_context import (
+    context_to_dict,
+    load_bar_context,
+    load_coin_context,
+)
 from app.db import close_pool, get_pool
 from app.fx import fetch_usd_to
 from app.models import CoinListing, PriceResponse
@@ -302,6 +307,42 @@ async def get_bar_history(
             for row in rows
         ],
     }
+
+
+@app.get("/context/bar/{dealer}/{size}")
+async def get_bar_context(
+    dealer: str, size: float, _: None = Depends(require_api_key),
+) -> dict[str, object]:
+    """Buy-now-or-wait analytics for a specific (dealer, bar size) over the
+    last 30 days: today's premium vs the dealer's IQR band, the lowest
+    premium recorded, and whether today is a new low."""
+    if size not in ALLOWED_SIZES:
+        raise HTTPException(
+            status_code=400, detail=f"size must be one of {sorted(ALLOWED_SIZES)}",
+        )
+    if dealer not in DEALER_NAMES:
+        raise HTTPException(status_code=404, detail=f"unknown dealer: {dealer}")
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    async with pool.acquire() as conn:
+        ctx = await load_bar_context(conn, dealer, size)
+    return context_to_dict(ctx)
+
+
+@app.get("/context/coin/{dealer}/{coin_type}/{fine_gold_g}")
+async def get_coin_context(
+    dealer: str, coin_type: str, fine_gold_g: float,
+    _: None = Depends(require_api_key),
+) -> dict[str, object]:
+    """Buy-now-or-wait analytics for a specific (dealer, coin_type, fine_gold_g)
+    over the last 30 days. See `get_bar_context` for response shape."""
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    async with pool.acquire() as conn:
+        ctx = await load_coin_context(conn, dealer, coin_type, fine_gold_g)
+    return context_to_dict(ctx)
 
 
 @app.get("/coins")

@@ -273,6 +273,7 @@ function expandHistory(rowEl, config) {
             <div class="chart-container"><canvas id="history-premium-chart"></canvas></div>
           </div>
         </div>
+        <div class="buy-context" id="buy-context"></div>
       </div>
     </td>
   `;
@@ -290,6 +291,74 @@ function expandHistory(rowEl, config) {
   });
 
   fetchHistory();
+  fetchBuyContext();
+}
+
+async function fetchBuyContext() {
+  const el = document.getElementById('buy-context');
+  if (!el || !historyState.contextUrl) return;
+  const apiKey = loadApiKey();
+  if (!apiKey) return;
+  el.innerHTML = '';
+  try {
+    const resp = await fetch(historyState.contextUrl, {
+      headers: { 'X-API-Key': apiKey },
+    });
+    if (!resp.ok) return;  // silent — chart still works without context
+    const data = await resp.json();
+    renderBuyContext(el, data);
+  } catch (e) {
+    // Network error — silently skip. Chart already loaded fine.
+  }
+}
+
+function renderBuyContext(el, ctx) {
+  if (ctx.verdict === 'insufficient data') {
+    el.innerHTML = `
+      <h4>Buy now or wait?</h4>
+      <div class="bc-muted">Not enough history yet (${ctx.n_observations} observations — need at least 5).</div>
+    `;
+    return;
+  }
+  const latest = ctx.today_premium_pct.toFixed(2);
+  const iqrLo = ctx.iqr_low_premium_pct.toFixed(2);
+  const iqrHi = ctx.iqr_high_premium_pct.toFixed(2);
+  const minPrem = ctx.min_premium_pct.toFixed(2);
+  const minAt = new Date(ctx.min_premium_at).toLocaleDateString('en-GB', {
+    day: '2-digit', month: 'short',
+  });
+  const latestAgo = relativeTimeFrom(ctx.today_premium_at);
+  const newLowPill = ctx.is_new_low
+    ? `<span class="bc-new-low">New 30-day low</span>` : '';
+  const minValue = ctx.is_new_low ? `${minPrem}% (today)` : `${minPrem}%`;
+  const minNote = ctx.is_new_low
+    ? `The latest snapshot beats the prior 30-day low.`
+    : `That low was set on ${minAt}.`;
+  el.innerHTML = `
+    <h4>Buy now or wait? ${newLowPill}</h4>
+    <div class="bc-stats">
+      <div class="bc-stat"><span class="bc-label">Latest recorded</span>
+        <span class="bc-value">${latest}% <span class="bc-ago">(${latestAgo})</span></span></div>
+      <div class="bc-stat"><span class="bc-label">Typical band (30d IQR)</span>
+        <span class="bc-value">${iqrLo}% – ${iqrHi}%</span></div>
+      <div class="bc-stat"><span class="bc-label">Lowest in 30d</span>
+        <span class="bc-value">${minValue}</span></div>
+    </div>
+    <p class="bc-verdict">Latest snapshot is <strong>${ctx.verdict}</strong> for this dealer. ${minNote}</p>
+  `;
+}
+
+function relativeTimeFrom(iso) {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return '';
+  const diffSec = Math.max(0, (Date.now() - t) / 1000);
+  if (diffSec < 60) return 'just now';
+  const min = Math.floor(diffSec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  return `${day}d ago`;
 }
 
 async function fetchHistory() {
@@ -588,6 +657,8 @@ $('#coin-listings tbody').addEventListener('click', (e) => {
       titleText: `${dealer} — ${coinType} (${fineGoldG.toFixed(2)} g)`,
       historyUrlBuilder: (range) =>
         `${BACKEND_URL}/history/coin/${encodeURIComponent(dealer)}/${encodeURIComponent(coinType)}/${fineGoldG}?range=${range}`,
+      contextUrl:
+        `${BACKEND_URL}/context/coin/${encodeURIComponent(dealer)}/${encodeURIComponent(coinType)}/${fineGoldG}`,
     });
   }
 });
@@ -630,6 +701,8 @@ $('#listings tbody').addEventListener('click', (e) => {
       titleText: `${dealer} — ${lastSize} g`,
       historyUrlBuilder: (range) =>
         `${BACKEND_URL}/history/bar/${encodeURIComponent(dealer)}/${lastSize}?range=${range}`,
+      contextUrl:
+        `${BACKEND_URL}/context/bar/${encodeURIComponent(dealer)}/${lastSize}`,
     });
   }
 });
