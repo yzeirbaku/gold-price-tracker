@@ -50,6 +50,14 @@ let coinSortState = { col: 'premium', dir: 'asc' };  // best deals first
 const TAB_STORAGE = 'gold-tracker-tab';
 let currentTab = localStorage.getItem(TAB_STORAGE) || 'bars';
 
+// Purchase dialog mode. Re-used between Add and Edit flows — submit handler
+// reads this to decide POST /portfolio vs PATCH /portfolio/{id}.
+let purchaseMode = { kind: 'add' };
+
+// Portfolio metal filter — null = show all, 'gold' | 'silver' = filter to one.
+// Toggled by clicking a metal panel under the summary.
+let portfolioMetalFilter = null;
+
 function renderSpot(data) {
   if (!data || !data.spot) {
     $('#spot-content').textContent = 'Spot price unavailable.';
@@ -1336,10 +1344,11 @@ function renderPortfolioSummary(s) {
 }
 
 function renderMetalPanel(metal, m) {
+  const tone = metal === 'gold' ? 'is-gold' : 'is-silver';
   const isEmpty = !(m.paid_dkk > 0);
   if (isEmpty) {
     return `
-      <div class="metal-panel is-empty">
+      <div class="metal-panel ${tone} is-empty" data-metal="${metal}">
         <div class="metal-panel-head"><span class="metal-chip metal-${metal}">${metal}</span></div>
         <div class="metal-panel-empty">No ${metal} purchases yet.</div>
       </div>
@@ -1348,8 +1357,9 @@ function renderMetalPanel(metal, m) {
   const pnl = m.value_dkk - m.paid_dkk;
   const pnlPct = (pnl / m.paid_dkk) * 100;
   const pnlClass = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+  const activeCls = portfolioMetalFilter === metal ? ' is-active' : '';
   return `
-    <div class="metal-panel">
+    <div class="metal-panel ${tone}${activeCls}" data-metal="${metal}" role="button" tabindex="0" aria-pressed="${portfolioMetalFilter === metal}" title="Click to filter by ${metal}">
       <div class="metal-panel-head"><span class="metal-chip metal-${metal}">${metal}</span></div>
       <div class="metal-panel-stats">
         <div class="ps-stat"><span class="ps-label">Fine weight</span><span class="ps-value">${fmtFineG(m.fine_weight_g)} g</span></div>
@@ -1360,6 +1370,30 @@ function renderMetalPanel(metal, m) {
     </div>
   `;
 }
+
+function setPortfolioFilter(metal) {
+  // Pass null to clear, 'gold'/'silver' to filter. Clicking the active panel
+  // again toggles the filter off so the panels themselves are a toggle.
+  portfolioMetalFilter = (portfolioMetalFilter === metal) ? null : metal;
+  if (lastPortfolio.summary) renderPortfolioSummary(lastPortfolio.summary);
+  if (lastPortfolio.purchases) renderPortfolioTable(lastPortfolio.purchases);
+}
+
+// Delegated click + keyboard on the summary card: any .metal-panel with a
+// data-metal attribute toggles the filter for that metal. Empty panels (no
+// purchases of that metal) ignore clicks because there's nothing to filter to.
+$('#portfolio-summary-content').addEventListener('click', (e) => {
+  const panel = e.target.closest('.metal-panel[data-metal]');
+  if (!panel || panel.classList.contains('is-empty')) return;
+  setPortfolioFilter(panel.dataset.metal);
+});
+$('#portfolio-summary-content').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const panel = e.target.closest('.metal-panel[data-metal]');
+  if (!panel || panel.classList.contains('is-empty')) return;
+  e.preventDefault();
+  setPortfolioFilter(panel.dataset.metal);
+});
 
 function fmtPctSigned(n) {
   if (n == null) return '—';
@@ -1413,20 +1447,60 @@ function fmtDate(isoOrDate) {
   return `${dd}-${mm}-${yyyy}`;
 }
 
+function renderPortfolioFilterBar() {
+  // Shows "Showing {metal} only · Show all" above the table when a metal
+  // filter is active; renders nothing when filter is null. Lives inside
+  // #portfolio-list so it sits with the table it scopes.
+  const bar = $('#portfolio-filter-bar');
+  if (!bar) return;
+  if (!portfolioMetalFilter) {
+    bar.hidden = true;
+    bar.innerHTML = '';
+    return;
+  }
+  bar.hidden = false;
+  bar.innerHTML = `
+    <span class="filter-chip-label">Showing <strong>${portfolioMetalFilter}</strong> only</span>
+    <button id="portfolio-filter-clear" type="button" class="filter-chip-clear">Show all</button>
+  `;
+  $('#portfolio-filter-clear').addEventListener('click', () => {
+    setPortfolioFilter(portfolioMetalFilter);  // toggle off
+  });
+}
+
 function renderPortfolioTable(purchases) {
   const tableEl = $('#portfolio-table');
   const emptyEl = $('#portfolio-empty');
   const tbody = tableEl.querySelector('tbody');
+  renderPortfolioFilterBar();
   if (!purchases.length) {
     tableEl.hidden = true;
     emptyEl.hidden = false;
+    emptyEl.innerHTML = '<p>No purchases yet. Add your first one to start tracking gains.</p>';
+    tbody.innerHTML = '';
+    updatePortfolioSortIndicators();
+    return;
+  }
+  const filtered = portfolioMetalFilter
+    ? purchases.filter(p => p.metal === portfolioMetalFilter)
+    : purchases;
+  if (!filtered.length) {
+    // Filter excludes everything — show a filter-aware empty state with a
+    // one-click escape hatch instead of leaving a blank card.
+    tableEl.hidden = true;
+    emptyEl.hidden = false;
+    emptyEl.innerHTML = `<p>No ${portfolioMetalFilter} purchases. <a href="#" id="filter-empty-clear">Show all</a></p>`;
+    $('#filter-empty-clear').addEventListener('click', (e) => {
+      e.preventDefault();
+      setPortfolioFilter(portfolioMetalFilter);  // toggle off
+    });
     tbody.innerHTML = '';
     updatePortfolioSortIndicators();
     return;
   }
   emptyEl.hidden = true;
   tableEl.hidden = false;
-  const sorted = [...purchases].sort((a, b) => {
+  const sorted = [...filtered].sort((a, b) => {
     if (portfolioSort.col === 'date') {
       const cmp = new Date(a.purchased_at) - new Date(b.purchased_at);
       return portfolioSort.dir === 'asc' ? cmp : -cmp;
@@ -1440,7 +1514,12 @@ function renderPortfolioTable(purchases) {
         <td>${fmtDate(p.purchased_at)}</td>
         <td><span class="metal-chip metal-${p.metal}">${p.metal}</span></td>
         <td>${gross} g</td>
-        <td><button class="row-delete icon-btn" aria-label="Delete" data-id="${p.id}" type="button">✕</button></td>
+        <td>
+          <div class="row-actions">
+            <button class="row-edit icon-btn" aria-label="Edit" data-id="${p.id}" type="button">✎</button>
+            <button class="row-delete icon-btn" aria-label="Delete" data-id="${p.id}" type="button">✕</button>
+          </div>
+        </td>
       </tr>
     `;
   }).join('');
@@ -1522,6 +1601,15 @@ function collapsePortfolioDetail() {
 }
 
 $('#portfolio-table tbody').addEventListener('click', async (e) => {
+  const edit = e.target.closest('.row-edit');
+  if (edit) {
+    e.stopPropagation();
+    const purchase = (lastPortfolio.purchases || []).find(x => x.id === edit.dataset.id);
+    if (!purchase) return;
+    openPurchaseDialog({ kind: 'edit', id: edit.dataset.id }, purchase);
+    return;
+  }
+
   const del = e.target.closest('.row-delete');
   if (del) {
     e.stopPropagation();
@@ -1563,20 +1651,43 @@ $('#portfolio-table tbody').addEventListener('click', async (e) => {
   row.classList.add('is-expanded');
 });
 
-// Add-purchase dialog ———————————————————————————————————————————————————————
+// Add / Edit purchase dialog ————————————————————————————————————————————————
 
-$('#portfolio-add-btn').addEventListener('click', () => {
-  $('#purchase-form').reset();
-  $('#purchase-purity').value = '0.9999';
-  // Default purchase date to today in the user's local timezone (date input
-  // expects yyyy-mm-dd; the API gets noon UTC at submit time).
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  $('#purchase-date').value = `${yyyy}-${mm}-${dd}`;
+function openPurchaseDialog(mode, purchase = null) {
+  // Stash the original row on edit so the submit handler can diff against it
+  // and PATCH only changed fields. Avoids needlessly re-fetching historical
+  // spot when the user edits only e.g. the label or notes.
+  purchaseMode = mode.kind === 'edit' ? { ...mode, original: purchase } : mode;
+  const form = $('#purchase-form');
+  form.reset();
+  const titleEl = $('#purchase-dialog-title');
+  if (mode.kind === 'edit' && purchase) {
+    titleEl.textContent = 'Edit purchase';
+    $(`#purchase-form input[name="metal"][value="${purchase.metal}"]`).checked = true;
+    $('#purchase-label').value = purchase.label || '';
+    $('#purchase-gross').value = purchase.gross_weight_g;
+    $('#purchase-purity').value = purchase.purity;
+    $('#purchase-price').value = purchase.price_paid_dkk;
+    $('#purchase-date').value = (purchase.purchased_at || '').slice(0, 10);
+    $('#purchase-dealer').value = purchase.dealer || '';
+    $('#purchase-notes').value = purchase.notes || '';
+  } else {
+    titleEl.textContent = 'Add purchase';
+    $('#purchase-purity').value = '0.9999';
+    // Default purchase date to today in the user's local timezone (date input
+    // expects yyyy-mm-dd; the API gets noon UTC at submit time).
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    $('#purchase-date').value = `${yyyy}-${mm}-${dd}`;
+  }
   $('#purchase-error').hidden = true;
   $('#purchase-dialog').showModal();
+}
+
+$('#portfolio-add-btn').addEventListener('click', () => {
+  openPurchaseDialog({ kind: 'add' });
 });
 
 $('#purchase-form').addEventListener('submit', async (e) => {
@@ -1607,19 +1718,50 @@ $('#purchase-form').addEventListener('submit', async (e) => {
   // midpoint of the trading day in the user's likely timezone.
   const purchased_at = `${dateOnly}T12:00:00Z`;
 
+  const isEdit = purchaseMode.kind === 'edit';
+  const url = isEdit
+    ? `${BACKEND_URL}/portfolio/${purchaseMode.id}`
+    : `${BACKEND_URL}/portfolio`;
+  const method = isEdit ? 'PATCH' : 'POST';
+
+  // POST sends every field. PATCH diffs against the cached original so the
+  // backend only re-freezes historical spot when purchased_at/metal actually
+  // moved — avoids hitting yfinance on a notes-only edit.
+  let payload;
+  if (isEdit) {
+    const original = purchaseMode.original || {};
+    const originalDate = (original.purchased_at || '').slice(0, 10);
+    const diff = {};
+    if (metal !== original.metal) diff.metal = metal;
+    if (label !== (original.label || '')) diff.label = label;
+    if (gross !== parseFloat(original.gross_weight_g)) diff.gross_weight_g = gross;
+    if (purity !== parseFloat(original.purity)) diff.purity = purity;
+    if (price !== parseFloat(original.price_paid_dkk)) diff.price_paid_dkk = price;
+    if (dateOnly !== originalDate) diff.purchased_at = purchased_at;
+    if ((dealer || null) !== (original.dealer || null)) diff.dealer = dealer;
+    if ((notes || null) !== (original.notes || null)) diff.notes = notes;
+    if (Object.keys(diff).length === 0) {
+      $('#purchase-dialog').close();
+      return;
+    }
+    payload = diff;
+  } else {
+    payload = {
+      metal, label,
+      gross_weight_g: gross, purity, price_paid_dkk: price,
+      purchased_at, dealer, notes,
+    };
+  }
+
   const submitBtn = $('#purchase-submit');
   const originalLabel = submitBtn.textContent;
   submitBtn.disabled = true;
   submitBtn.textContent = 'Saving…';
   try {
-    const res = await fetch(`${BACKEND_URL}/portfolio`, {
-      method: 'POST',
+    const res = await fetch(url, {
+      method,
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({
-        metal, label,
-        gross_weight_g: gross, purity, price_paid_dkk: price,
-        purchased_at, dealer, notes,
-      }),
+      body: JSON.stringify(payload),
     });
     if (res.status === 401) {
       $('#purchase-dialog').close();
