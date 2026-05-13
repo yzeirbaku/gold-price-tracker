@@ -163,12 +163,17 @@ site works fully without logging in; sign-in only unlocks the portfolio.
 2. User clicks the link `https://.../#auth=<token>`. The frontend extracts
    the token from the URL fragment (never hits the server in proxies/logs)
    and `POST /auth/verify`s it. Backend looks up the hash inside a
-   `FOR UPDATE` transaction, marks `used_at`, upserts the user, and sets a
-   90-day `session` cookie (`HttpOnly Secure SameSite=None` in prod;
-   `SameSite=Lax` for `http://` local dev — detected from `FRONTEND_ORIGIN`).
-3. Verify tab writes `localStorage.gold-tracker.session = '1'` to broadcast
-   the new session; the original "Check your inbox" tab picks it up via the
-   `storage` event and transitions to logged-in.
+   `FOR UPDATE` transaction, marks `used_at`, upserts the user, creates a
+   `sessions` row, and returns `{user_id, email, token}` — `token` is the
+   raw UUID from `sessions.id`.
+3. Frontend writes the token to `localStorage` (`gold-tracker.session-token`)
+   and broadcasts via `localStorage.gold-tracker.session = '1'`. The
+   original "Check your inbox" tab picks it up via the `storage` event,
+   re-reads `/auth/me` with the new token, and transitions to logged-in.
+4. Subsequent authed calls send `Authorization: Bearer <token>` —
+   `require_session` parses the header, validates against `sessions`, and
+   slides `last_seen_at` forward. Logout = `DELETE FROM sessions` +
+   `localStorage.removeItem`.
 
 **Portfolio P&L math:**
 - `fine_weight_g = gross_weight_g × purity` (always derived; row stores gross + purity).
@@ -185,11 +190,23 @@ historical comes from frankfurter.dev's `/v1/{date}` endpoint. Both walk
 back up to 7 days through weekends/holidays. The PATCH endpoint
 re-freezes the spot if `purchased_at` *or* `metal` changes.
 
-**CORS + cookies:** because the backend (Render) and frontend (Cloudflare
-Pages) are on different sites, the session cookie requires
-`SameSite=None; Secure`. That in turn requires `allow_credentials=True`,
-which means `allow_origins` MUST be an explicit URL (not `*`). The
-backend hard-fails at startup if `FRONTEND_ORIGIN=*`.
+**Why bearer tokens, not cookies:** the backend (Render `*.onrender.com`)
+and frontend (Cloudflare Pages `*.pages.dev`) live on different sites.
+Safari ITP, Brave, Firefox ETP, and Chrome (with 3rd-party cookies
+disabled) all refuse to save a cross-site `SameSite=None; Secure` cookie
+regardless of how correctly the headers are set — which broke sign-in in
+production. Bearer tokens in `localStorage` sidestep that entirely (and
+remove CSRF risk for free, since browsers don't auto-attach Authorization
+headers). The trade-off is XSS resistance: an attacker who lands a script
+on the frontend origin can read the token. We mitigate that with a strict
+CSP in `frontend/_headers` and consistent use of `escapeHtml` everywhere
+user input touches `innerHTML`.
+
+**Content-Security-Policy:** lives in `frontend/_headers` and ships with
+Cloudflare Pages. Scripts are `'self'` + `https://cdn.jsdelivr.net` (for
+Chart.js); `connect-src` allowlists the Render backend; `frame-ancestors
+'none'` blocks clickjacking; `object-src 'none'` blocks Flash/etc. Update
+the `connect-src` URL if the backend host ever changes.
 
 ## Cron
 

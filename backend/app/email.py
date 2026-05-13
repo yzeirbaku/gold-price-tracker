@@ -11,7 +11,7 @@ import resend
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_FROM = "Gold Tracker <onboarding@resend.dev>"
+_DEFAULT_FROM = "Gold Price Tracker <onboarding@resend.dev>"
 
 
 class EmailSendError(RuntimeError):
@@ -36,7 +36,7 @@ async def send_magic_link(to_email: str, link_url: str) -> None:
         resend.Emails.send({
             "from": from_addr,
             "to": [to_email],
-            "subject": "Sign in to Gold Tracker",
+            "subject": "Sign in to Gold Price Tracker",
             "html": html_body,
             "text": text_body,
         })
@@ -58,10 +58,10 @@ def _html_body(link_url: str) -> str:
     return f"""\
 <!DOCTYPE html>
 <html><body style="{body_style}">
-  <h2 style="margin: 0 0 16px;">Sign in to Gold Tracker</h2>
+  <h2 style="margin: 0 0 16px;">Sign in to Gold Price Tracker</h2>
   <p>You requested a sign-in link. Click the button below to continue — valid for 15 minutes.</p>
   <p style="margin: 24px 0;">
-    <a href="{link_url}" style="{btn_style}">Sign in to Gold Tracker</a>
+    <a href="{link_url}" style="{btn_style}">Sign in to Gold Price Tracker</a>
   </p>
   <p style="color: #666; font-size: 0.9em;">Or paste this link into your browser:<br>
     <span style="word-break: break-all;">{link_url}</span></p>
@@ -73,7 +73,7 @@ def _html_body(link_url: str) -> str:
 
 def _text_body(link_url: str) -> str:
     return (
-        "Sign in to Gold Tracker\n\n"
+        "Sign in to Gold Price Tracker\n\n"
         "You requested a sign-in link. Open this URL to continue — valid for 15 minutes:\n\n"
         f"{link_url}\n\n"
         "If you didn't request this, ignore this email."

@@ -3,11 +3,17 @@ dependency. Coexists with the existing X-API-Key auth — neither is required
 to call the other's endpoints.
 
 Token lifecycle:
-  - Raw token = 256-bit secrets.token_urlsafe(32). Only ever leaves the server
-    in the email.
-  - DB stores sha256(token) in magic_links.token_hash.
-  - Session cookie value = UUIDv4 from sessions.id. Stored unhashed; never
-    rendered in UI or logs.
+  - Magic-link raw token = 256-bit secrets.token_urlsafe(32). Only leaves
+    the server in the sign-in email. DB stores sha256(token).
+  - Session token = UUIDv4 from sessions.id. Returned in the /auth/verify
+    response body; the frontend stores it in localStorage and sends it as
+    `Authorization: Bearer <token>` on every authenticated request.
+
+We switched from cookie sessions to bearer tokens because Cloudflare Pages
+(*.pages.dev) and Render (*.onrender.com) are different sites, and many
+browsers (Safari ITP, Brave, Firefox ETP, Chrome with 3rd-party cookies
+off) refuse to save SameSite=None cross-site cookies regardless of how
+correctly the headers are set. Bearer-in-localStorage works everywhere.
 """
 import hashlib
 import logging
@@ -18,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import asyncpg
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr
 
 from .db import get_pool
@@ -28,8 +34,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-SESSION_COOKIE = "session"
-SESSION_MAX_AGE_S = 90 * 24 * 60 * 60  # 90 days
 SESSION_SLIDING_DAYS = 90
 MAGIC_LINK_TTL_MIN = 15
 RATE_LIMIT_PER_EMAIL = 3
@@ -54,34 +58,6 @@ class VerifyBody(BaseModel):
 
 def _hash_token(raw: str) -> bytes:
     return hashlib.sha256(raw.encode("utf-8")).digest()
-
-
-def _is_secure_origin() -> bool:
-    return os.environ.get("FRONTEND_ORIGIN", "").startswith("https://")
-
-
-def _set_session_cookie(response: Response, session_id: UUID) -> None:
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=str(session_id),
-        max_age=SESSION_MAX_AGE_S,
-        httponly=True,
-        secure=_is_secure_origin(),
-        samesite="none" if _is_secure_origin() else "lax",
-        path="/",
-    )
-
-
-def _clear_session_cookie(response: Response) -> None:
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value="",
-        max_age=0,
-        httponly=True,
-        secure=_is_secure_origin(),
-        samesite="none" if _is_secure_origin() else "lax",
-        path="/",
-    )
 
 
 def _client_ip(request: Request) -> str | None:
@@ -150,7 +126,10 @@ async def request_link(body: RequestLinkBody, request: Request) -> Response:
 
 
 @router.post("/verify")
-async def verify(body: VerifyBody, request: Request, response: Response) -> dict[str, str]:
+async def verify(body: VerifyBody, request: Request) -> dict[str, str]:
+    """Exchange a magic-link token for a session bearer token. The session
+    token returned is the same uuid stored in `sessions.id`; the client
+    sends it as `Authorization: Bearer <token>` on subsequent requests."""
     pool = await get_pool()
     if pool is None:
         raise HTTPException(status_code=503, detail="database not configured")
@@ -184,8 +163,11 @@ async def verify(body: VerifyBody, request: Request, response: Response) -> dict
                 "INSERT INTO sessions (id, user_id, user_agent) VALUES ($1, $2, $3)",
                 session_id, user_row["id"], user_agent,
             )
-    _set_session_cookie(response, session_id)
-    return {"user_id": str(user_row["id"]), "email": user_row["email"]}
+    return {
+        "user_id": str(user_row["id"]),
+        "email": user_row["email"],
+        "token": str(session_id),
+    }
 
 
 async def _resolve_session(session_id_str: str | None) -> AuthedUser | None:
@@ -215,25 +197,37 @@ async def _resolve_session(session_id_str: str | None) -> AuthedUser | None:
     return AuthedUser(id=row["user_id"], email=row["email"])
 
 
-async def require_session(session: str | None = Cookie(default=None)) -> AuthedUser:
-    user = await _resolve_session(session)
+def _extract_bearer(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    parts = authorization.split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    return parts[1].strip() or None
+
+
+async def require_session(
+    authorization: str | None = Header(default=None),
+) -> AuthedUser:
+    token = _extract_bearer(authorization)
+    user = await _resolve_session(token)
     if user is None:
         raise HTTPException(status_code=401, detail="not authenticated")
     return user
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(response: Response, session: str | None = Cookie(default=None)) -> Response:
-    if session:
+async def logout(authorization: str | None = Header(default=None)) -> Response:
+    token = _extract_bearer(authorization)
+    if token:
         try:
-            session_id = UUID(session)
+            session_id = UUID(token)
             pool = await get_pool()
             if pool is not None:
                 async with pool.acquire() as conn:
                     await conn.execute("DELETE FROM sessions WHERE id = $1", session_id)
         except ValueError:
             pass
-    _clear_session_cookie(response)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

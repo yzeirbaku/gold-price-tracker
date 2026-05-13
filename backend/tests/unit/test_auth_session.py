@@ -13,8 +13,8 @@ from app.auth_session import (
     _build_magic_link_url,
     _check_rate_limit,
     _client_ip,
+    _extract_bearer,
     _hash_token,
-    _is_secure_origin,
 )
 
 
@@ -32,19 +32,28 @@ def test_hash_token_differs_for_different_inputs() -> None:
     assert _hash_token("a") != _hash_token("b")
 
 
-def test_is_secure_origin_true_for_https() -> None:
-    with patch.dict(os.environ, {"FRONTEND_ORIGIN": "https://example.com"}):
-        assert _is_secure_origin() is True
+def test_extract_bearer_returns_token() -> None:
+    assert _extract_bearer("Bearer abc123") == "abc123"
 
 
-def test_is_secure_origin_false_for_http() -> None:
-    with patch.dict(os.environ, {"FRONTEND_ORIGIN": "http://localhost:5500"}):
-        assert _is_secure_origin() is False
+def test_extract_bearer_is_case_insensitive_on_scheme() -> None:
+    assert _extract_bearer("bearer abc123") == "abc123"
+    assert _extract_bearer("BEARER abc123") == "abc123"
 
 
-def test_is_secure_origin_false_when_unset() -> None:
-    with patch.dict(os.environ, {}, clear=True):
-        assert _is_secure_origin() is False
+def test_extract_bearer_returns_none_for_other_schemes() -> None:
+    assert _extract_bearer("Basic abc123") is None
+    assert _extract_bearer("Token abc123") is None
+
+
+def test_extract_bearer_returns_none_for_none_or_empty() -> None:
+    assert _extract_bearer(None) is None
+    assert _extract_bearer("") is None
+    assert _extract_bearer("Bearer ") is None
+
+
+def test_extract_bearer_strips_whitespace_from_token() -> None:
+    assert _extract_bearer("Bearer  spaced  ") == "spaced"
 
 
 def test_client_ip_from_x_forwarded_for_takes_first() -> None:

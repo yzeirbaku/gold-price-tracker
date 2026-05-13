@@ -65,24 +65,18 @@ async def _startup() -> None:
 async def _shutdown() -> None:
     await close_pool()
 
-# CORS — only the deployed Cloudflare Pages frontend may call us.
-# Cookie auth (magic link) requires allow_credentials=True, which combined
-# with allow_origins=["*"] would let any origin issue credentialed XHRs
-# against /portfolio and /auth/* (Starlette echoes the request Origin back
-# in that case). So FRONTEND_ORIGIN MUST be an explicit, non-wildcard
-# value in production. Locally we fall back to the dev frontend URL.
-_origin = os.environ.get("FRONTEND_ORIGIN", "http://127.0.0.1:5500")
-if _origin == "*":
-    raise RuntimeError(
-        "FRONTEND_ORIGIN=* is unsafe with cookie auth. "
-        "Set it to the specific frontend URL (e.g. https://your-app.pages.dev)."
-    )
+# CORS — restrict by origin as an extra defense-in-depth layer. Auth is
+# bearer-token-based (Authorization header, not cookies), so we don't need
+# allow_credentials. Browsers treat Authorization-header requests as
+# "non-credentialed" CORS, so cross-site is always permitted by the spec —
+# the origin allowlist is just to keep random hostnames from poking the
+# X-API-Key endpoints.
+_origin = os.environ.get("FRONTEND_ORIGIN", "*")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[_origin],
-    allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
-    allow_headers=["X-API-Key", "Content-Type"],
+    allow_headers=["X-API-Key", "Content-Type", "Authorization"],
     expose_headers=["Content-Disposition"],
 )
 

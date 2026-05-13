@@ -87,7 +87,7 @@ Open `http://127.0.0.1:5500/`, click the ☰ hamburger menu → **Settings**, pa
 | Var | Required | Notes |
 |---|---|---|
 | `API_KEY` | yes | Shared secret. PWA sends as `X-API-Key`. Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. |
-| `FRONTEND_ORIGIN` | yes | Your Cloudflare Pages URL, e.g. `https://gold-tracker.pages.dev` — for CORS. Must be an explicit URL, **not `*`** (backend refuses to start with wildcard once cookie auth is on). |
+| `FRONTEND_ORIGIN` | no | Your Cloudflare Pages URL, e.g. `https://gold-tracker.pages.dev`. Defaults to `*` (permissive). Auth is bearer-token-based so a wildcard origin doesn't open a credential-leak path; explicit is just tidier. |
 | `DATABASE_URL` | yes (for portfolio + history + reports) | Neon Postgres connection string. Without it, only `/prices`, `/spot`, `/coins` work. |
 | `RESEND_API_KEY` | yes (for portfolio sign-in) | Resend API key (`re_...`). Get it from resend.com. |
 | `MAGIC_LINK_BASE_URL` | yes (for portfolio sign-in) | Frontend origin used to build the `#auth=` URL in the email, e.g. `https://gold-tracker.pages.dev`. |
@@ -106,7 +106,9 @@ Optional sign-in unlocks a per-user portfolio. Anyone with a valid email can sig
 
 **What gets tracked per purchase:** metal (gold/silver), gross weight, purity (so fine weight = gross × purity), price paid in DKK, purchase date, free-text label, optional dealer + notes. Spot at the purchase date is fetched from yfinance (`GC=F` / `SI=F`) plus historical USD→DKK from frankfurter.dev and frozen onto the row at write-time, so the cost-basis premium stays stable forever. Current value uses live spot at read time.
 
-**Authentication architecture:** SHA-256 hashed one-time tokens in `magic_links` (15-min TTL, single-use, rate-limited at 3/10min per email and 30/hr per IP); opaque UUID session tokens in `sessions` with a 90-day sliding TTL via `last_seen_at`. Cookie is `HttpOnly Secure SameSite=None` in prod (cross-origin Render ↔ Pages); `SameSite=Lax` locally. No passwords stored anywhere. Logout is `DELETE FROM sessions` and revokes immediately.
+**Authentication architecture:** SHA-256 hashed one-time tokens in `magic_links` (15-min TTL, single-use, rate-limited at 3/10min per email and 30/hr per IP); opaque UUID session tokens in `sessions` with a 90-day sliding TTL via `last_seen_at`. Sessions are transported as `Authorization: Bearer <token>` (the verify endpoint returns the token; the frontend stashes it in `localStorage` and sends it on every authed call). We don't use cookies because the backend and frontend live on different sites and modern browsers (Safari ITP, Brave, Firefox ETP) silently drop cross-site cookies. No passwords stored anywhere. Logout = `DELETE FROM sessions` + `localStorage.removeItem` and revokes immediately.
+
+A strict CSP in `frontend/_headers` limits script and connect origins to mitigate the XSS surface that comes with localStorage-stored tokens.
 
 The site continues to work fully without signing in — the existing X-API-Key endpoints (prices, history, spot, coins, reports) are untouched.
 

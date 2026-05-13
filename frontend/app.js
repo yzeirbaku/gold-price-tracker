@@ -1090,9 +1090,24 @@ $('#reports-view').addEventListener('click', (e) => {
 // Auth + portfolio ——————————————————————————————————————————————————————————
 
 const SESSION_BROADCAST_KEY = 'gold-tracker.session';
+const SESSION_TOKEN_KEY = 'gold-tracker.session-token';
 let currentUser = null;
 let lastPortfolio = { purchases: [], summary: null };
 let portfolioSort = { col: 'date', dir: 'desc' };
+
+function getSessionToken() {
+  try { return localStorage.getItem(SESSION_TOKEN_KEY) || ''; } catch { return ''; }
+}
+function setSessionToken(t) {
+  try { localStorage.setItem(SESSION_TOKEN_KEY, t); } catch {}
+}
+function clearSessionToken() {
+  try { localStorage.removeItem(SESSION_TOKEN_KEY); } catch {}
+}
+function authHeaders() {
+  const t = getSessionToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
 
 function updateAuthUI() {
   const signedIn = currentUser != null;
@@ -1105,10 +1120,15 @@ function updateAuthUI() {
 }
 
 async function loadAuthState() {
+  if (!getSessionToken()) { currentUser = null; updateAuthUI(); return; }
   try {
-    const res = await fetch(`${BACKEND_URL}/auth/me`, { credentials: 'include' });
+    const res = await fetch(`${BACKEND_URL}/auth/me`, { headers: authHeaders() });
     if (res.ok) currentUser = await res.json();
-    else currentUser = null;
+    else {
+      // Stale or revoked token — clear it so we don't keep retrying.
+      if (res.status === 401) clearSessionToken();
+      currentUser = null;
+    }
   } catch (e) {
     currentUser = null;
   }
@@ -1140,7 +1160,6 @@ $('#login-form').addEventListener('submit', async (e) => {
   try {
     const res = await fetch(`${BACKEND_URL}/auth/request-link`, {
       method: 'POST',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     });
@@ -1191,7 +1210,6 @@ async function handleVerifyFragment() {
   try {
     const res = await fetch(`${BACKEND_URL}/auth/verify`, {
       method: 'POST',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
     });
@@ -1212,7 +1230,10 @@ async function handleVerifyFragment() {
       return true;
     }
     const user = await res.json();
-    currentUser = user;
+    // Persist the session bearer token first so authHeaders() works on the
+    // next call, then derive currentUser shape and update UI.
+    if (user.token) setSessionToken(user.token);
+    currentUser = { user_id: user.user_id, email: user.email };
     updateAuthUI();
     try { localStorage.setItem(SESSION_BROADCAST_KEY, '1'); } catch {}
     // Strip the token from the URL immediately so a reload doesn't re-fire
@@ -1239,9 +1260,10 @@ async function signOut() {
   try {
     await fetch(`${BACKEND_URL}/auth/logout`, {
       method: 'POST',
-      credentials: 'include',
+      headers: authHeaders(),
     });
   } catch {}
+  clearSessionToken();
   currentUser = null;
   try { localStorage.setItem(SESSION_BROADCAST_KEY, ''); } catch {}
   updateAuthUI();
@@ -1267,8 +1289,11 @@ async function loadPortfolio() {
   emptyEl.hidden = true;
   summaryEl.innerHTML = '';
   try {
-    const res = await fetch(`${BACKEND_URL}/portfolio`, { credentials: 'include' });
-    if (res.status === 401) { currentUser = null; updateAuthUI(); showPricesView(); openLoginDialog(); return; }
+    const res = await fetch(`${BACKEND_URL}/portfolio`, { headers: authHeaders() });
+    if (res.status === 401) {
+      clearSessionToken(); currentUser = null; updateAuthUI();
+      showPricesView(); openLoginDialog(); return;
+    }
     if (!res.ok) {
       loadingEl.innerHTML = `Failed to load portfolio (status ${res.status}).`;
       return;
@@ -1483,7 +1508,7 @@ $('#portfolio-table tbody').addEventListener('click', async (e) => {
     try {
       const res = await fetch(`${BACKEND_URL}/portfolio/${del.dataset.id}`, {
         method: 'DELETE',
-        credentials: 'include',
+        headers: authHeaders(),
       });
       if (!res.ok && res.status !== 204) {
         alert(`Delete failed (status ${res.status})`);
@@ -1560,8 +1585,7 @@ $('#purchase-form').addEventListener('submit', async (e) => {
   try {
     const res = await fetch(`${BACKEND_URL}/portfolio`, {
       method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({
         metal, label,
         gross_weight_g: gross, purity, price_paid_dkk: price,
@@ -1570,7 +1594,7 @@ $('#purchase-form').addEventListener('submit', async (e) => {
     });
     if (res.status === 401) {
       $('#purchase-dialog').close();
-      currentUser = null; updateAuthUI();
+      clearSessionToken(); currentUser = null; updateAuthUI();
       showPricesView(); openLoginDialog();
       return;
     }
