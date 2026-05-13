@@ -87,7 +87,7 @@ header {
 }
 header h1 {
   margin: 0;
-  font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em;
+  font-size: 1.3rem; font-weight: 700; letter-spacing: -0.01em;
   background: linear-gradient(90deg, var(--accent) 0%, var(--accent-title-mid) 50%, var(--accent-2) 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
@@ -190,7 +190,7 @@ main { max-width: 720px; margin: 0 auto; }
      left edge lines up exactly with the cards. Title and tabs spread
      to opposite ends so tabs hug the right edge. */
   header { padding: 0.7rem 1rem; gap: 0.35rem; }
-  header h1 { font-size: 0.95rem; }
+  header h1 { font-size: 1.05rem; }
   .header-title { gap: 0.5rem; justify-content: space-between; }
   .tab-strip { gap: 0.75rem; }
   .tab-strip button { font-size: 0.7rem; }
@@ -407,11 +407,17 @@ dialog menu button {
   transition: background 120ms ease, color 120ms ease;
 }
 dialog menu button:hover { background: var(--hover-bg); color: var(--fg); }
+dialog menu button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+  filter: none;
+}
 dialog menu button[value="save"] {
   background: linear-gradient(180deg, var(--btn-active-top) 0%, var(--btn-active-bottom) 100%);
   color: #1a1300; border-color: var(--btn-active-bottom); font-weight: 600;
 }
 dialog menu button[value="save"]:hover { filter: brightness(1.05); }
+dialog menu button[value="save"]:disabled:hover { filter: none; }
 
 .spot-row {
   display: flex; justify-content: space-between; align-items: baseline;
@@ -696,17 +702,20 @@ tr.history-row > td {
 /* Affirmative variant — gold gradient. Use for Save/Add/Submit standalone
    buttons. Dialog menu buttons get this automatically via value="save". */
 .site-btn-primary {
-  padding: 0.5rem 0.95rem;
+  padding: 0.45rem 0.85rem;
   background: linear-gradient(180deg, var(--btn-active-top) 0%, var(--btn-active-bottom) 100%);
   color: #1a1300;
   border: 1px solid var(--btn-active-bottom);
   border-radius: var(--radius-sm);
-  font: inherit; font-size: 0.9rem; font-weight: 600;
+  font: inherit; font-size: 0.85rem; font-weight: 600;
   cursor: pointer;
   transition: filter 120ms ease;
 }
 .site-btn-primary:hover { filter: brightness(1.05); }
 .site-btn-primary:disabled { opacity: 0.55; cursor: wait; }
+@media (max-width: 600px) {
+  .site-btn-primary { padding: 0.35rem 0.7rem; font-size: 0.78rem; }
+}
 
 .dialog-helper {
   margin: 0 0 0.7rem;
@@ -734,18 +743,18 @@ tr.history-row > td {
 }
 .ps-stat { display: flex; flex-direction: column; gap: 0.1rem; }
 .ps-label {
-  font-size: 0.7rem; color: var(--muted);
+  font-size: 0.65rem; color: var(--muted);
   text-transform: uppercase; letter-spacing: 0.06em;
 }
-.ps-value { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.ps-value { font-size: 0.95rem; font-variant-numeric: tabular-nums; }
 .pnl-pos { color: var(--success, #5ec27a); }
 .pnl-neg { color: var(--error, #e85a5a); }
 
 .metal-chip {
   display: inline-block;
-  padding: 0.15rem 0.55rem;
+  padding: 0.1rem 0.5rem;
   border-radius: 10px;
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   font-weight: 600;
   text-transform: capitalize;
   letter-spacing: 0.02em;
@@ -768,7 +777,6 @@ tr.history-row > td {
   margin-bottom: 0.55rem;
   display: flex; align-items: center; gap: 0.5rem;
 }
-.metal-panel-head .metal-chip { font-size: 0.7rem; padding: 0.1rem 0.5rem; }
 .metal-panel-stats {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -844,13 +852,31 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .purchase-grid .settings-field { margin: 0; }
 .purchase-grid-wide { grid-column: 1 / -1; }
 @media (max-width: 520px) {
-  #purchase-dialog { width: auto; }
-  .purchase-grid { grid-template-columns: 1fr; }
+  /* Cap the modals so they don't fill the whole phone viewport — leaves
+     visible margin around the dialog and makes it feel like a popup, not
+     a full-screen page. Applies to all our dialogs for visual consistency. */
+  #purchase-dialog,
+  #settings-dialog,
+  #login-dialog,
+  #confirm-dialog {
+    width: auto;
+    max-width: min(380px, 92vw);
+    padding: 1rem 0.85rem;
+  }
+  .purchase-grid { grid-template-columns: 1fr; gap: 0.4rem; }
+  #purchase-dialog .settings-field { padding: 0.4rem 0.6rem 0.5rem; }
+  #purchase-dialog input,
+  #purchase-dialog textarea { padding: 0.45rem 0.55rem; font-size: 0.9rem; }
 }
 
 /* Date column stays on one line — DD-MM-YYYY otherwise wraps on phone. */
 #portfolio-table th:first-child,
 #portfolio-table td:first-child { white-space: nowrap; }
+/* Weight column — numbers like "253.12 g" mustn't break across lines. */
+#portfolio-table tr.portfolio-row td:nth-child(3) { white-space: nowrap; }
+/* Push the delete column flush right — drop the global 1.1rem right padding. */
+#portfolio-table tr.portfolio-row td:last-child,
+#portfolio-table thead th:last-child { padding-right: 0.3rem; }
 
 /* Portfolio row — compact 4-col layout with click-to-expand detail panel. */
 .portfolio-row { cursor: pointer; }
@@ -884,21 +910,40 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   letter-spacing: 0.08em;
 }
 .pd-section-grid {
+  /* Grid with auto-fit so cells spread evenly across the section width
+     on desktop (3 cells = thirds; 4 cells = quarters). `minmax(0, 1fr)`
+     lets cells shrink below their content size — combined with the
+     `min-width: 0` + `overflow-wrap: anywhere` below, long values like
+     "+2.580 dkk (+161.26%)" wrap onto two lines on narrow viewports
+     instead of overflowing the section bounds. */
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
-  gap: 0.4rem 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 0.4rem 1.5rem;
 }
-.pd-section-notes { grid-column: 1 / -1; }
-.pd-notes {
-  margin: 0; font-size: 0.88rem; color: var(--fg-soft);
-  white-space: pre-wrap; word-break: break-word;
+.pd-section-grid .pd-cell { min-width: 0; }
+/* "About" group spans the full detail panel width; the three numeric
+   groups (Spec / At purchase / Now) sit below it in the 3-column grid. */
+.pd-section-about { grid-column: 1 / -1; }
+/* About has its own fixed 2-column layout so Notes can be a proper
+   full-width row instead of a cramped third column on mobile. */
+.pd-section-about .pd-section-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-.pd-cell { display: flex; flex-direction: column; gap: 0.05rem; }
+.pd-cell-wide { grid-column: 1 / -1; }
+.pd-value-multiline {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.pd-cell { display: flex; flex-direction: column; gap: 0.05rem; min-width: 0; }
 .pd-label {
-  font-size: 0.66rem; color: var(--muted);
+  font-size: 0.62rem; color: var(--muted);
   text-transform: uppercase; letter-spacing: 0.06em;
 }
-.pd-value { font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+.pd-value {
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
 
 @media (max-width: 720px) {
   .purchase-detail { grid-template-columns: 1fr; gap: 0.55rem; }

@@ -144,6 +144,7 @@ function updateSortIndicators() {
     th.classList.toggle('sort-active', active);
     th.classList.toggle('sort-asc', active && sortState.dir === 'asc');
     th.classList.toggle('sort-desc', active && sortState.dir === 'desc');
+    th.setAttribute('aria-sort', active ? (sortState.dir === 'asc' ? 'ascending' : 'descending') : 'none');
   });
 }
 
@@ -577,6 +578,7 @@ function updateCoinSortIndicators() {
     th.classList.toggle('sort-active', active);
     th.classList.toggle('sort-asc', active && coinSortState.dir === 'asc');
     th.classList.toggle('sort-desc', active && coinSortState.dir === 'desc');
+    th.setAttribute('aria-sort', active ? (coinSortState.dir === 'asc' ? 'ascending' : 'descending') : 'none');
   });
 }
 
@@ -1156,7 +1158,10 @@ $('#login-form').addEventListener('submit', async (e) => {
   if (!email) return;
   const errEl = $('#login-error');
   errEl.hidden = true;
-  $('#login-submit').disabled = true;
+  const submitBtn = $('#login-submit');
+  const originalLabel = submitBtn.textContent;
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Sending…';
   try {
     const res = await fetch(`${BACKEND_URL}/auth/request-link`, {
       method: 'POST',
@@ -1180,7 +1185,8 @@ $('#login-form').addEventListener('submit', async (e) => {
     errEl.textContent = `Network error: ${err.message}`;
     errEl.hidden = false;
   } finally {
-    $('#login-submit').disabled = false;
+    submitBtn.disabled = false;
+    submitBtn.textContent = originalLabel;
   }
 });
 
@@ -1268,6 +1274,11 @@ async function signOut() {
   try { localStorage.setItem(SESSION_BROADCAST_KEY, ''); } catch {}
   updateAuthUI();
   if (!$('#portfolio-view').hidden) showPricesView();
+  await infoDialog({
+    title: 'Signed out',
+    message: 'You have been signed out. The site keeps working without sign-in — pop back in anytime to view your portfolio.',
+    okLabel: 'OK',
+  });
 }
 
 // Portfolio view ————————————————————————————————————————————————————————————
@@ -1368,20 +1379,29 @@ function fmtFineG(g) {
 
 // Generic in-app confirmation dialog. Resolves to true when the user clicks
 // the affirmative button, false otherwise. Pass a custom button label via
-// `okLabel` if "Confirm" isn't right (e.g. "Delete").
-function confirmDialog({ title = 'Confirm', message, okLabel = 'Confirm' }) {
+// `okLabel` if "Confirm" isn't right (e.g. "Delete"). Pass `okOnly: true`
+// for one-button informational dialogs ("Signed out", etc.) — the cancel
+// button is hidden and the resolve value is ignored by most callers.
+function confirmDialog({ title = 'Confirm', message, okLabel = 'Confirm', okOnly = false }) {
   return new Promise((resolve) => {
     const dlg = $('#confirm-dialog');
+    const cancelBtn = dlg.querySelector('menu button[value="cancel"]');
     $('#confirm-dialog-title').textContent = title;
     $('#confirm-dialog-message').textContent = message;
     $('#confirm-dialog-ok').textContent = okLabel;
+    cancelBtn.hidden = !!okOnly;
     const onClose = () => {
       dlg.removeEventListener('close', onClose);
+      cancelBtn.hidden = false;  // restore for the next caller
       resolve(dlg.returnValue === 'save');
     };
     dlg.addEventListener('close', onClose);
     dlg.showModal();
   });
+}
+
+function infoDialog({ title, message, okLabel = 'OK' }) {
+  return confirmDialog({ title, message, okLabel, okOnly: true });
 }
 
 // Canonical site-wide date format: DD-MM-YYYY (see CLAUDE.md "Date format").
@@ -1418,7 +1438,6 @@ function renderPortfolioTable(purchases) {
     return `
       <tr class="portfolio-row" data-id="${p.id}">
         <td>${fmtDate(p.purchased_at)}</td>
-        <td>${escapeHtml(p.label)}</td>
         <td><span class="metal-chip metal-${p.metal}">${p.metal}</span></td>
         <td>${gross} g</td>
         <td><button class="row-delete icon-btn" aria-label="Delete" data-id="${p.id}" type="button">✕</button></td>
@@ -1432,8 +1451,9 @@ function updatePortfolioSortIndicators() {
   document.querySelectorAll('#portfolio-table th.sortable').forEach(th => {
     const active = th.dataset.sort === portfolioSort.col;
     th.classList.toggle('sort-active', active);
-    th.classList.toggle('sort-desc', active && portfolioSort.dir === 'desc');
     th.classList.toggle('sort-asc', active && portfolioSort.dir === 'asc');
+    th.classList.toggle('sort-desc', active && portfolioSort.dir === 'desc');
+    th.setAttribute('aria-sort', active ? (portfolioSort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
   });
 }
 
@@ -1457,12 +1477,19 @@ function buildPortfolioDetail(p) {
   const pnlClass = p.pnl_dkk >= 0 ? 'pnl-pos' : 'pnl-neg';
   return `
     <div class="purchase-detail">
+      <section class="pd-section pd-section-about">
+        <h4 class="pd-section-head">About</h4>
+        <div class="pd-section-grid">
+          <div class="pd-cell"><span class="pd-label">Label</span><span class="pd-value">${escapeHtml(p.label)}</span></div>
+          ${p.dealer ? `<div class="pd-cell"><span class="pd-label">Dealer</span><span class="pd-value">${escapeHtml(p.dealer)}</span></div>` : ''}
+          ${p.notes ? `<div class="pd-cell pd-cell-wide"><span class="pd-label">Notes</span><span class="pd-value pd-value-multiline">${escapeHtml(p.notes)}</span></div>` : ''}
+        </div>
+      </section>
       <section class="pd-section">
         <h4 class="pd-section-head">Spec</h4>
         <div class="pd-section-grid">
           <div class="pd-cell"><span class="pd-label">Fine weight</span><span class="pd-value">${fmtFineG(p.fine_weight_g)} g</span></div>
           <div class="pd-cell"><span class="pd-label">Purity</span><span class="pd-value">${p.purity}</span></div>
-          ${p.dealer ? `<div class="pd-cell"><span class="pd-label">Dealer</span><span class="pd-value">${escapeHtml(p.dealer)}</span></div>` : ''}
         </div>
       </section>
       <section class="pd-section">
@@ -1470,7 +1497,7 @@ function buildPortfolioDetail(p) {
         <div class="pd-section-grid">
           <div class="pd-cell"><span class="pd-label">Price paid</span><span class="pd-value">${fmtDKK(p.price_paid_dkk)}</span></div>
           <div class="pd-cell"><span class="pd-label">Spot then</span><span class="pd-value">${spotThen}</span></div>
-          <div class="pd-cell"><span class="pd-label">Purchase premium</span><span class="pd-value">${purchasePrem}</span></div>
+          <div class="pd-cell"><span class="pd-label">Premium</span><span class="pd-value">${purchasePrem}</span></div>
         </div>
       </section>
       <section class="pd-section">
@@ -1478,10 +1505,9 @@ function buildPortfolioDetail(p) {
         <div class="pd-section-grid">
           <div class="pd-cell"><span class="pd-label">Current spot</span><span class="pd-value">${fmtSpotDKK(p.current_spot_dkk_per_g)}/g</span></div>
           <div class="pd-cell"><span class="pd-label">Current value</span><span class="pd-value">${fmtDKK(p.current_value_dkk)}</span></div>
-          <div class="pd-cell"><span class="pd-label">P&amp;L</span><span class="pd-value ${pnlClass}">${fmtDKKSigned(p.pnl_dkk)} (${fmtPctSigned(p.pnl_pct)})</span></div>
+          <div class="pd-cell"><span class="pd-label">P&amp;L</span><span class="pd-value ${pnlClass}">${fmtDKKSigned(p.pnl_dkk)}<br><span class="muted-tiny">${fmtPctSigned(p.pnl_pct)}</span></span></div>
         </div>
       </section>
-      ${p.notes ? `<section class="pd-section pd-section-notes"><h4 class="pd-section-head">Notes</h4><p class="pd-notes">${escapeHtml(p.notes)}</p></section>` : ''}
     </div>
   `;
 }
@@ -1532,7 +1558,7 @@ $('#portfolio-table tbody').addEventListener('click', async (e) => {
   if (!purchase) return;
   const tr = document.createElement('tr');
   tr.className = 'portfolio-detail-row';
-  tr.innerHTML = `<td colspan="5">${buildPortfolioDetail(purchase)}</td>`;
+  tr.innerHTML = `<td colspan="4">${buildPortfolioDetail(purchase)}</td>`;
   row.after(tr);
   row.classList.add('is-expanded');
 });
@@ -1581,7 +1607,10 @@ $('#purchase-form').addEventListener('submit', async (e) => {
   // midpoint of the trading day in the user's likely timezone.
   const purchased_at = `${dateOnly}T12:00:00Z`;
 
-  $('#purchase-submit').disabled = true;
+  const submitBtn = $('#purchase-submit');
+  const originalLabel = submitBtn.textContent;
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Saving…';
   try {
     const res = await fetch(`${BACKEND_URL}/portfolio`, {
       method: 'POST',
@@ -1610,7 +1639,8 @@ $('#purchase-form').addEventListener('submit', async (e) => {
     errEl.textContent = `Network error: ${err.message}`;
     errEl.hidden = false;
   } finally {
-    $('#purchase-submit').disabled = false;
+    submitBtn.disabled = false;
+    submitBtn.textContent = originalLabel;
   }
 });
 
