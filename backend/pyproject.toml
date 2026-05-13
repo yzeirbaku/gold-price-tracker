@@ -6,6 +6,9 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP"]
 ignore = []
 
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Cookie", "fastapi.Header", "fastapi.Query", "fastapi.Path"]
+
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true

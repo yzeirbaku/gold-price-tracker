@@ -15,11 +15,15 @@ backend/         FastAPI on Render free tier (Python 3.12)
   app/
     main.py            FastAPI app + CORS + endpoints
     auth.py            X-API-Key header check (constant-time compare)
-    fx.py              USD→EUR/DKK via frankfurter.dev (+ stamped fallback)
-    spot.py            api.gold-api.com USD/oz → per-gram USD
+    auth_session.py    magic-link auth: issue/verify, sessions, rate limit, require_session
+    portfolio.py       per-user purchase CRUD + P&L assembly (cookie-auth)
+    email.py           Resend wrapper for the magic-link email (with MAGIC_LINK_DEV_PRINT bypass)
+    fx.py              USD→EUR/DKK via frankfurter.dev (+ stamped fallback + historical)
+    spot.py            current spot via api.gold-api.com; historical via yfinance (GC=F / SI=F)
     orchestrator.py    fan-out bar scrapers, compute premium %, sort
     models.py          Pydantic response models — Listing + CoinListing
     coins.py           static registry of recognized bullion coin types + resolver
+    buy_context.py     "buy now or wait?" stats for a single bar/coin (history-driven)
     db.py              asyncpg pool + idempotent SCHEMA_SQL bootstrap
     scrapers/
       base.py          DealerScraper Protocol, DEFAULT_HEADERS, parse_dkk_price
@@ -58,6 +62,10 @@ Postgres tables (Neon in prod, local Docker in dev):
 - `coin_snapshots`
 - `spot_snapshots`
 - `report_archive` — rendered HTML reports, keyed by (`report_type`, `period_start`), upsert on conflict
+- `users` — email-keyed user records (magic-link signup)
+- `magic_links` — one-time SHA-256-hashed tokens, 15-min TTL, single-use, `created_ip` for rate-limit
+- `sessions` — opaque UUID cookie tokens, 90-day sliding TTL via `last_seen_at`
+- `purchases` — per-user purchase rows; `spot_at_purchase_dkk_per_g` frozen at write
 
 ## Endpoints
 
@@ -75,6 +83,14 @@ Postgres tables (Neon in prod, local Docker in dev):
 | POST | `/reports/generate?range=week\|month` | `X-API-Key` | on-demand report, streamed back, not persisted |
 | POST | `/reports/cron/{type}` (`weekly`\|`monthly`) | `X-API-Key` | cron-only — generate + upsert into `report_archive` |
 | GET  | `/health` | `X-API-Key` | runs every bar scraper at 5 g, returns per-dealer pass/fail |
+| POST | `/auth/request-link` | none | issue a magic-link email; always 204, rate-limited |
+| POST | `/auth/verify` | none | exchange a magic-link token for a session cookie |
+| POST | `/auth/logout` | session cookie | delete the session row + clear cookie |
+| GET  | `/auth/me` | session cookie | returns `{user_id, email}` or 401 |
+| GET  | `/portfolio` | session cookie | the user's purchases + summary (live spot-driven P&L) |
+| POST | `/portfolio` | session cookie | create a purchase; freezes historical spot at write |
+| PATCH | `/portfolio/{id}` | session cookie | edit; re-freezes spot if `purchased_at` or `metal` change |
+| DELETE | `/portfolio/{id}` | session cookie | hard delete; 404 if not the caller's row |
 
 ## Dealers
 
@@ -130,6 +146,50 @@ generator + time-of-month drift), `renderer.py` (Jinja2), `builder.py`
 `scripts/seed.py` truncates the four snapshot tables, fills 30 days of
 synthetic data, then calls `build_report` for previous-week + previous-month
 and upserts both so the local archive is non-empty on first PWA load.
+
+## Portfolio + magic-link auth
+
+Two parallel auth schemes coexist. The shared `X-API-Key` (`auth.require_api_key`)
+gates everything from the original site — prices, history, spot, reports.
+The session cookie (`auth_session.require_session`) gates only the personal
+features added on top: the four `/auth/*` endpoints and `/portfolio*`. The
+site works fully without logging in; sign-in only unlocks the portfolio.
+
+**Sign-in flow:**
+1. User submits email → `POST /auth/request-link` rate-limits (3/10min per
+   email, 30/hour per IP), inserts a `magic_links` row holding only
+   `sha256(token)`, and sends the raw token in an email via Resend.
+   Always returns 204 — never reveals whether the email exists.
+2. User clicks the link `https://.../#auth=<token>`. The frontend extracts
+   the token from the URL fragment (never hits the server in proxies/logs)
+   and `POST /auth/verify`s it. Backend looks up the hash inside a
+   `FOR UPDATE` transaction, marks `used_at`, upserts the user, and sets a
+   90-day `session` cookie (`HttpOnly Secure SameSite=None` in prod;
+   `SameSite=Lax` for `http://` local dev — detected from `FRONTEND_ORIGIN`).
+3. Verify tab writes `localStorage.gold-tracker.session = '1'` to broadcast
+   the new session; the original "Check your inbox" tab picks it up via the
+   `storage` event and transitions to logged-in.
+
+**Portfolio P&L math:**
+- `fine_weight_g = gross_weight_g × purity` (always derived; row stores gross + purity).
+- `purchase_premium_pct` = (paid − frozen_spot_dkk_per_g × fine_g) / (frozen_spot × fine_g) × 100.
+- `current_value_dkk` = current_spot_dkk_per_g × fine_g.
+- `pnl_dkk` = current_value − paid; `pnl_pct` = pnl / paid × 100.
+
+**Historical spot for `spot_at_purchase_dkk_per_g`:** fetched once at
+write-time and frozen onto the row. **api.gold-api.com does *not* expose
+historical** (despite the early design assumption), so we use yfinance
+with `GC=F` (gold futures) and `SI=F` (silver futures) — they track spot
+to fractions of a percent, well below dealer bid/ask spreads. USD→DKK
+historical comes from frankfurter.dev's `/v1/{date}` endpoint. Both walk
+back up to 7 days through weekends/holidays. The PATCH endpoint
+re-freezes the spot if `purchased_at` *or* `metal` changes.
+
+**CORS + cookies:** because the backend (Render) and frontend (Cloudflare
+Pages) are on different sites, the session cookie requires
+`SameSite=None; Secure`. That in turn requires `allow_credentials=True`,
+which means `allow_origins` MUST be an explicit URL (not `*`). The
+backend hard-fails at startup if `FRONTEND_ORIGIN=*`.
 
 ## Cron
 
@@ -211,6 +271,8 @@ CI (`.github/workflows/tests.yml`) runs all three on push/PR to `main`. The live
 - **Coin scrapers don't pick a single cheapest variant per dealer.** Unlike bar scrapers, coin scrapers emit every recognized in-stock coin from the listing page; the global ranked `/coins` view sorts them across all dealers.
 - **Bars table was renamed `dealer_snapshots` → `bar_snapshots`** on 2026-05-08. The schema bootstrap in `app/db.py` includes an idempotent migration block that runs on every backend startup; safe to re-run.
 - **Bar history endpoint was renamed `/history/dealer/...` → `/history/bar/...`** at the same time, for symmetry with `/history/coin/...`. The PWA is the only client, so no compatibility shim.
+- **Buttons**: two styles, one rule. **Cancel / Close / non-affirmative → neutral**. **Save / Add / Submit / affirmative → gold gradient** (same yellow as the active size pill). Inside a dialog `<menu>`, the neutral is automatic — `dialog menu button` styles it. For the gold variant inside a dialog, give the button `value="save"` (the `dialog menu button[value="save"]` rule paints it). For standalone buttons **outside** any dialog, use `class="site-btn"` (neutral) or `class="site-btn-primary"` (gold). All four classes live in `styles.css`. The active-pill gold gradient is also used as a *state* indicator on the tab strip / size picker — that's the same colour by design.
+- **Date format**: site-wide canonical display format is `DD-MM-YYYY` (date only) or `DD-MM-YYYY HH:MM` (when a timestamp is needed). Use `fmtDate(iso)` from `app.js`. Don't use `toLocaleDateString` directly for user-facing dates; that drifts by locale. Existing report archive list still uses ISO (`YYYY-MM-DD`) inside the report content itself — that's separate, internal to the report renderer.
 
 ## Adding a new bar scraper
 

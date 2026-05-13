@@ -140,14 +140,10 @@ function sortListings(listings) {
 
 function updateSortIndicators() {
   document.querySelectorAll('#listings th.sortable').forEach(th => {
-    const ind = th.querySelector('.sort-indicator');
-    if (th.dataset.sort === sortState.col) {
-      th.classList.add('active');
-      ind.textContent = sortState.dir === 'asc' ? ' ↑' : ' ↓';
-    } else {
-      th.classList.remove('active');
-      ind.textContent = '';
-    }
+    const active = th.dataset.sort === sortState.col;
+    th.classList.toggle('sort-active', active);
+    th.classList.toggle('sort-asc', active && sortState.dir === 'asc');
+    th.classList.toggle('sort-desc', active && sortState.dir === 'desc');
   });
 }
 
@@ -577,14 +573,10 @@ function sortCoinListings(listings) {
 
 function updateCoinSortIndicators() {
   document.querySelectorAll('#coin-listings th.sortable').forEach(th => {
-    const ind = th.querySelector('.sort-indicator');
-    if (th.dataset.sort === coinSortState.col) {
-      th.classList.add('active');
-      ind.textContent = coinSortState.dir === 'asc' ? ' ↑' : ' ↓';
-    } else {
-      th.classList.remove('active');
-      ind.textContent = '';
-    }
+    const active = th.dataset.sort === coinSortState.col;
+    th.classList.toggle('sort-active', active);
+    th.classList.toggle('sort-asc', active && coinSortState.dir === 'asc');
+    th.classList.toggle('sort-desc', active && coinSortState.dir === 'desc');
   });
 }
 
@@ -755,13 +747,15 @@ $('#menu-dropdown').addEventListener('click', (e) => {
   setMenuOpen(false);
   if (action === 'settings') openSettings();
   else if (action === 'reports') openReportsView();
+  else if (action === 'portfolio') openPortfolioView();
+  else if (action === 'signin') openLoginDialog();
+  else if (action === 'signout') signOut();
   else if (action === 'prices') {
-    const wasOnReports = !$('#reports-view').hidden;
-    // Coming from Reports: snap back to the canonical home — Bars tab at
-    // 10 g. Coming from the Prices view already: leave the user's current
-    // tab/size alone (clicking Prices in that case is effectively a no-op).
-    if (wasOnReports) goToPricesHome();
-    else showPricesView();
+    const onPrices = $('#reports-view').hidden && $('#portfolio-view').hidden;
+    // Coming from any aux view: snap back to the canonical home — Bars tab at
+    // 10 g. Already on Prices: leave the user's current tab/size alone.
+    if (onPrices) showPricesView();
+    else goToPricesHome();
   }
 });
 
@@ -803,8 +797,14 @@ if ('serviceWorker' in navigator) {
 
 // View switching ————————————————————————————————————————————————————————————
 
-function showPricesView() {
+function hideAllAuxViews() {
   $('#reports-view').hidden = true;
+  $('#portfolio-view').hidden = true;
+  $('#verify-view').hidden = true;
+}
+
+function showPricesView() {
+  hideAllAuxViews();
   $('#spot').hidden = false;
   $('#tab-strip').hidden = false;
   // Restore the bars/coins tab the user was last on.
@@ -814,6 +814,7 @@ function showPricesView() {
 function showReportsView() {
   $('#bars-view').hidden = true;
   $('#coins-view').hidden = true;
+  hideAllAuxViews();
   $('#reports-view').hidden = false;
   $('#spot').hidden = true;
   $('#tab-strip').hidden = true;
@@ -821,6 +822,28 @@ function showReportsView() {
     b.classList.remove('active');
     b.setAttribute('aria-selected', 'false');
   });
+}
+
+function showPortfolioView() {
+  $('#bars-view').hidden = true;
+  $('#coins-view').hidden = true;
+  hideAllAuxViews();
+  $('#portfolio-view').hidden = false;
+  $('#spot').hidden = true;
+  $('#tab-strip').hidden = true;
+  document.querySelectorAll('#tab-strip button').forEach((b) => {
+    b.classList.remove('active');
+    b.setAttribute('aria-selected', 'false');
+  });
+}
+
+function showVerifyView() {
+  $('#bars-view').hidden = true;
+  $('#coins-view').hidden = true;
+  hideAllAuxViews();
+  $('#verify-view').hidden = false;
+  $('#spot').hidden = true;
+  $('#tab-strip').hidden = true;
 }
 
 async function openReportsView() {
@@ -1063,3 +1086,512 @@ $('#reports-view').addEventListener('click', (e) => {
   if (!item) return;
   downloadReport(parseInt(item.dataset.id, 10));
 });
+
+// Auth + portfolio ——————————————————————————————————————————————————————————
+
+const SESSION_BROADCAST_KEY = 'gold-tracker.session';
+let currentUser = null;
+let lastPortfolio = { purchases: [], summary: null };
+let portfolioSort = { col: 'date', dir: 'desc' };
+
+function updateAuthUI() {
+  const signedIn = currentUser != null;
+  $('.menu-item[data-action="portfolio"]').hidden = !signedIn;
+  $('.menu-item[data-action="signin"]').hidden = signedIn;
+  $('.menu-item[data-action="signout"]').hidden = !signedIn;
+  const accountInfo = $('.menu-account-info');
+  accountInfo.hidden = !signedIn;
+  if (signedIn) accountInfo.textContent = currentUser.email;
+}
+
+async function loadAuthState() {
+  try {
+    const res = await fetch(`${BACKEND_URL}/auth/me`, { credentials: 'include' });
+    if (res.ok) currentUser = await res.json();
+    else currentUser = null;
+  } catch (e) {
+    currentUser = null;
+  }
+  updateAuthUI();
+}
+
+function openLoginDialog() {
+  $('#login-stage-1').hidden = false;
+  $('#login-stage-2').hidden = true;
+  $('#login-email').value = '';
+  $('#login-error').hidden = true;
+  $('#login-error').textContent = '';
+  $('#login-dialog').showModal();
+  setTimeout(() => $('#login-email').focus(), 30);
+}
+
+$('#login-form').addEventListener('submit', async (e) => {
+  // Only the "Send link" button triggers the request; Cancel/Close just close.
+  const submitter = e.submitter;
+  if (!submitter || submitter.value === 'cancel') return;
+  if (submitter.id !== 'login-submit') return;
+  e.preventDefault();
+
+  const email = $('#login-email').value.trim();
+  if (!email) return;
+  const errEl = $('#login-error');
+  errEl.hidden = true;
+  $('#login-submit').disabled = true;
+  try {
+    const res = await fetch(`${BACKEND_URL}/auth/request-link`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (res.status === 429) {
+      errEl.textContent = 'Too many attempts. Wait a few minutes and try again.';
+      errEl.hidden = false;
+      return;
+    }
+    if (!res.ok) {
+      errEl.textContent = `Couldn't send link (status ${res.status}). Try again.`;
+      errEl.hidden = false;
+      return;
+    }
+    $('#login-stage-2-email').textContent = email;
+    $('#login-stage-1').hidden = true;
+    $('#login-stage-2').hidden = false;
+  } catch (err) {
+    errEl.textContent = `Network error: ${err.message}`;
+    errEl.hidden = false;
+  } finally {
+    $('#login-submit').disabled = false;
+  }
+});
+
+// Cross-tab broadcast: when verify completes in another tab, this tab notices.
+window.addEventListener('storage', async (e) => {
+  if (e.key !== SESSION_BROADCAST_KEY) return;
+  if (e.newValue === '1') {
+    await loadAuthState();
+    const dialog = $('#login-dialog');
+    if (dialog.open) dialog.close();
+  } else if (e.newValue === '' || e.newValue === null) {
+    currentUser = null;
+    updateAuthUI();
+    // If user is on portfolio view, kick them back to prices.
+    if (!$('#portfolio-view').hidden) showPricesView();
+  }
+});
+
+async function handleVerifyFragment() {
+  const hash = window.location.hash;
+  if (!hash.startsWith('#auth=')) return false;
+  // Token is secrets.token_urlsafe — already URL-safe, no decode needed.
+  const token = hash.slice('#auth='.length);
+  showVerifyView();
+  const contentEl = $('#verify-content');
+  contentEl.innerHTML = '<div class="loading-msg"><div class="loading-text">Signing you in…</div></div>';
+  try {
+    const res = await fetch(`${BACKEND_URL}/auth/verify`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) {
+      const msg = res.status === 400
+        ? 'This link is invalid or expired.'
+        : `Sign-in failed (status ${res.status}).`;
+      contentEl.innerHTML = `
+        <h2>Sign-in failed</h2>
+        <p>${msg}</p>
+        <p><button class="site-btn" id="verify-retry" type="button">Send a new link</button></p>
+      `;
+      $('#verify-retry').addEventListener('click', () => {
+        history.replaceState(null, '', window.location.pathname);
+        showPricesView();
+        openLoginDialog();
+      });
+      return true;
+    }
+    const user = await res.json();
+    currentUser = user;
+    updateAuthUI();
+    try { localStorage.setItem(SESSION_BROADCAST_KEY, '1'); } catch {}
+    // Strip the token from the URL immediately so a reload doesn't re-fire
+    // the now-used token and surface "Sign-in failed" to an already-signed-in user.
+    history.replaceState(null, '', window.location.pathname);
+    contentEl.innerHTML = `
+      <h2>You're signed in</h2>
+      <p>Signed in as <strong>${escapeHtml(user.email)}</strong>. You can close this tab.</p>
+      <p><button class="site-btn" id="verify-continue" type="button">Continue to app</button></p>
+    `;
+    $('#verify-continue').addEventListener('click', () => {
+      showPricesView();
+    });
+  } catch (err) {
+    contentEl.innerHTML = `
+      <h2>Sign-in failed</h2>
+      <p>Network error: ${escapeHtml(err.message)}</p>
+    `;
+  }
+  return true;
+}
+
+async function signOut() {
+  try {
+    await fetch(`${BACKEND_URL}/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } catch {}
+  currentUser = null;
+  try { localStorage.setItem(SESSION_BROADCAST_KEY, ''); } catch {}
+  updateAuthUI();
+  if (!$('#portfolio-view').hidden) showPricesView();
+}
+
+// Portfolio view ————————————————————————————————————————————————————————————
+
+async function openPortfolioView() {
+  if (!currentUser) { openLoginDialog(); return; }
+  showPortfolioView();
+  await loadPortfolio();
+}
+
+async function loadPortfolio() {
+  const loadingEl = $('#portfolio-loading');
+  const tableEl = $('#portfolio-table');
+  const emptyEl = $('#portfolio-empty');
+  const summaryEl = $('#portfolio-summary-content');
+  loadingEl.hidden = false;
+  loadingEl.innerHTML = '<div class="spinner"><span></span><span></span><span></span></div><div class="loading-text">Loading portfolio…</div>';
+  tableEl.hidden = true;
+  emptyEl.hidden = true;
+  summaryEl.innerHTML = '';
+  try {
+    const res = await fetch(`${BACKEND_URL}/portfolio`, { credentials: 'include' });
+    if (res.status === 401) { currentUser = null; updateAuthUI(); showPricesView(); openLoginDialog(); return; }
+    if (!res.ok) {
+      loadingEl.innerHTML = `Failed to load portfolio (status ${res.status}).`;
+      return;
+    }
+    const data = await res.json();
+    lastPortfolio = data;
+    renderPortfolioSummary(data.summary);
+    renderPortfolioTable(data.purchases);
+  } catch (e) {
+    loadingEl.innerHTML = `Network error: ${escapeHtml(e.message)}`;
+  } finally {
+    loadingEl.hidden = true;
+  }
+}
+
+function renderPortfolioSummary(s) {
+  const pnlClass = s.total_pnl_dkk >= 0 ? 'pnl-pos' : 'pnl-neg';
+  $('#portfolio-summary-content').innerHTML = `
+    <div class="portfolio-summary-grid">
+      <div class="ps-stat"><span class="ps-label">Total paid</span><span class="ps-value">${fmtDKK(s.total_paid_dkk)}</span></div>
+      <div class="ps-stat"><span class="ps-label">Current value</span><span class="ps-value">${fmtDKK(s.total_value_dkk)}</span></div>
+      <div class="ps-stat"><span class="ps-label">P&amp;L</span><span class="ps-value ${pnlClass}">${fmtDKKSigned(s.total_pnl_dkk)} (${fmtPctSigned(s.total_pnl_pct)})</span></div>
+    </div>
+    <div class="metal-breakdown">
+      ${renderMetalPanel('gold', s.by_metal.gold)}
+      ${renderMetalPanel('silver', s.by_metal.silver)}
+    </div>
+  `;
+}
+
+function renderMetalPanel(metal, m) {
+  const isEmpty = !(m.paid_dkk > 0);
+  if (isEmpty) {
+    return `
+      <div class="metal-panel is-empty">
+        <div class="metal-panel-head"><span class="metal-chip metal-${metal}">${metal}</span></div>
+        <div class="metal-panel-empty">No ${metal} purchases yet.</div>
+      </div>
+    `;
+  }
+  const pnl = m.value_dkk - m.paid_dkk;
+  const pnlPct = (pnl / m.paid_dkk) * 100;
+  const pnlClass = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+  return `
+    <div class="metal-panel">
+      <div class="metal-panel-head"><span class="metal-chip metal-${metal}">${metal}</span></div>
+      <div class="metal-panel-stats">
+        <div class="ps-stat"><span class="ps-label">Fine weight</span><span class="ps-value">${fmtFineG(m.fine_weight_g)} g</span></div>
+        <div class="ps-stat"><span class="ps-label">Cost basis</span><span class="ps-value">${fmtDKK(m.paid_dkk)}</span></div>
+        <div class="ps-stat"><span class="ps-label">Value</span><span class="ps-value">${fmtDKK(m.value_dkk)}</span></div>
+        <div class="ps-stat"><span class="ps-label">P&amp;L</span><span class="ps-value ${pnlClass}">${fmtDKKSigned(pnl)} (${fmtPctSigned(pnlPct)})</span></div>
+      </div>
+    </div>
+  `;
+}
+
+function fmtPctSigned(n) {
+  if (n == null) return '—';
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${n.toFixed(2)}%`;
+}
+function fmtDKKSigned(n) {
+  const sign = n > 0 ? '+' : (n < 0 ? '−' : '');
+  return `${sign}${fmtDKK(Math.abs(n))}`;
+}
+
+function fmtFineG(g) {
+  // Round display to 2 decimals, strip trailing zeros so 4.9995→"5", 9.999→"10".
+  // Actual stored value remains full-precision; this only tidies the displayed digits.
+  return parseFloat(g.toFixed(2)).toString();
+}
+
+// Generic in-app confirmation dialog. Resolves to true when the user clicks
+// the affirmative button, false otherwise. Pass a custom button label via
+// `okLabel` if "Confirm" isn't right (e.g. "Delete").
+function confirmDialog({ title = 'Confirm', message, okLabel = 'Confirm' }) {
+  return new Promise((resolve) => {
+    const dlg = $('#confirm-dialog');
+    $('#confirm-dialog-title').textContent = title;
+    $('#confirm-dialog-message').textContent = message;
+    $('#confirm-dialog-ok').textContent = okLabel;
+    const onClose = () => {
+      dlg.removeEventListener('close', onClose);
+      resolve(dlg.returnValue === 'save');
+    };
+    dlg.addEventListener('close', onClose);
+    dlg.showModal();
+  });
+}
+
+// Canonical site-wide date format: DD-MM-YYYY (see CLAUDE.md "Date format").
+function fmtDate(isoOrDate) {
+  const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+}
+
+function renderPortfolioTable(purchases) {
+  const tableEl = $('#portfolio-table');
+  const emptyEl = $('#portfolio-empty');
+  const tbody = tableEl.querySelector('tbody');
+  if (!purchases.length) {
+    tableEl.hidden = true;
+    emptyEl.hidden = false;
+    tbody.innerHTML = '';
+    updatePortfolioSortIndicators();
+    return;
+  }
+  emptyEl.hidden = true;
+  tableEl.hidden = false;
+  const sorted = [...purchases].sort((a, b) => {
+    if (portfolioSort.col === 'date') {
+      const cmp = new Date(a.purchased_at) - new Date(b.purchased_at);
+      return portfolioSort.dir === 'asc' ? cmp : -cmp;
+    }
+    return 0;
+  });
+  tbody.innerHTML = sorted.map(p => {
+    const gross = fmtFineG(p.gross_weight_g);
+    return `
+      <tr class="portfolio-row" data-id="${p.id}">
+        <td>${fmtDate(p.purchased_at)}</td>
+        <td>${escapeHtml(p.label)}</td>
+        <td><span class="metal-chip metal-${p.metal}">${p.metal}</span></td>
+        <td>${gross} g</td>
+        <td><button class="row-delete icon-btn" aria-label="Delete" data-id="${p.id}" type="button">✕</button></td>
+      </tr>
+    `;
+  }).join('');
+  updatePortfolioSortIndicators();
+}
+
+function updatePortfolioSortIndicators() {
+  document.querySelectorAll('#portfolio-table th.sortable').forEach(th => {
+    const active = th.dataset.sort === portfolioSort.col;
+    th.classList.toggle('sort-active', active);
+    th.classList.toggle('sort-desc', active && portfolioSort.dir === 'desc');
+    th.classList.toggle('sort-asc', active && portfolioSort.dir === 'asc');
+  });
+}
+
+document.querySelectorAll('#portfolio-table th.sortable').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    if (portfolioSort.col === col) {
+      portfolioSort.dir = portfolioSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      portfolioSort.col = col;
+      portfolioSort.dir = 'desc';
+    }
+    if (lastPortfolio.purchases.length) renderPortfolioTable(lastPortfolio.purchases);
+  });
+});
+
+function buildPortfolioDetail(p) {
+  const purchasePrem = p.purchase_premium_pct != null ? fmtPctSigned(p.purchase_premium_pct) : '—';
+  const spotThen = p.spot_at_purchase_dkk_per_g != null
+    ? `${fmtSpotDKK(p.spot_at_purchase_dkk_per_g)}/g` : '—';
+  const pnlClass = p.pnl_dkk >= 0 ? 'pnl-pos' : 'pnl-neg';
+  return `
+    <div class="purchase-detail">
+      <section class="pd-section">
+        <h4 class="pd-section-head">Spec</h4>
+        <div class="pd-section-grid">
+          <div class="pd-cell"><span class="pd-label">Fine weight</span><span class="pd-value">${fmtFineG(p.fine_weight_g)} g</span></div>
+          <div class="pd-cell"><span class="pd-label">Purity</span><span class="pd-value">${p.purity}</span></div>
+          ${p.dealer ? `<div class="pd-cell"><span class="pd-label">Dealer</span><span class="pd-value">${escapeHtml(p.dealer)}</span></div>` : ''}
+        </div>
+      </section>
+      <section class="pd-section">
+        <h4 class="pd-section-head">At purchase</h4>
+        <div class="pd-section-grid">
+          <div class="pd-cell"><span class="pd-label">Price paid</span><span class="pd-value">${fmtDKK(p.price_paid_dkk)}</span></div>
+          <div class="pd-cell"><span class="pd-label">Spot then</span><span class="pd-value">${spotThen}</span></div>
+          <div class="pd-cell"><span class="pd-label">Purchase premium</span><span class="pd-value">${purchasePrem}</span></div>
+        </div>
+      </section>
+      <section class="pd-section">
+        <h4 class="pd-section-head">Now</h4>
+        <div class="pd-section-grid">
+          <div class="pd-cell"><span class="pd-label">Current spot</span><span class="pd-value">${fmtSpotDKK(p.current_spot_dkk_per_g)}/g</span></div>
+          <div class="pd-cell"><span class="pd-label">Current value</span><span class="pd-value">${fmtDKK(p.current_value_dkk)}</span></div>
+          <div class="pd-cell"><span class="pd-label">P&amp;L</span><span class="pd-value ${pnlClass}">${fmtDKKSigned(p.pnl_dkk)} (${fmtPctSigned(p.pnl_pct)})</span></div>
+        </div>
+      </section>
+      ${p.notes ? `<section class="pd-section pd-section-notes"><h4 class="pd-section-head">Notes</h4><p class="pd-notes">${escapeHtml(p.notes)}</p></section>` : ''}
+    </div>
+  `;
+}
+
+function collapsePortfolioDetail() {
+  const open = document.querySelector('#portfolio-table tr.portfolio-row.is-expanded');
+  if (open) {
+    open.classList.remove('is-expanded');
+    const next = open.nextElementSibling;
+    if (next && next.classList.contains('portfolio-detail-row')) next.remove();
+  }
+}
+
+$('#portfolio-table tbody').addEventListener('click', async (e) => {
+  const del = e.target.closest('.row-delete');
+  if (del) {
+    e.stopPropagation();
+    const ok = await confirmDialog({
+      title: 'Delete purchase',
+      message: 'This permanently removes the purchase from your portfolio. This cannot be undone.',
+      okLabel: 'Delete',
+    });
+    if (!ok) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/portfolio/${del.dataset.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok && res.status !== 204) {
+        alert(`Delete failed (status ${res.status})`);
+        return;
+      }
+      await loadPortfolio();
+    } catch (err) {
+      alert(`Delete failed: ${err.message}`);
+    }
+    return;
+  }
+
+  const row = e.target.closest('tr.portfolio-row');
+  if (!row) return;
+  const wasOpen = row.classList.contains('is-expanded');
+  collapsePortfolioDetail();
+  if (wasOpen) return;
+
+  // Look up the cached purchase data for this id.
+  const purchase = (lastPortfolio.purchases || []).find(x => x.id === row.dataset.id);
+  if (!purchase) return;
+  const tr = document.createElement('tr');
+  tr.className = 'portfolio-detail-row';
+  tr.innerHTML = `<td colspan="5">${buildPortfolioDetail(purchase)}</td>`;
+  row.after(tr);
+  row.classList.add('is-expanded');
+});
+
+// Add-purchase dialog ———————————————————————————————————————————————————————
+
+$('#portfolio-add-btn').addEventListener('click', () => {
+  $('#purchase-form').reset();
+  $('#purchase-purity').value = '0.9999';
+  // Default purchase date to today in the user's local timezone (date input
+  // expects yyyy-mm-dd; the API gets noon UTC at submit time).
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  $('#purchase-date').value = `${yyyy}-${mm}-${dd}`;
+  $('#purchase-error').hidden = true;
+  $('#purchase-dialog').showModal();
+});
+
+$('#purchase-form').addEventListener('submit', async (e) => {
+  const submitter = e.submitter;
+  if (!submitter || submitter.value === 'cancel') return;
+  if (submitter.id !== 'purchase-submit') return;
+  e.preventDefault();
+
+  const errEl = $('#purchase-error');
+  errEl.hidden = true;
+
+  const metal = $('#purchase-form input[name="metal"]:checked').value;
+  const label = $('#purchase-label').value.trim();
+  const gross = parseFloat($('#purchase-gross').value);
+  const purity = parseFloat($('#purchase-purity').value);
+  const price = parseFloat($('#purchase-price').value);
+  const dateOnly = $('#purchase-date').value;
+  const dealer = $('#purchase-dealer').value.trim() || null;
+  const notes = $('#purchase-notes').value.trim() || null;
+
+  if (!label || isNaN(gross) || isNaN(purity) || isNaN(price) || !dateOnly) {
+    errEl.textContent = 'Fill in all required fields.';
+    errEl.hidden = false;
+    return;
+  }
+
+  // Date-only input: use noon UTC so the historical spot lookup lands on the
+  // midpoint of the trading day in the user's likely timezone.
+  const purchased_at = `${dateOnly}T12:00:00Z`;
+
+  $('#purchase-submit').disabled = true;
+  try {
+    const res = await fetch(`${BACKEND_URL}/portfolio`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        metal, label,
+        gross_weight_g: gross, purity, price_paid_dkk: price,
+        purchased_at, dealer, notes,
+      }),
+    });
+    if (res.status === 401) {
+      $('#purchase-dialog').close();
+      currentUser = null; updateAuthUI();
+      showPricesView(); openLoginDialog();
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.text();
+      errEl.textContent = `Save failed (status ${res.status}): ${body.slice(0, 200)}`;
+      errEl.hidden = false;
+      return;
+    }
+    $('#purchase-dialog').close();
+    await loadPortfolio();
+  } catch (err) {
+    errEl.textContent = `Network error: ${err.message}`;
+    errEl.hidden = false;
+  } finally {
+    $('#purchase-submit').disabled = false;
+  }
+});
+
+// Boot: handle verify fragment first, then resolve auth state.
+(async () => {
+  const handled = await handleVerifyFragment();
+  if (!handled) await loadAuthState();
+})();

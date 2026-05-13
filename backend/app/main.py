@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from app.auth import require_api_key
+from app.auth_session import router as auth_router
 from app.buy_context import (
     context_to_dict,
     load_bar_context,
@@ -19,6 +20,7 @@ from app.db import close_pool, get_pool
 from app.fx import fetch_usd_to
 from app.models import CoinListing, PriceResponse
 from app.orchestrator import run
+from app.portfolio import router as portfolio_router
 from app.reports.builder import build_report
 from app.reports.storage import fetch_report_html, list_reports, upsert_report
 from app.reports.windows import (
@@ -64,15 +66,28 @@ async def _shutdown() -> None:
     await close_pool()
 
 # CORS — only the deployed Cloudflare Pages frontend may call us.
-# (Set FRONTEND_ORIGIN env var on Render to your *.pages.dev URL.)
-_origin = os.environ.get("FRONTEND_ORIGIN", "*")
+# Cookie auth (magic link) requires allow_credentials=True, which combined
+# with allow_origins=["*"] would let any origin issue credentialed XHRs
+# against /portfolio and /auth/* (Starlette echoes the request Origin back
+# in that case). So FRONTEND_ORIGIN MUST be an explicit, non-wildcard
+# value in production. Locally we fall back to the dev frontend URL.
+_origin = os.environ.get("FRONTEND_ORIGIN", "http://127.0.0.1:5500")
+if _origin == "*":
+    raise RuntimeError(
+        "FRONTEND_ORIGIN=* is unsafe with cookie auth. "
+        "Set it to the specific frontend URL (e.g. https://your-app.pages.dev)."
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[_origin],
-    allow_methods=["GET", "POST"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["X-API-Key", "Content-Type"],
     expose_headers=["Content-Disposition"],
 )
+
+app.include_router(auth_router)
+app.include_router(portfolio_router)
 
 ALLOWED_SIZES = {2.5, 5.0, 10.0, 20.0}
 HISTORY_RANGES = {"24h": "24 hours", "7d": "7 days", "30d": "30 days"}

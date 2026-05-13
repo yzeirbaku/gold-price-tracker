@@ -137,6 +137,7 @@ header h1 {
 }
 .menu-item:hover { background: var(--hover-bg); color: var(--fg); }
 .menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.menu-item[hidden], .menu-account-info[hidden], .menu-divider[hidden] { display: none; }
 
 /* Title is a click-link to the Prices view. */
 #header-title-link { cursor: pointer; }
@@ -267,10 +268,19 @@ th, td { padding: 0.55rem 0.3rem; text-align: left; border-bottom: 1px solid var
 th:first-child, td:first-child { padding-left: 1.1rem; }
 th:last-child, td:last-child { padding-right: 1.1rem; text-align: right; }
 th { color: var(--muted); font-weight: 500; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+/* Shared sortable-column treatment. All tables with class="sortable" on
+   their <th> get the same ▲/▼ indicator pattern. The active column gets a
+   filled triangle in --accent; inactive columns show no indicator. JS
+   toggles `sort-active` + `sort-asc` / `sort-desc` on the <th>. */
 th.sortable { cursor: pointer; user-select: none; transition: color 120ms ease; }
 th.sortable:hover { color: var(--fg-soft); }
-th.sortable.active { color: var(--accent); }
-th .sort-indicator { font-size: 0.85em; }
+th.sortable.sort-active { color: var(--accent); }
+th.sortable .sort-indicator::after {
+  content: ""; margin-left: 0.3em; opacity: 0.5; font-size: 0.85em;
+}
+th.sortable.sort-active .sort-indicator::after { opacity: 1; }
+th.sortable.sort-asc  .sort-indicator::after { content: " ▲"; }
+th.sortable.sort-desc .sort-indicator::after { content: " ▼"; }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr { transition: background 120ms ease; }
 tbody tr:hover { background: var(--row-hover); }
@@ -401,6 +411,7 @@ dialog menu button[value="save"] {
   background: linear-gradient(180deg, var(--btn-active-top) 0%, var(--btn-active-bottom) 100%);
   color: #1a1300; border-color: var(--btn-active-bottom); font-weight: 600;
 }
+dialog menu button[value="save"]:hover { filter: brightness(1.05); }
 
 .spot-row {
   display: flex; justify-content: space-between; align-items: baseline;
@@ -650,4 +661,246 @@ tr.history-row > td {
 }
 #reports-weekly[open] > summary::before,
 #reports-monthly[open] > summary::before { transform: rotate(90deg); }
+
+/* Auth + portfolio —————————————————————————————————————————————————————— */
+
+.menu-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.4rem 0;
+}
+.menu-account-info {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+/* Canonical action-button style — see CLAUDE.md "Buttons" convention.
+   All standalone action buttons (outside .buttons containers and outside
+   dialog <menu> blocks, which have their own neutral styling) should use
+   this class. Don't introduce primary/secondary gold variants. */
+.site-btn {
+  padding: 0.5rem 0.9rem;
+  background: var(--surface-2);
+  color: var(--fg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit; font-size: 0.9rem; font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.site-btn:hover { background: var(--hover-bg); color: var(--fg); }
+.site-btn:disabled { opacity: 0.55; cursor: wait; }
+
+/* Affirmative variant — gold gradient. Use for Save/Add/Submit standalone
+   buttons. Dialog menu buttons get this automatically via value="save". */
+.site-btn-primary {
+  padding: 0.5rem 0.95rem;
+  background: linear-gradient(180deg, var(--btn-active-top) 0%, var(--btn-active-bottom) 100%);
+  color: #1a1300;
+  border: 1px solid var(--btn-active-bottom);
+  border-radius: var(--radius-sm);
+  font: inherit; font-size: 0.9rem; font-weight: 600;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+.site-btn-primary:hover { filter: brightness(1.05); }
+.site-btn-primary:disabled { opacity: 0.55; cursor: wait; }
+
+.dialog-helper {
+  margin: 0 0 0.7rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+.dialog-error {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.7rem;
+  background: rgba(220, 70, 70, 0.12);
+  border: 1px solid rgba(220, 70, 70, 0.35);
+  color: var(--error, #e85a5a);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+
+/* Portfolio view */
+#portfolio-view .results-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 0.6rem;
+}
+.portfolio-summary-grid {
+  display: flex; gap: 1.5rem; flex-wrap: wrap;
+  margin-bottom: 0.65rem;
+}
+.ps-stat { display: flex; flex-direction: column; gap: 0.1rem; }
+.ps-label {
+  font-size: 0.7rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.ps-value { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.pnl-pos { color: var(--success, #5ec27a); }
+.pnl-neg { color: var(--error, #e85a5a); }
+
+.metal-chip {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 10px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+}
+
+/* Per-metal breakdown — two equal panels under the totals row. */
+.metal-breakdown {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+  margin-top: 0.85rem;
+}
+.metal-panel {
+  padding: 0.75rem 0.9rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.metal-panel-head {
+  margin-bottom: 0.55rem;
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.metal-panel-head .metal-chip { font-size: 0.7rem; padding: 0.1rem 0.5rem; }
+.metal-panel-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem 0.85rem;
+}
+.metal-panel.is-empty .metal-panel-stats { opacity: 0.55; }
+.metal-panel-empty {
+  font-size: 0.78rem; color: var(--muted); font-style: italic;
+}
+@media (max-width: 600px) {
+  .metal-breakdown { grid-template-columns: 1fr; gap: 0.55rem; }
+}
+.metal-gold { background: rgba(226, 192, 84, 0.18); color: #e2c054; border: 1px solid rgba(226, 192, 84, 0.3); }
+.metal-silver { background: rgba(192, 192, 192, 0.18); color: #c9c9c9; border: 1px solid rgba(192, 192, 192, 0.3); }
+[data-theme="light"] .metal-gold { color: #8a6512; background: rgba(184,147,42,0.14); border-color: rgba(184,147,42,0.32); }
+[data-theme="light"] .metal-silver { color: #4d4d52; background: rgba(120,120,128,0.14); border-color: rgba(120,120,128,0.3); }
+
+/* Native date-picker calendar icon is barely visible in dark theme.
+   Invert it so it reads against the dark surface; in light theme leave it
+   alone. */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.85);
+  opacity: 0.7;
+  cursor: pointer;
+}
+[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: none;
+  opacity: 0.85;
+}
+
+
+.empty-state {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+#portfolio-table thead th:last-child,
+#portfolio-table tr.portfolio-row td:last-child { text-align: right; width: 1%; }
+.row-delete {
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.row-delete:hover { color: var(--error, #e85a5a); }
+
+#purchase-form textarea {
+  width: 100%;
+  background: var(--surface-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.55rem;
+  font-family: inherit;
+  font-size: 0.88rem;
+  resize: vertical;
+}
+
+/* Wider purchase dialog with a 2-column form grid — keeps the modal
+   short enough to avoid a scroll bar on typical viewports. */
+#purchase-dialog {
+  max-width: min(640px, 96vw);
+  width: 600px;
+}
+.purchase-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem 0.85rem;
+  margin-top: 0.5rem;
+}
+.purchase-grid .settings-field { margin: 0; }
+.purchase-grid-wide { grid-column: 1 / -1; }
+@media (max-width: 520px) {
+  #purchase-dialog { width: auto; }
+  .purchase-grid { grid-template-columns: 1fr; }
+}
+
+/* Date column stays on one line — DD-MM-YYYY otherwise wraps on phone. */
+#portfolio-table th:first-child,
+#portfolio-table td:first-child { white-space: nowrap; }
+
+/* Portfolio row — compact 4-col layout with click-to-expand detail panel. */
+.portfolio-row { cursor: pointer; }
+.portfolio-row:hover { background: var(--hover-bg); }
+.portfolio-row.is-expanded { background: var(--hover-bg); }
+.portfolio-detail-row > td {
+  background: var(--bg);
+  padding: 0.55rem 0.6rem 0.85rem;
+  border-top: 1px solid var(--history-border-top);
+}
+.purchase-detail {
+  padding: 0.2rem 0.4rem;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.85rem;
+  text-align: left;
+}
+#portfolio-table tr.portfolio-detail-row > td { padding-right: 0.6rem; }
+.pd-section {
+  padding: 0.55rem 0.7rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.pd-section-head {
+  margin: 0 0 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.pd-section-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 0.4rem 0.85rem;
+}
+.pd-section-notes { grid-column: 1 / -1; }
+.pd-notes {
+  margin: 0; font-size: 0.88rem; color: var(--fg-soft);
+  white-space: pre-wrap; word-break: break-word;
+}
+.pd-cell { display: flex; flex-direction: column; gap: 0.05rem; }
+.pd-label {
+  font-size: 0.66rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.pd-value { font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 720px) {
+  .purchase-detail { grid-template-columns: 1fr; gap: 0.55rem; }
+}
 

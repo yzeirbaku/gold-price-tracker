@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=51" />
+  <link rel="stylesheet" href="styles.css?v=66" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
@@ -29,7 +29,12 @@
   <aside id="menu-dropdown" class="menu-dropdown" role="menu" aria-label="Navigation">
     <button class="menu-item" data-action="prices" role="menuitem" type="button">Prices</button>
     <button class="menu-item" data-action="reports" role="menuitem" type="button">Reports</button>
+    <button class="menu-item" data-action="portfolio" role="menuitem" type="button" hidden>Portfolio</button>
     <button class="menu-item" data-action="settings" role="menuitem" type="button">Settings</button>
+    <hr class="menu-divider" />
+    <div class="menu-account-info" hidden></div>
+    <button class="menu-item" data-action="signin" role="menuitem" type="button">Sign in</button>
+    <button class="menu-item" data-action="signout" role="menuitem" type="button" hidden>Sign out</button>
   </aside>
 
   <section id="spot" class="card">
@@ -122,6 +127,40 @@
     </details>
   </div>
 
+  <div id="portfolio-view" hidden>
+    <section id="portfolio-summary" class="card">
+      <div class="results-head">
+        <h2>Portfolio</h2>
+        <button id="portfolio-add-btn" class="site-btn-primary" type="button">+ Add purchase</button>
+      </div>
+      <div id="portfolio-summary-content"></div>
+    </section>
+    <section id="portfolio-list" class="card">
+      <div id="portfolio-loading" class="loading-msg" hidden></div>
+      <div id="portfolio-empty" class="empty-state" hidden>
+        <p>No purchases yet. Add your first one to start tracking gains.</p>
+      </div>
+      <table id="portfolio-table" hidden>
+        <thead>
+          <tr>
+            <th class="sortable" data-sort="date">Date<span class="sort-indicator"></span></th>
+            <th>Label</th>
+            <th>Metal</th>
+            <th>Weight</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </div>
+
+  <div id="verify-view" hidden>
+    <section class="card">
+      <div id="verify-content"></div>
+    </section>
+  </div>
+
   <div id="coins-view" hidden>
     <section id="coins" class="card">
       <div class="results-head">
@@ -144,9 +183,93 @@
     </section>
   </div>
 
+  <dialog id="login-dialog">
+    <form method="dialog" id="login-form">
+      <button class="dialog-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button>
+      <h2>Sign in</h2>
+      <div id="login-stage-1">
+        <p class="dialog-helper">Enter your email and we'll send you a sign-in link.</p>
+        <fieldset class="settings-field">
+          <legend>Email</legend>
+          <input id="login-email" type="email" placeholder="you@example.com" required autocomplete="email" />
+        </fieldset>
+        <div id="login-error" class="dialog-error" hidden></div>
+        <menu>
+          <button value="cancel" type="submit" formnovalidate>Cancel</button>
+          <button id="login-submit" value="save" type="submit">Send link</button>
+        </menu>
+      </div>
+      <div id="login-stage-2" hidden>
+        <p>Check your inbox. We sent a link to <strong id="login-stage-2-email"></strong>.</p>
+        <p class="dialog-helper">After you click it, this tab will sign in automatically.</p>
+        <menu>
+          <button value="cancel" type="submit" formnovalidate>Close</button>
+        </menu>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="purchase-dialog">
+    <form method="dialog" id="purchase-form">
+      <button class="dialog-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button>
+      <h2 id="purchase-dialog-title">Add purchase</h2>
+      <div class="purchase-grid">
+        <fieldset class="settings-field">
+          <legend>Metal</legend>
+          <label class="theme-option"><input type="radio" name="metal" value="gold" checked /><span>Gold</span></label>
+          <label class="theme-option"><input type="radio" name="metal" value="silver" /><span>Silver</span></label>
+        </fieldset>
+        <fieldset class="settings-field">
+          <legend>Label</legend>
+          <input id="purchase-label" type="text" placeholder="e.g. 10g Heimerle bar" required maxlength="200" />
+        </fieldset>
+        <fieldset class="settings-field">
+          <legend>Gross weight (g)</legend>
+          <input id="purchase-gross" type="number" step="0.0001" min="0.0001" required />
+        </fieldset>
+        <fieldset class="settings-field">
+          <legend>Purity</legend>
+          <input id="purchase-purity" type="number" step="0.00001" min="0.001" max="1" value="0.9999" required />
+        </fieldset>
+        <fieldset class="settings-field">
+          <legend>Price paid (DKK)</legend>
+          <input id="purchase-price" type="number" step="0.01" min="0" required />
+        </fieldset>
+        <fieldset class="settings-field">
+          <legend>Purchase date</legend>
+          <input id="purchase-date" type="date" required />
+        </fieldset>
+        <fieldset class="settings-field">
+          <legend>Dealer (optional)</legend>
+          <input id="purchase-dealer" type="text" maxlength="200" />
+        </fieldset>
+        <fieldset class="settings-field purchase-grid-wide">
+          <legend>Notes (optional)</legend>
+          <textarea id="purchase-notes" rows="2" maxlength="2000"></textarea>
+        </fieldset>
+      </div>
+      <div id="purchase-error" class="dialog-error" hidden></div>
+      <menu>
+        <button value="cancel" type="submit" formnovalidate>Cancel</button>
+        <button id="purchase-submit" value="save" type="submit">Save</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog">
+    <form method="dialog">
+      <h2 id="confirm-dialog-title">Confirm</h2>
+      <p id="confirm-dialog-message"></p>
+      <menu>
+        <button value="cancel" formnovalidate>Cancel</button>
+        <button id="confirm-dialog-ok" value="save">Confirm</button>
+      </menu>
+    </form>
+  </dialog>
+
   <dialog id="settings-dialog">
     <form method="dialog">
-      <button class="dialog-close" value="cancel" aria-label="Close" type="submit">×</button>
+      <button class="dialog-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button>
       <h2>Settings</h2>
       <fieldset class="settings-field">
         <legend>API key</legend>
@@ -164,7 +287,7 @@
         </label>
       </fieldset>
       <menu>
-        <button value="cancel">Close</button>
+        <button value="cancel" formnovalidate>Cancel</button>
         <button id="save-settings" value="save">Save</button>
       </menu>
     </form>
@@ -172,7 +295,7 @@
 
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=51"></script>
-  <script src="app.js?v=51"></script>
+  <script src="config.js?v=66"></script>
+  <script src="app.js?v=66"></script>
 </body>
 </html>

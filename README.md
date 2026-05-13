@@ -1,13 +1,15 @@
 # Gold Prices Tracker
 
-Personal tool to compare gold-bar prices (2.5 / 5 / 10 / 20 g) and gold-coin prices (≤ 20 g of fine gold) across Danish online dealers, plus live spot prices for gold and silver.
+Personal tool to compare gold-bar prices (2.5 / 5 / 10 / 20 g) and gold-coin prices (≤ 20 g of fine gold) across Danish online dealers, plus live spot prices for gold and silver. Optional sign-in unlocks a per-user portfolio with live P&L.
 
 ## Architecture
 
 - **Backend** — Python + FastAPI on Render free tier. `backend/`
 - **Frontend** — Static PWA on Cloudflare Pages. `frontend/`
-- **Spot price** — api.gold-api.com (USD/oz, free, no key)
-- **FX** — frankfurter.dev (USD→EUR, USD→DKK)
+- **Spot price (live)** — api.gold-api.com (USD/oz, free, no key)
+- **Spot price (historical, portfolio)** — yfinance `GC=F` / `SI=F` futures (free, no key; tracks spot within fractions of a percent)
+- **FX** — frankfurter.dev (USD→EUR, USD→DKK) — live and historical
+- **Auth** — passwordless magic-link email via Resend; opaque session cookies (Postgres-backed, 90-day sliding TTL)
 
 ## Dealers wired
 
@@ -41,6 +43,16 @@ Coin coverage is bullion-only via a static registry in `backend/app/coins.py`: K
 | POST | `/reports/generate?range=week\|month`                         | on-demand report (not persisted) |
 | POST | `/reports/cron/{type}` (`weekly` or `monthly`)                | cron-only — generate + persist to archive |
 | GET  | `/health`                                                    | per-scraper pass/fail summary |
+| POST | `/auth/request-link`                                         | issue a magic-link email; always 204; rate-limited (3/10min/email, 30/hr/IP) |
+| POST | `/auth/verify`                                               | exchange a magic-link token for a session cookie |
+| POST | `/auth/logout`                                               | delete the session row + clear cookie |
+| GET  | `/auth/me`                                                   | `{user_id, email}` or 401 |
+| GET  | `/portfolio`                                                 | current user's purchases + summary (live spot-driven P&L) |
+| POST | `/portfolio`                                                 | create a purchase; freezes historical spot at write time |
+| PATCH | `/portfolio/{id}`                                           | edit; re-freezes spot if `purchased_at` or `metal` change |
+| DELETE | `/portfolio/{id}`                                          | hard delete; 404 if not the caller's row |
+
+Endpoints up through `/health` use `X-API-Key` (legacy shared secret). The `/auth/*` and `/portfolio*` endpoints use a session cookie set during magic-link verification. Both schemes coexist — the site works fully without signing in.
 
 ## Local dev
 
@@ -75,7 +87,28 @@ Open `http://127.0.0.1:5500/`, click the ☰ hamburger menu → **Settings**, pa
 | Var | Required | Notes |
 |---|---|---|
 | `API_KEY` | yes | Shared secret. PWA sends as `X-API-Key`. Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. |
-| `FRONTEND_ORIGIN` | yes | Your Cloudflare Pages URL, e.g. `https://gold-tracker.pages.dev` — for CORS. |
+| `FRONTEND_ORIGIN` | yes | Your Cloudflare Pages URL, e.g. `https://gold-tracker.pages.dev` — for CORS. Must be an explicit URL, **not `*`** (backend refuses to start with wildcard once cookie auth is on). |
+| `DATABASE_URL` | yes (for portfolio + history + reports) | Neon Postgres connection string. Without it, only `/prices`, `/spot`, `/coins` work. |
+| `RESEND_API_KEY` | yes (for portfolio sign-in) | Resend API key (`re_...`). Get it from resend.com. |
+| `MAGIC_LINK_BASE_URL` | yes (for portfolio sign-in) | Frontend origin used to build the `#auth=` URL in the email, e.g. `https://gold-tracker.pages.dev`. |
+| `RESEND_FROM` | no | Override the From address. Defaults to `Gold Tracker <onboarding@resend.dev>` (Resend's shared sender; no DNS setup). |
+| `MAGIC_LINK_DEV_PRINT` | no (dev only) | Set to `1` locally to log the magic link to stdout instead of sending via Resend. Saves quota during testing. |
+
+## Portfolio + magic-link auth
+
+Optional sign-in unlocks a per-user portfolio. Anyone with a valid email can sign in — there's no password to remember.
+
+**The flow:**
+
+1. Open the ☰ menu → **Sign in**, enter an email, click **Send link**.
+2. A one-time link arrives (valid 15 minutes). Click it; that tab signs in and the original tab picks up the new session via a `localStorage` broadcast.
+3. **Portfolio** appears in the menu. Click **+ Add purchase** to log a bar or coin.
+
+**What gets tracked per purchase:** metal (gold/silver), gross weight, purity (so fine weight = gross × purity), price paid in DKK, purchase date, free-text label, optional dealer + notes. Spot at the purchase date is fetched from yfinance (`GC=F` / `SI=F`) plus historical USD→DKK from frankfurter.dev and frozen onto the row at write-time, so the cost-basis premium stays stable forever. Current value uses live spot at read time.
+
+**Authentication architecture:** SHA-256 hashed one-time tokens in `magic_links` (15-min TTL, single-use, rate-limited at 3/10min per email and 30/hr per IP); opaque UUID session tokens in `sessions` with a 90-day sliding TTL via `last_seen_at`. Cookie is `HttpOnly Secure SameSite=None` in prod (cross-origin Render ↔ Pages); `SameSite=Lax` locally. No passwords stored anywhere. Logout is `DELETE FROM sessions` and revokes immediately.
+
+The site continues to work fully without signing in — the existing X-API-Key endpoints (prices, history, spot, coins, reports) are untouched.
 
 ## Reports
 

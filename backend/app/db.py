@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 # on startup; new columns get added via plain ALTER TABLE statements appended
 # below over time.
 SCHEMA_SQL = """
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Idempotent migration: rename dealer_snapshots → bar_snapshots if needed.
 DO $$
 BEGIN
@@ -90,6 +92,51 @@ CREATE TABLE IF NOT EXISTS report_archive (
 
 CREATE INDEX IF NOT EXISTS idx_report_archive_type_period
     ON report_archive (report_type, period_start DESC);
+
+CREATE TABLE IF NOT EXISTS users (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email         TEXT UNIQUE NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_login_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS magic_links (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    token_hash  BYTEA NOT NULL,
+    email       TEXT NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_ip  INET
+);
+CREATE INDEX IF NOT EXISTS idx_magic_links_token_hash ON magic_links (token_hash);
+CREATE INDEX IF NOT EXISTS idx_magic_links_email_created ON magic_links (email, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_magic_links_ip_created ON magic_links (created_ip, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id            UUID PRIMARY KEY,
+    user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    user_agent    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id);
+
+CREATE TABLE IF NOT EXISTS purchases (
+    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id                     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    metal                       TEXT NOT NULL CHECK (metal IN ('gold','silver')),
+    gross_weight_g              NUMERIC(10,4) NOT NULL CHECK (gross_weight_g > 0),
+    purity                      NUMERIC(6,5)  NOT NULL CHECK (purity > 0 AND purity <= 1),
+    price_paid_dkk              NUMERIC(12,2) NOT NULL CHECK (price_paid_dkk >= 0),
+    purchased_at                TIMESTAMPTZ NOT NULL,
+    label                       TEXT NOT NULL,
+    dealer                      TEXT,
+    notes                       TEXT,
+    spot_at_purchase_dkk_per_g  NUMERIC(12,4),
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases (user_id, purchased_at DESC);
 """
 
 _pool: asyncpg.Pool | None = None
