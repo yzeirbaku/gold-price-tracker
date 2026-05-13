@@ -1,7 +1,7 @@
 const API_KEY_STORAGE = 'gold-tracker-api-key';
 const THEME_STORAGE = 'gold-tracker-theme';
 const BACKEND_URL = (window.BACKEND_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
-const SPOT_REFRESH_MS = 20000;
+const SPOT_REFRESH_MS = 30000;
 const $ = (s) => document.querySelector(s);
 
 function loadApiKey() { return localStorage.getItem(API_KEY_STORAGE) || ''; }
