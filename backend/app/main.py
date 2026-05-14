@@ -3,6 +3,8 @@ import json
 import logging
 import os
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import httpx
@@ -20,7 +22,7 @@ from app.buy_context import (
 from app.db import close_pool, get_pool
 from app.fx import fetch_usd_to
 from app.models import CoinListing, PriceResponse
-from app.orchestrator import run
+from app.orchestrator import flag_coin_premium_outliers, run
 from app.portfolio import router as portfolio_router
 from app.reports.builder import build_report
 from app.reports.storage import fetch_report_html, list_reports, upsert_report
@@ -49,23 +51,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Gold Bar Price Tracker")
 
-
-@app.on_event("startup")
-async def _startup() -> None:
-    # Best-effort — pool init is allowed to fail (e.g. transient Neon outage)
-    # without taking the whole service down. /snapshot and /history will 503
-    # until the next call retries.
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Startup: pool init is best-effort — a transient Neon outage shouldn't
+    # take the whole service down. /snapshot and /history will 503 until the
+    # next call retries get_pool().
     try:
         await get_pool()
     except Exception as e:
-        logging.getLogger(__name__).warning("db pool init failed at startup: %s", e)
+        logger.warning("db pool init failed at startup: %s", e)
+    # `try/finally` around the yield: matches the unconditional shutdown
+    # behavior of the previous @app.on_event("shutdown") decorator. Without
+    # the finally, a raise during runtime that propagates into the lifespan
+    # generator would skip pool cleanup.
+    try:
+        yield
+    finally:
+        await close_pool()
 
 
-@app.on_event("shutdown")
-async def _shutdown() -> None:
-    await close_pool()
+app = FastAPI(title="Gold Bar Price Tracker", lifespan=lifespan)
 
 # CORS — restrict by origin as an extra defense-in-depth layer. Auth is
 # bearer-token-based (Authorization header, not cookies), so we don't need
@@ -292,6 +298,14 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
             *[_safe_fetch_coins(s, coin_client) for s in ALL_COIN_SCRAPERS]
         )
 
+    # Flag implausible coin premiums (wrong-field grabs from the scraper) so
+    # bad prices don't land in coin_snapshots. Same philosophy as the bar
+    # outlier guard in orchestrator.run(). Float-cast on Decimal-tolerant
+    # spot_gold_dkk; None-safe inside the helper.
+    coin_spot_for_guard = float(spot_gold_dkk) if spot_gold_dkk is not None else None
+    for batch in coin_results:
+        flag_coin_premium_outliers(batch, coin_spot_for_guard)
+
     coin_rows = [
         (
             fetched_at,
@@ -471,6 +485,11 @@ async def get_coins(_: None = Depends(require_api_key)) -> dict[str, object]:
     spot_gold_dkk_per_g: float | None = None
     if spot_usd is not None:
         spot_gold_dkk_per_g = round(spot_usd["gold"] * fx_rates["DKK"], 4)
+
+    # Flag scraper outliers before building the response. Same helper as the
+    # /snapshot path uses, so live and persisted views agree on what's valid.
+    for batch in coin_batches:
+        flag_coin_premium_outliers(batch, spot_gold_dkk_per_g)
 
     fetched_at = now_utc()
     listings: list[dict[str, object]] = []

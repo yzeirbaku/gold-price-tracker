@@ -6,7 +6,7 @@ import time
 import httpx
 
 from app.fx import fetch_usd_to
-from app.models import Listing, PerCurrency, PriceResponse, SpotPrice
+from app.models import CoinListing, Listing, PerCurrency, PriceResponse, SpotPrice
 from app.scrapers.base import DEFAULT_HEADERS, DealerScraper, now_utc
 from app.scrapers.registry import ALL_SCRAPERS
 from app.spot import fetch_spot_usd_per_gram
@@ -18,6 +18,85 @@ logger = logging.getLogger(__name__)
 # the whole response — each scraper times out independently and others still
 # resolve in parallel.
 SCRAPER_DEADLINE_S = 10.0
+
+# Plausible premium ranges for scraper output. Below 0% means the dealer is
+# selling under spot — economically impossible for online retail (would be an
+# arbitrage). Buy-back rates on the same dealer page are typically spot-1% to
+# spot-3%, so the floor needs to be exactly 0% to catch them (a -1% floor
+# would let buy-back rates slip through). Above the ceiling means the scraper
+# has very likely grabbed the wrong field (shipping cost, multi-pack price,
+# a different product). These are deliberately a soft fence against scraper
+# bugs, not a market-vol fence: tune by widening if a real future price ever
+# trips them. See CLAUDE.md "Conventions / gotchas" for rationale.
+BAR_PREMIUM_BOUNDS_PCT = (0.0, 80.0)
+COIN_PREMIUM_BOUNDS_PCT = (0.0, 120.0)
+
+
+def flag_bar_premium_outliers(listings: list[Listing], size_g: float) -> None:
+    """Mutate `listings` in place: any whose computed premium falls outside
+    BAR_PREMIUM_BOUNDS_PCT is flipped to status='error', price + premium are
+    cleared, and a structured `scraper_outlier` event is logged. Same
+    philosophy as the /snapshot fx_stale + outlier guards — refuse to let
+    obviously-wrong scraper output land in history."""
+    lo, hi = BAR_PREMIUM_BOUNDS_PCT
+    for li in listings:
+        if li.status != "ok" or li.premium_pct is None:
+            continue
+        if lo <= li.premium_pct <= hi:
+            continue
+        logger.warning(
+            "scraper_outlier %s",
+            json.dumps({
+                "event": "scraper_outlier",
+                "kind": "bar",
+                "dealer": li.dealer,
+                "size_g": size_g,
+                "price_dkk": li.price_dkk,
+                "premium_pct": li.premium_pct,
+                "bounds_pct": [lo, hi],
+            }),
+        )
+        li.status = "error"
+        li.error = f"premium {li.premium_pct:.1f}% out of bar bounds [{lo}%, {hi}%]"
+        li.price_dkk = None
+        li.premium_pct = None
+
+
+def flag_coin_premium_outliers(
+    coins: list[CoinListing], spot_gold_dkk_per_g: float | None,
+) -> None:
+    """Mutate `coins` in place: computes premium from price + fine_gold_g +
+    spot; out-of-COIN_PREMIUM_BOUNDS_PCT entries are flipped to status='error'
+    with price cleared. No-op if spot is unavailable (no comparison possible)."""
+    if spot_gold_dkk_per_g is None or spot_gold_dkk_per_g <= 0:
+        return
+    lo, hi = COIN_PREMIUM_BOUNDS_PCT
+    for c in coins:
+        if c.status != "ok" or c.price_dkk is None or not c.fine_gold_g:
+            continue
+        ref = float(spot_gold_dkk_per_g) * float(c.fine_gold_g)
+        if ref <= 0:
+            continue
+        premium = (float(c.price_dkk) - ref) / ref * 100
+        if lo <= premium <= hi:
+            continue
+        logger.warning(
+            "scraper_outlier %s",
+            json.dumps({
+                "event": "scraper_outlier",
+                "kind": "coin",
+                "dealer": c.dealer,
+                "coin_type": c.coin_type,
+                "size_label": c.size_label,
+                "fine_gold_g": float(c.fine_gold_g),
+                "price_dkk": float(c.price_dkk),
+                "premium_pct": round(premium, 2),
+                "bounds_pct": [lo, hi],
+            }),
+        )
+        c.status = "error"
+        c.error = f"premium {premium:.1f}% out of coin bounds [{lo}%, {hi}%]"
+        c.price_dkk = None
 
 
 async def _safe_fetch(
@@ -89,6 +168,9 @@ async def run(size_g: float) -> PriceResponse:
             if li.status == "ok" and li.price_dkk is not None and ref_dkk_per_g > 0:
                 ref_total = ref_dkk_per_g * size_g
                 li.premium_pct = round((li.price_dkk - ref_total) / ref_total * 100, 2)
+        # After premium is computed, flag scraper outliers (wrong-field grabs,
+        # unit confusion, etc.) so they don't propagate to /snapshot writes.
+        flag_bar_premium_outliers(listings, size_g)
 
     listings.sort(key=_sort_key)
 

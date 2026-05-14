@@ -4,8 +4,15 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.models import Listing
-from app.orchestrator import run
+from app.models import CoinListing, Listing
+from app.orchestrator import (
+    BAR_PREMIUM_BOUNDS_PCT,
+    COIN_PREMIUM_BOUNDS_PCT,
+    flag_bar_premium_outliers,
+    flag_coin_premium_outliers,
+    run,
+)
+from app.scrapers.base import now_utc
 
 
 class FakeScraper:
@@ -95,6 +102,135 @@ async def test_run_returns_partial_when_one_scraper_times_out() -> None:
     assert by_dealer["Slow"].status == "error"
     assert by_dealer["Slow"].error is not None
     assert "timeout" in by_dealer["Slow"].error
+
+
+def _bar(dealer: str, price: float, premium: float | None, status: str = "ok") -> Listing:
+    return Listing(
+        dealer=dealer, status=status,  # type: ignore[arg-type]
+        price_dkk=price, premium_pct=premium, in_stock=True,
+        url="https://example.com/x", fetched_at=now_utc(),
+    )
+
+
+def _coin(
+    dealer: str, price: float | None, fine_g: float, status: str = "ok",
+) -> CoinListing:
+    return CoinListing(
+        dealer=dealer, status=status,  # type: ignore[arg-type]
+        coin_type="Krugerrand", size_label="1/2 oz",
+        gross_weight_g=fine_g / 0.9167, purity=0.9167, fine_gold_g=fine_g,
+        price_dkk=price,
+        url="https://example.com/c", fetched_at=now_utc(),
+    )
+
+
+# --- flag_bar_premium_outliers --------------------------------------------
+
+
+def test_bar_outlier_flips_status_and_clears_price() -> None:
+    bad = _bar("Bogus", price=100.0, premium=-50.0)
+    flag_bar_premium_outliers([bad], size_g=10.0)
+    assert bad.status == "error"
+    assert bad.price_dkk is None
+    assert bad.premium_pct is None
+    assert bad.error is not None and "out of bar bounds" in bad.error
+
+
+def test_bar_outlier_leaves_in_range_alone() -> None:
+    ok = _bar("Normal", price=9750.0, premium=7.5)
+    flag_bar_premium_outliers([ok], size_g=10.0)
+    assert ok.status == "ok"
+    assert ok.price_dkk == 9750.0
+    assert ok.premium_pct == 7.5
+
+
+def test_bar_outlier_floor_catches_buy_back_rate() -> None:
+    # Buy-back rates are typically spot-1% to spot-3%, i.e. negative premium.
+    # The 0% floor must reject them — a -1% floor would let them slip.
+    buy_back = _bar("ConfusedScraper", price=9500.0, premium=-2.5)
+    flag_bar_premium_outliers([buy_back], size_g=10.0)
+    assert buy_back.status == "error"
+
+
+def test_bar_outlier_ceiling() -> None:
+    # 80% ceiling — above is "scraper grabbed wrong field" territory.
+    too_high = _bar("Multipack", price=20000.0, premium=100.0)
+    flag_bar_premium_outliers([too_high], size_g=10.0)
+    assert too_high.status == "error"
+
+
+def test_bar_outlier_skips_non_ok_status() -> None:
+    err = _bar("Down", price=0.0, premium=None, status="error")
+    flag_bar_premium_outliers([err], size_g=10.0)
+    assert err.status == "error"  # unchanged (was already error)
+
+
+def test_bar_outlier_skips_none_premium() -> None:
+    # No spot available → premium never computed → guard is a no-op.
+    no_premium = _bar("NoSpot", price=9750.0, premium=None)
+    flag_bar_premium_outliers([no_premium], size_g=10.0)
+    assert no_premium.status == "ok"
+    assert no_premium.price_dkk == 9750.0
+
+
+def test_bar_outlier_constants_are_what_we_expect() -> None:
+    # Lock the floor at 0%: if anyone ever loosens this without thinking,
+    # this assertion will scream. See orchestrator.py rationale comment.
+    assert BAR_PREMIUM_BOUNDS_PCT[0] == 0.0
+    assert BAR_PREMIUM_BOUNDS_PCT[1] >= 50.0
+
+
+# --- flag_coin_premium_outliers -------------------------------------------
+
+
+def test_coin_outlier_flags_above_ceiling() -> None:
+    # 15g fine at spot=1000 DKK/g → ref=15000. price=40000 → premium=166% (>120%).
+    c = _coin("Bogus", price=40000.0, fine_g=15.0)
+    flag_coin_premium_outliers([c], spot_gold_dkk_per_g=1000.0)
+    assert c.status == "error"
+    assert c.price_dkk is None
+
+
+def test_coin_outlier_leaves_high_but_legit_premium() -> None:
+    # Fractional coins legitimately premium 50-80% — must NOT be flagged.
+    # 3.1g at spot=1000 → ref=3100. price=5000 → premium=61.3%.
+    c = _coin("Realistic", price=5000.0, fine_g=3.1)
+    flag_coin_premium_outliers([c], spot_gold_dkk_per_g=1000.0)
+    assert c.status == "ok"
+    assert c.price_dkk == 5000.0
+
+
+def test_coin_outlier_floor_at_zero() -> None:
+    # Below spot is impossible for online retail — flag.
+    # 10g at spot=1000 → ref=10000. price=9500 → premium=-5%.
+    c = _coin("BuyBack", price=9500.0, fine_g=10.0)
+    flag_coin_premium_outliers([c], spot_gold_dkk_per_g=1000.0)
+    assert c.status == "error"
+
+
+def test_coin_outlier_no_spot_is_noop() -> None:
+    # When spot is unavailable we can't compute premium, so the guard
+    # leaves listings untouched (premium would have been None anyway in the
+    # /coins endpoint, but raw price stays intact for caller decisions).
+    c = _coin("UnchangedNoSpot", price=999_999_999.0, fine_g=10.0)
+    flag_coin_premium_outliers([c], spot_gold_dkk_per_g=None)
+    assert c.status == "ok"
+    assert c.price_dkk == 999_999_999.0
+
+
+def test_coin_outlier_idempotent_on_already_flagged() -> None:
+    # Calling the helper twice on the same list is safe — flipped rows have
+    # status != "ok" and are skipped. Matters because /snapshot may guard,
+    # then the same batch reference flows through downstream code.
+    c = _coin("Bogus", price=40000.0, fine_g=15.0)
+    flag_coin_premium_outliers([c], spot_gold_dkk_per_g=1000.0)
+    flag_coin_premium_outliers([c], spot_gold_dkk_per_g=1000.0)
+    assert c.status == "error"
+
+
+def test_coin_outlier_constants_are_what_we_expect() -> None:
+    assert COIN_PREMIUM_BOUNDS_PCT[0] == 0.0
+    assert COIN_PREMIUM_BOUNDS_PCT[1] >= 80.0
 
 
 @pytest.mark.asyncio

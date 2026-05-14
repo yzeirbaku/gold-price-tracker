@@ -114,3 +114,58 @@ def test_yf_ticker_map_uses_futures_symbols() -> None:
 
 def test_ounce_constant() -> None:
     assert OUNCE_TO_GRAM == pytest.approx(31.1034768)
+
+
+# --- Sanity bounds rejection ----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rejects_gold_below_lower_bound() -> None:
+    # Stub returns 100 USD/oz → ~3.22 USD/g, well below the $30 floor for gold.
+    # Could happen if yfinance ever returns a stuck-at-zero / placeholder value.
+    with _stub_yf_closes({"2026-01-15": 100.0}):
+        with pytest.raises(HistoricalSpotUnavailable, match="outside sanity bounds"):
+            await fetch_historical_usd_per_gram("gold", date(2026, 1, 15))
+
+
+@pytest.mark.asyncio
+async def test_rejects_gold_above_upper_bound() -> None:
+    # 20000 USD/oz → ~643 USD/g, above the $500 ceiling. The intended trap is
+    # the "they returned per-gram but we still divided by 31" unit-confusion
+    # bug — and any other future upstream weirdness that produces obvious
+    # garbage. Wide enough that no real market move can trip it.
+    with _stub_yf_closes({"2026-01-15": 20000.0}):
+        with pytest.raises(HistoricalSpotUnavailable, match="outside sanity bounds"):
+            await fetch_historical_usd_per_gram("gold", date(2026, 1, 15))
+
+
+@pytest.mark.asyncio
+async def test_rejects_silver_above_upper_bound() -> None:
+    # Silver is normally well under $2/g; $50/g is the ceiling. 3110 USD/oz
+    # would be a "wrong ticker substitution" bug (gold price under silver
+    # ticker) — exactly the kind of upstream glitch the guard exists for.
+    with _stub_yf_closes({"2026-01-15": 3110.34768}):
+        with pytest.raises(HistoricalSpotUnavailable, match="outside sanity bounds"):
+            await fetch_historical_usd_per_gram("silver", date(2026, 1, 15))
+
+
+@pytest.mark.asyncio
+async def test_does_not_cache_rejected_value() -> None:
+    # The bad value must not be cached — a future call could legitimately get
+    # a good price for the same date and shouldn't be masked by the bad one.
+    calls = {"n": 0}
+
+    def stub(ticker, start, end):
+        calls["n"] += 1
+        # First call: garbage. Second call (post-recovery): valid.
+        if calls["n"] == 1:
+            return {"2026-01-15": 100.0}  # too low → rejected
+        return {"2026-01-15": 3110.34768}  # 100 USD/g, valid
+
+    with patch("app.spot._yf_closes", side_effect=stub):
+        with pytest.raises(HistoricalSpotUnavailable):
+            await fetch_historical_usd_per_gram("gold", date(2026, 1, 15))
+        # Retry after upstream recovery should succeed.
+        result = await fetch_historical_usd_per_gram("gold", date(2026, 1, 15))
+    assert result == pytest.approx(100.0, abs=1e-4)
+    assert calls["n"] == 2
