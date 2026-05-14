@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=85" />
+  <link rel="stylesheet" href="styles.css?v=86" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
@@ -30,6 +30,7 @@
     <button class="menu-item" data-action="prices" role="menuitem" type="button">Prices</button>
     <button class="menu-item" data-action="reports" role="menuitem" type="button">Reports</button>
     <button class="menu-item" data-action="portfolio" role="menuitem" type="button" hidden>Portfolio</button>
+    <button class="menu-item" data-action="alerts" role="menuitem" type="button" hidden>Alerts</button>
     <button class="menu-item" data-action="settings" role="menuitem" type="button">Settings</button>
     <hr class="menu-divider" />
     <div class="menu-account-info" hidden></div>
@@ -155,6 +156,35 @@
     </section>
   </div>
 
+  <div id="alerts-view" hidden>
+    <section id="alerts-summary" class="card">
+      <div class="results-head">
+        <h2>Alerts</h2>
+        <button id="alerts-add-btn" class="site-btn-primary" type="button">+ Add alert</button>
+      </div>
+      <p class="muted-tiny">Get an email when a bar or coin drops below your premium threshold. Cross-dealer — fires when any dealer hits it.</p>
+    </section>
+    <section id="alerts-list" class="card">
+      <div id="alerts-loading" class="loading-msg" hidden></div>
+      <div id="alerts-empty" class="empty-state" hidden>
+        <p>No alerts yet. Add one to get an email when a gold premium drops.</p>
+      </div>
+      <table id="alerts-table" hidden>
+        <thead>
+          <tr>
+            <th>Kind</th>
+            <th>Target</th>
+            <th>Threshold</th>
+            <th>Current</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </div>
+
   <div id="verify-view" hidden>
     <section class="card">
       <div id="verify-content"></div>
@@ -256,6 +286,43 @@
     </form>
   </dialog>
 
+  <dialog id="alert-dialog">
+    <form method="dialog" id="alert-form">
+      <button class="dialog-close" value="cancel" aria-label="Close" type="submit" formnovalidate>×</button>
+      <h2 id="alert-dialog-title">Add alert</h2>
+      <fieldset class="settings-field">
+        <legend>Kind</legend>
+        <label class="theme-option"><input type="radio" name="alert-kind" value="bar" checked /><span>Bar</span></label>
+        <label class="theme-option"><input type="radio" name="alert-kind" value="coin" /><span>Coin</span></label>
+      </fieldset>
+      <fieldset class="settings-field" id="alert-bar-fields">
+        <legend>Size</legend>
+        <select id="alert-bar-size" required></select>
+      </fieldset>
+      <fieldset class="settings-field" id="alert-coin-type-field" hidden>
+        <legend>Coin type</legend>
+        <select id="alert-coin-type"></select>
+      </fieldset>
+      <fieldset class="settings-field" id="alert-coin-size-field" hidden>
+        <legend>Coin size</legend>
+        <select id="alert-coin-size"></select>
+      </fieldset>
+      <fieldset class="settings-field">
+        <legend>Threshold (%)</legend>
+        <input id="alert-threshold" type="number" step="0.25" min="0" max="200" required />
+      </fieldset>
+      <fieldset class="settings-field" id="alert-enabled-field" hidden>
+        <legend>Status</legend>
+        <label class="theme-option"><input type="checkbox" id="alert-enabled" checked /><span>Enabled</span></label>
+      </fieldset>
+      <div id="alert-error" class="dialog-error" hidden></div>
+      <menu>
+        <button value="cancel" type="submit" formnovalidate>Cancel</button>
+        <button id="alert-submit" value="save" type="submit">Save</button>
+      </menu>
+    </form>
+  </dialog>
+
   <dialog id="confirm-dialog">
     <form method="dialog">
       <h2 id="confirm-dialog-title">Confirm</h2>
@@ -295,7 +362,7 @@
 
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=85"></script>
-  <script src="app.js?v=85"></script>
+  <script src="config.js?v=86"></script>
+  <script src="app.js?v=86"></script>
 </body>
 </html>

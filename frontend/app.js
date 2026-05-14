@@ -758,10 +758,11 @@ $('#menu-dropdown').addEventListener('click', (e) => {
   if (action === 'settings') openSettings();
   else if (action === 'reports') openReportsView();
   else if (action === 'portfolio') openPortfolioView();
+  else if (action === 'alerts') openAlertsView();
   else if (action === 'signin') openLoginDialog();
   else if (action === 'signout') signOut();
   else if (action === 'prices') {
-    const onPrices = $('#reports-view').hidden && $('#portfolio-view').hidden;
+    const onPrices = $('#reports-view').hidden && $('#portfolio-view').hidden && $('#alerts-view').hidden;
     // Coming from any aux view: snap back to the canonical home — Bars tab at
     // 10 g. Already on Prices: leave the user's current tab/size alone.
     if (onPrices) showPricesView();
@@ -810,6 +811,7 @@ if ('serviceWorker' in navigator) {
 function hideAllAuxViews() {
   $('#reports-view').hidden = true;
   $('#portfolio-view').hidden = true;
+  $('#alerts-view').hidden = true;
   $('#verify-view').hidden = true;
 }
 
@@ -839,6 +841,19 @@ function showPortfolioView() {
   $('#coins-view').hidden = true;
   hideAllAuxViews();
   $('#portfolio-view').hidden = false;
+  $('#spot').hidden = true;
+  $('#tab-strip').hidden = true;
+  document.querySelectorAll('#tab-strip button').forEach((b) => {
+    b.classList.remove('active');
+    b.setAttribute('aria-selected', 'false');
+  });
+}
+
+function showAlertsView() {
+  $('#bars-view').hidden = true;
+  $('#coins-view').hidden = true;
+  hideAllAuxViews();
+  $('#alerts-view').hidden = false;
   $('#spot').hidden = true;
   $('#tab-strip').hidden = true;
   document.querySelectorAll('#tab-strip button').forEach((b) => {
@@ -1122,6 +1137,7 @@ function authHeaders() {
 function updateAuthUI() {
   const signedIn = currentUser != null;
   $('.menu-item[data-action="portfolio"]').hidden = !signedIn;
+  $('.menu-item[data-action="alerts"]').hidden = !signedIn;
   $('.menu-item[data-action="signin"]').hidden = signedIn;
   $('.menu-item[data-action="signout"]').hidden = !signedIn;
   const accountInfo = $('.menu-account-info');
@@ -1209,7 +1225,7 @@ window.addEventListener('storage', async (e) => {
     currentUser = null;
     updateAuthUI();
     // If user is on portfolio view, kick them back to prices.
-    if (!$('#portfolio-view').hidden) showPricesView();
+    if (!$('#portfolio-view').hidden || !$('#alerts-view').hidden) showPricesView();
   }
 });
 
@@ -1281,7 +1297,7 @@ async function signOut() {
   currentUser = null;
   try { localStorage.setItem(SESSION_BROADCAST_KEY, ''); } catch {}
   updateAuthUI();
-  if (!$('#portfolio-view').hidden) showPricesView();
+  if (!$('#portfolio-view').hidden || !$('#alerts-view').hidden) showPricesView();
   await infoDialog({
     title: 'Signed out',
     message: 'You have been signed out. The site keeps working without sign-in — pop back in anytime to view your portfolio.',
@@ -1777,6 +1793,314 @@ $('#purchase-form').addEventListener('submit', async (e) => {
     }
     $('#purchase-dialog').close();
     await loadPortfolio();
+  } catch (err) {
+    errEl.textContent = `Network error: ${err.message}`;
+    errEl.hidden = false;
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = originalLabel;
+  }
+});
+
+// Alerts view ——————————————————————————————————————————————————————————————
+
+// Cached /alerts/options response so the dialog dropdowns don't refetch on
+// every open. Loaded once on first openAlertsView; refresh on demand if
+// stale (we never invalidate — the registry is essentially static).
+let alertsOptions = null;
+let alertsCache = [];
+// Edit mode: { kind: 'edit', id, original } | { kind: 'add' }
+let alertMode = { kind: 'add' };
+
+async function openAlertsView() {
+  showAlertsView();
+  await Promise.all([loadAlertsOptions(), loadAlerts()]);
+}
+
+async function loadAlertsOptions() {
+  if (alertsOptions) return alertsOptions;
+  try {
+    const res = await fetch(`${BACKEND_URL}/alerts/options`, { headers: authHeaders() });
+    if (!res.ok) return null;
+    alertsOptions = await res.json();
+    return alertsOptions;
+  } catch {
+    return null;
+  }
+}
+
+async function loadAlerts() {
+  const loadingEl = $('#alerts-loading');
+  const emptyEl = $('#alerts-empty');
+  const tableEl = $('#alerts-table');
+  loadingEl.hidden = false;
+  loadingEl.innerHTML = '<div class="spinner"><span></span><span></span><span></span></div><div class="loading-text">Loading alerts…</div>';
+  emptyEl.hidden = true;
+  tableEl.hidden = true;
+  try {
+    const res = await fetch(`${BACKEND_URL}/alerts`, { headers: authHeaders() });
+    if (res.status === 401) {
+      clearSessionToken(); currentUser = null; updateAuthUI();
+      showPricesView(); openLoginDialog(); return;
+    }
+    if (!res.ok) {
+      loadingEl.innerHTML = `Failed to load alerts (status ${res.status}).`;
+      return;
+    }
+    const data = await res.json();
+    alertsCache = data.alerts || [];
+    renderAlerts();
+  } catch (e) {
+    loadingEl.innerHTML = `Network error: ${escapeHtml(e.message)}`;
+  } finally {
+    loadingEl.hidden = true;
+  }
+}
+
+function renderAlerts() {
+  const emptyEl = $('#alerts-empty');
+  const tableEl = $('#alerts-table');
+  const tbody = tableEl.querySelector('tbody');
+  if (!alertsCache.length) {
+    emptyEl.hidden = false;
+    tableEl.hidden = true;
+    tbody.innerHTML = '';
+    return;
+  }
+  emptyEl.hidden = true;
+  tableEl.hidden = false;
+  tbody.innerHTML = alertsCache.map((a) => {
+    const target = a.kind === 'bar'
+      ? `${formatBarSize(a.size_g)} g bar`
+      : `${escapeHtml(a.coin_type)} <span class="muted-tiny">(${formatFineG(a.fine_gold_g)} g fine)</span>`;
+    const current = a.current_min_premium_pct != null
+      ? `${a.current_min_premium_pct.toFixed(2)}% <span class="muted-tiny">${escapeHtml(a.current_best_dealer || '')}</span>`
+      : '<span class="muted-tiny">—</span>';
+    let statusCls = 'status-disabled';
+    let statusTitle = 'Disabled';
+    if (a.enabled && !a.muted_until_recovery) { statusCls = 'status-armed'; statusTitle = 'Armed — watching'; }
+    else if (a.enabled && a.muted_until_recovery) {
+      statusCls = 'status-muted';
+      const lastFired = a.last_fired_at ? fmtDateTime(a.last_fired_at) : '';
+      statusTitle = lastFired ? `Muted — fired ${lastFired}; will re-arm when premium recovers` : 'Muted — will re-arm when premium recovers';
+    }
+    return `
+      <tr class="alert-row" data-id="${a.id}">
+        <td>${a.kind}</td>
+        <td>${target}</td>
+        <td>≤ ${Number(a.threshold_pct).toFixed(2)}%</td>
+        <td>${current}</td>
+        <td><span class="status-dot ${statusCls}" title="${escapeHtml(statusTitle)}" aria-label="${escapeHtml(statusTitle)}"></span></td>
+        <td>
+          <div class="row-actions">
+            <button class="row-edit icon-btn" aria-label="Edit" data-id="${a.id}" type="button">✎</button>
+            <button class="row-delete icon-btn" aria-label="Delete" data-id="${a.id}" type="button">✕</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function formatBarSize(g) {
+  // Match the size labels used elsewhere (2.5 / 5 / 10 / 20).
+  return Number(g) % 1 === 0 ? String(Number(g)) : Number(g).toString();
+}
+function formatFineG(g) {
+  return Number(g).toFixed(2).replace(/\.?0+$/, '');
+}
+function fmtDateTime(iso) {
+  const d = iso instanceof Date ? iso : new Date(iso);
+  return `${fmtDate(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// Table click delegate — edit + delete actions.
+$('#alerts-table tbody').addEventListener('click', async (e) => {
+  const edit = e.target.closest('.row-edit');
+  if (edit) {
+    e.stopPropagation();
+    const a = alertsCache.find((x) => x.id === edit.dataset.id);
+    if (!a) return;
+    openAlertDialog({ kind: 'edit', id: a.id, original: a }, a);
+    return;
+  }
+  const del = e.target.closest('.row-delete');
+  if (del) {
+    e.stopPropagation();
+    const ok = await confirmDialog({
+      title: 'Delete alert',
+      message: 'This permanently removes this alert. You won\u2019t be notified about it anymore.',
+      okLabel: 'Delete',
+    });
+    if (!ok) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/alerts/${del.dataset.id}`, {
+        method: 'DELETE', headers: authHeaders(),
+      });
+      if (!res.ok && res.status !== 204) {
+        alert(`Delete failed (status ${res.status})`);
+        return;
+      }
+      await loadAlerts();
+    } catch (err) {
+      alert(`Delete failed: ${err.message}`);
+    }
+  }
+});
+
+// Add / edit dialog ----------------------------------------------------------
+
+function openAlertDialog(mode, existing = null) {
+  alertMode = mode;
+  const form = $('#alert-form');
+  form.reset();
+  const titleEl = $('#alert-dialog-title');
+  const opts = alertsOptions || { bar_sizes: [2.5, 5, 10, 20], coin_options: [] };
+  populateAlertDialogOptions(opts);
+  const enabledField = $('#alert-enabled-field');
+  if (mode.kind === 'edit' && existing) {
+    titleEl.textContent = 'Edit alert';
+    enabledField.hidden = false;
+    $(`input[name="alert-kind"][value="${existing.kind}"]`).checked = true;
+    switchAlertKind(existing.kind);
+    if (existing.kind === 'bar') {
+      $('#alert-bar-size').value = String(existing.size_g);
+    } else {
+      $('#alert-coin-type').value = existing.coin_type;
+      refreshCoinSizeOptions(existing.coin_type, existing.fine_gold_g);
+    }
+    $('#alert-threshold').value = Number(existing.threshold_pct).toFixed(2);
+    $('#alert-enabled').checked = !!existing.enabled;
+  } else {
+    titleEl.textContent = 'Add alert';
+    enabledField.hidden = true;
+    document.querySelector('input[name="alert-kind"][value="bar"]').checked = true;
+    switchAlertKind('bar');
+    $('#alert-enabled').checked = true;
+  }
+  $('#alert-error').hidden = true;
+  $('#alert-dialog').showModal();
+}
+
+function populateAlertDialogOptions(opts) {
+  const barSel = $('#alert-bar-size');
+  barSel.innerHTML = opts.bar_sizes.map((s) => `<option value="${s}">${s} g</option>`).join('');
+  const coinTypeSel = $('#alert-coin-type');
+  coinTypeSel.innerHTML = (opts.coin_options || [])
+    .map((co) => `<option value="${escapeHtml(co.coin_type)}">${escapeHtml(co.coin_type)}</option>`)
+    .join('');
+  // Default to first coin type's sizes
+  if (opts.coin_options && opts.coin_options.length) {
+    refreshCoinSizeOptions(opts.coin_options[0].coin_type);
+  }
+  coinTypeSel.addEventListener('change', (e) => {
+    refreshCoinSizeOptions(e.target.value);
+  }, { once: false });
+}
+
+function refreshCoinSizeOptions(coinType, preselectFine = null) {
+  const opts = alertsOptions || { coin_options: [] };
+  const entry = (opts.coin_options || []).find((c) => c.coin_type === coinType);
+  const sizeSel = $('#alert-coin-size');
+  if (!entry) {
+    sizeSel.innerHTML = '<option value="">—</option>';
+    return;
+  }
+  sizeSel.innerHTML = entry.sizes
+    .map((s) => `<option value="${s.fine_gold_g}">${escapeHtml(s.size_label)} (${s.fine_gold_g.toFixed(2)} g)</option>`)
+    .join('');
+  if (preselectFine != null) {
+    // Pick the dropdown entry within 0.005g of the requested fine weight.
+    const target = Number(preselectFine);
+    const match = entry.sizes.find((s) => Math.abs(s.fine_gold_g - target) < 0.005);
+    if (match) sizeSel.value = String(match.fine_gold_g);
+  }
+}
+
+function switchAlertKind(kind) {
+  $('#alert-bar-fields').hidden = kind !== 'bar';
+  $('#alert-coin-type-field').hidden = kind !== 'coin';
+  $('#alert-coin-size-field').hidden = kind !== 'coin';
+}
+
+document.querySelectorAll('input[name="alert-kind"]').forEach((r) => {
+  r.addEventListener('change', (e) => switchAlertKind(e.target.value));
+});
+
+$('#alerts-add-btn').addEventListener('click', () => {
+  openAlertDialog({ kind: 'add' });
+});
+
+$('#alert-form').addEventListener('submit', async (e) => {
+  const submitter = e.submitter;
+  if (!submitter || submitter.value === 'cancel') return;
+  if (submitter.id !== 'alert-submit') return;
+  e.preventDefault();
+
+  const errEl = $('#alert-error');
+  errEl.hidden = true;
+
+  const kind = document.querySelector('input[name="alert-kind"]:checked').value;
+  const threshold = parseFloat($('#alert-threshold').value);
+  if (isNaN(threshold) || threshold < 0) {
+    errEl.textContent = 'Threshold must be a non-negative number.';
+    errEl.hidden = false;
+    return;
+  }
+
+  let payload;
+  if (alertMode.kind === 'edit') {
+    const original = alertMode.original || {};
+    const diff = {};
+    if (Math.abs(threshold - Number(original.threshold_pct)) > 0.001) {
+      diff.threshold_pct = threshold;
+    }
+    const enabled = $('#alert-enabled').checked;
+    if (enabled !== !!original.enabled) diff.enabled = enabled;
+    if (!Object.keys(diff).length) {
+      $('#alert-dialog').close();
+      return;
+    }
+    payload = diff;
+  } else {
+    payload = { kind, threshold_pct: threshold };
+    if (kind === 'bar') {
+      payload.size_g = parseFloat($('#alert-bar-size').value);
+    } else {
+      payload.coin_type = $('#alert-coin-type').value;
+      payload.fine_gold_g = parseFloat($('#alert-coin-size').value);
+    }
+  }
+
+  const url = alertMode.kind === 'edit'
+    ? `${BACKEND_URL}/alerts/${alertMode.id}`
+    : `${BACKEND_URL}/alerts`;
+  const method = alertMode.kind === 'edit' ? 'PATCH' : 'POST';
+
+  const submitBtn = $('#alert-submit');
+  const originalLabel = submitBtn.textContent;
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Saving…';
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(payload),
+    });
+    if (res.status === 401) {
+      $('#alert-dialog').close();
+      clearSessionToken(); currentUser = null; updateAuthUI();
+      showPricesView(); openLoginDialog();
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.text();
+      errEl.textContent = `Save failed (status ${res.status}): ${body.slice(0, 200)}`;
+      errEl.hidden = false;
+      return;
+    }
+    $('#alert-dialog').close();
+    await loadAlerts();
   } catch (err) {
     errEl.textContent = `Network error: ${err.message}`;
     errEl.hidden = false;

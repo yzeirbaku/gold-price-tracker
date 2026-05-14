@@ -915,6 +915,39 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 .row-delete:hover { color: var(--error, #e85a5a); }
 
+/* Alerts table — same compact layout as portfolio + status dot column.
+   Last column right-aligned so the edit/delete buttons hug the right edge. */
+#alerts-table thead th:last-child,
+#alerts-table tr.alert-row td:last-child { text-align: right; width: 1%; }
+#alerts-table tr.alert-row td:last-child,
+#alerts-table thead th:last-child { padding-right: 0.3rem; }
+.status-dot {
+  display: inline-block;
+  width: 0.65rem; height: 0.65rem;
+  border-radius: 50%;
+  background: var(--muted);
+  vertical-align: middle;
+}
+/* Green = enabled and armed; amber = muted; grey = disabled. Tooltip on the
+   span carries the explanatory text so users hovering the dot understand
+   why a tile is muted. */
+.status-dot.status-armed    { background: #4caf50; box-shadow: 0 0 6px rgba(76,175,80,0.55); }
+.status-dot.status-muted    { background: #e2a534; box-shadow: 0 0 6px rgba(226,165,52,0.55); }
+.status-dot.status-disabled { background: #555; }
+#alerts-table select,
+#alerts-table input { font: inherit; }
+#alert-dialog { width: min(420px, 92vw); }
+#alert-dialog select {
+  width: 100%; padding: 0.55rem 0.6rem; margin-top: 0.1rem;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font: inherit;
+}
+#alert-dialog select:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(226,192,84,0.18);
+}
+
 #purchase-form textarea {
   width: 100%;
   background: var(--surface-2);

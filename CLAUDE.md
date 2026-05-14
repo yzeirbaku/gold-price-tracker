@@ -91,6 +91,11 @@ Postgres tables (Neon in prod, local Docker in dev):
 | POST | `/portfolio` | session cookie | create a purchase; freezes historical spot at write |
 | PATCH | `/portfolio/{id}` | session cookie | edit; re-freezes spot if `purchased_at` or `metal` change |
 | DELETE | `/portfolio/{id}` | session cookie | hard delete; 404 if not the caller's row |
+| GET    | `/alerts` | session cookie | list user's alerts + current_min_premium_pct enrichment |
+| GET    | `/alerts/options` | session cookie | bar sizes + coin registry for the dialog dropdowns |
+| POST   | `/alerts` | session cookie | create; bar requires size_g, coin requires (coin_type, fine_gold_g) |
+| PATCH  | `/alerts/{id}` | session cookie | edit threshold/enabled; threshold change resets muted state |
+| DELETE | `/alerts/{id}` | session cookie | hard delete; 404 if not the caller's row |
 
 ## Dealers
 
@@ -207,6 +212,53 @@ Cloudflare Pages. Scripts are `'self'` + `https://cdn.jsdelivr.net` (for
 Chart.js); `connect-src` allowlists the Render backend; `frame-ancestors
 'none'` blocks clickjacking; `object-src 'none'` blocks Flash/etc. Update
 the `connect-src` URL if the backend host ever changes.
+
+## Alerts
+
+Logged-in users can subscribe to **email alerts** that fire when a
+cross-dealer minimum premium drops below a configured threshold. One
+new table (`alerts`) + one module (`app/alerts.py`); evaluation
+piggybacks on `/snapshot` after persistence so the fx_stale + outlier
+guards already gate it. Endpoints:
+
+| Method | Path | Notes |
+|---|---|---|
+| GET    | `/alerts` | list user's alerts (with `current_min_premium_pct` + `current_best_dealer` enrichment from the most recent snapshot row) |
+| GET    | `/alerts/options` | bar sizes + coin registry (used by the dialog dropdowns; one-shot at view-open) |
+| POST   | `/alerts` | create; bar requires `size_g`, coin requires `(coin_type, fine_gold_g)`. The CHECK constraint on the table enforces shape; `_validate_kind_payload` returns a clean 400 first. |
+| PATCH  | `/alerts/{id}` | edit threshold or enabled flag. Threshold edits **reset** `muted_until_recovery=FALSE` so a 7%→6% change doesn't stay stuck muted. |
+| DELETE | `/alerts/{id}` | hard delete; 404 if not the caller's row |
+
+**Cross-dealer matching only.** Bar alerts key on `size_g`; coin alerts on
+`(coin_type, fine_gold_g)`. Premium is min across all `status='ok'` rows
+in the just-persisted tick. The unit of matching is "what a buyer cares
+about" — they want any 10g bar / any 1/2oz Krugerrand below threshold,
+not a specific dealer.
+
+**Dedup / state machine.** Each alert has a `muted_until_recovery` flag.
+On fire: email sent → flag set TRUE + `last_fired_at = NOW()`. On any
+subsequent tick where min premium climbs back above
+`threshold + HYSTERESIS_PCT` (0.5%), flag flips back to FALSE — re-armed.
+Standard fire-once-and-mute pattern; no spam during long flat-bottom dips.
+
+**Bundling + rate limit.** Multiple alerts firing for the same user on
+the same tick get bundled into **one email** with each alert as a
+section. Per-user hard cap of `MAX_FIRES_PER_HOUR_PER_USER = 8`
+alert-fires per rolling hour (a bundle of N alerts counts as N) —
+prevents a flapping watch from carpet-bombing the inbox. Throttled
+events log `alert_email_throttled` (structured JSON for Render grep).
+
+**Failure isolation.** If Resend fails for one user, their alerts stay
+**un-muted** so the next tick retries; other users still get their
+emails. Logged as `alert_email_failed` with user_id + alert_ids.
+Evaluation is inside the `/snapshot` transaction but Resend calls
+happen via try/except — Resend hiccup does NOT roll back the snapshot.
+
+**Why piggyback on `/snapshot`.** Fresh data already in scope (zero
+extra DB read for the per-tick eval), atomic with the persistence
+(no race where we alert on data that wasn't recorded), one scheduler
+to manage. 20-min cadence is the natural alert latency — fine for
+this use case.
 
 ## Cron
 

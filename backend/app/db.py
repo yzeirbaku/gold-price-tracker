@@ -137,6 +137,26 @@ CREATE TABLE IF NOT EXISTS purchases (
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases (user_id, purchased_at DESC);
+
+CREATE TABLE IF NOT EXISTS alerts (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id               UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind                  TEXT NOT NULL CHECK (kind IN ('bar', 'coin')),
+    size_g                NUMERIC(4,1),
+    coin_type             TEXT,
+    fine_gold_g           NUMERIC(8,4),
+    threshold_pct         NUMERIC(5,2) NOT NULL CHECK (threshold_pct >= 0),
+    enabled               BOOLEAN NOT NULL DEFAULT TRUE,
+    muted_until_recovery  BOOLEAN NOT NULL DEFAULT FALSE,
+    last_fired_at         TIMESTAMPTZ,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (
+        (kind = 'bar'  AND size_g IS NOT NULL AND coin_type IS NULL AND fine_gold_g IS NULL) OR
+        (kind = 'coin' AND coin_type IS NOT NULL AND fine_gold_g IS NOT NULL AND size_g IS NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_user ON alerts (user_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_enabled ON alerts (enabled) WHERE enabled = TRUE;
 """
 
 _pool: asyncpg.Pool | None = None

@@ -12,6 +12,8 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
+from app.alerts import evaluate_alerts
+from app.alerts import router as alerts_router
 from app.auth import require_api_key
 from app.auth_session import router as auth_router
 from app.buy_context import (
@@ -90,6 +92,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(portfolio_router)
+app.include_router(alerts_router)
 
 ALLOWED_SIZES = {2.5, 5.0, 10.0, 20.0}
 HISTORY_RANGES = {"24h": "24 hours", "7d": "7 days", "30d": "30 days"}
@@ -361,6 +364,14 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
                     """,
                     coin_rows,
                 )
+            # Alerts evaluation runs *inside* the same transaction as the
+            # INSERTs so state changes (muted_until_recovery, last_fired_at)
+            # stay atomic with the snapshot data they reflect. The fx_stale
+            # and outlier guards above already gated us; whatever lands here
+            # is data the alerts can trust. Failure inside evaluate_alerts
+            # (network hiccup to Resend, etc.) is logged and swallowed
+            # per-user — it does NOT roll back the snapshot.
+            await evaluate_alerts(conn, fetched_at, bar_rows, coin_rows)
 
     return {
         "ok": True,
