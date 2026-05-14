@@ -15,9 +15,27 @@ _HISTORICAL_USD_PER_GRAM_CACHE: dict[tuple[str, str], float] = {}
 _HISTORICAL_FALLBACK_DAYS = 7
 _YF_TICKER = {"gold": "GC=F", "silver": "SI=F"}
 
+# Generous sanity bounds on the yfinance historical spot, in USD/gram. Gold
+# has historically traded ~[$30/g, $130/g]; silver ~[$0.30/g, $1.60/g]. The
+# guard bounds widen those ~4-30× on purpose — they are NOT a market-vol
+# fence, they are a "did the upstream API silently break" fence. A unit-flip
+# (per-oz returned as per-gram → ~31× off → caught at 500 / 50), a stuck-at-
+# zero / NaN cast, or a wrong-ticker substitution would all blow past these.
+# Wide enough that no real market price can ever trip them; tight enough to
+# refuse to freeze obvious garbage onto a `purchases` row. Tune by widening
+# rather than tightening if a real future price ever rejects. See CLAUDE.md
+# "Conventions / gotchas" for the rationale.
+_HISTORICAL_BOUNDS_USD_PER_G: dict[str, tuple[float, float]] = {
+    "gold":   (30.0, 500.0),
+    "silver": (0.20, 50.0),
+}
+
 
 class HistoricalSpotUnavailable(RuntimeError):
-    """Raised when no historical spot can be resolved within the fallback window."""
+    """Raised when no historical spot can be resolved within the fallback window,
+    OR when the value returned by yfinance falls outside the generous sanity
+    bounds defined above. Either way the right move is to surface the failure
+    to the user so they can retry — never silently persist a suspect value."""
 
 
 async def fetch_spot_usd_per_gram(client: httpx.AsyncClient) -> dict[str, float] | None:
@@ -77,6 +95,14 @@ async def fetch_historical_usd_per_gram(
         key_iso = target.isoformat()
         if key_iso in closes_by_date:
             per_gram = closes_by_date[key_iso] / OUNCE_TO_GRAM
+            lo, hi = _HISTORICAL_BOUNDS_USD_PER_G[metal]
+            if not (lo <= per_gram <= hi):
+                # Don't cache the suspect value — a future call might get a
+                # correct quote that we'd otherwise mask with the bad one.
+                raise HistoricalSpotUnavailable(
+                    f"{metal} historical spot {per_gram:.4f} USD/g for "
+                    f"{key_iso} is outside sanity bounds [{lo}, {hi}]"
+                )
             _HISTORICAL_USD_PER_GRAM_CACHE[(ticker, key_iso)] = per_gram
             # Cache the requested date too, even if we ended up walking back —
             # so a future request for the same target_date doesn't refetch.

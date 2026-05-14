@@ -17,8 +17,25 @@ _HISTORICAL_FX_CACHE: dict[str, float] = {}
 _HISTORICAL_FALLBACK_DAYS = 7
 
 
+class HistoricalFxUnavailable(RuntimeError):
+    """Raised when no historical FX rate can be resolved within the fallback window.
+
+    Used by portfolio purchase writes — those values get frozen forever on the
+    `purchases` row, so we'd rather fail loud and have the user retry than
+    bake a stale STATIC_FALLBACK rate into history (see CLAUDE.md gotchas).
+    """
+
+
 async def fetch_usd_to(client: httpx.AsyncClient) -> tuple[dict[str, float], bool]:
-    """Return ({'EUR': rate, 'DKK': rate}, stale_flag)."""
+    """Return ({'EUR': rate, 'DKK': rate}, stale_flag).
+
+    Live request path — used by /spot, /prices, /coins. Returns the stamped
+    STATIC_FALLBACK with stale_flag=True if Frankfurter errors. That's safe
+    here because the value is shown briefly on screen and replaced on the
+    next 30s refresh — it never lands in Postgres. The cron-only /snapshot
+    path inspects `stale_flag` and refuses to persist when it's True (see
+    main.py snapshot()).
+    """
     try:
         resp = await client.get(
             FRANKFURTER_URL,
@@ -36,8 +53,14 @@ async def fetch_usd_to(client: httpx.AsyncClient) -> tuple[dict[str, float], boo
 
 async def fetch_usd_to_dkk_on(client: httpx.AsyncClient, on_date: date) -> float:
     """Return USD→DKK rate for `on_date`, walking back through weekends if
-    Frankfurter returns no data. Falls back to STATIC_FALLBACK['DKK'] after
-    7 misses. Cached in-process by date string."""
+    Frankfurter returns no data. Cached in-process by date string.
+
+    Raises HistoricalFxUnavailable if Frankfurter is unreachable for every
+    day in the fallback window. We deliberately do NOT fall back to the
+    stamped STATIC_FALLBACK here because this rate gets frozen onto a
+    `purchases` row forever — letting the user retry beats silently baking
+    in a stale rate.
+    """
     for offset in range(_HISTORICAL_FALLBACK_DAYS + 1):
         target = on_date - timedelta(days=offset)
         key = target.isoformat()
@@ -58,5 +81,7 @@ async def fetch_usd_to_dkk_on(client: httpx.AsyncClient, on_date: date) -> float
         except (httpx.HTTPError, KeyError, ValueError, TypeError) as e:
             logger.warning("historical FX fetch failed for %s: %s", key, e)
             continue
-    logger.warning("historical FX unavailable for %s; using static fallback", on_date.isoformat())
-    return STATIC_FALLBACK["DKK"]
+    raise HistoricalFxUnavailable(
+        f"no USD→DKK rate available within {_HISTORICAL_FALLBACK_DAYS} days "
+        f"of {on_date.isoformat()}"
+    )

@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from .auth_session import AuthedUser, require_session
 from .db import get_pool
-from .fx import fetch_usd_to, fetch_usd_to_dkk_on
+from .fx import HistoricalFxUnavailable, fetch_usd_to, fetch_usd_to_dkk_on
 from .spot import (
     HistoricalSpotUnavailable,
     fetch_historical_usd_per_gram,
@@ -63,14 +63,24 @@ class PurchaseUpdate(BaseModel):
 
 async def _fetch_historical_spot_dkk_per_g(metal: Metal, purchased_at: datetime) -> Decimal:
     """USD spot on the purchase date × USD→DKK on the same date.
-    Both sources are walked back through weekends/holidays if needed."""
+    Both sources are walked back through weekends/holidays if needed.
+
+    Surfaces upstream failures (yfinance, Frankfurter) as HTTP 502 so the
+    user can retry. We deliberately do NOT silently fall back to a stamped
+    static rate here — the result lands on a `purchases` row and stays
+    frozen forever, defining the cost-basis premium. Better to ask for a
+    retry than bake an off-by-7% rate into history.
+    """
     on_date = purchased_at.astimezone(UTC).date()
     try:
         usd_per_g = await fetch_historical_usd_per_gram(metal, on_date)
     except HistoricalSpotUnavailable as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
-    async with httpx.AsyncClient() as client:
-        dkk_rate = await fetch_usd_to_dkk_on(client, on_date)
+    try:
+        async with httpx.AsyncClient() as client:
+            dkk_rate = await fetch_usd_to_dkk_on(client, on_date)
+    except HistoricalFxUnavailable as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
     return Decimal(str(usd_per_g * dkk_rate)).quantize(Decimal("0.0001"))
 
 

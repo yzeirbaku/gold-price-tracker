@@ -80,9 +80,17 @@ async def test_caches_repeat_lookups_by_metal_and_date() -> None:
 async def test_different_metals_cache_separately() -> None:
     calls: list[str] = []
 
+    # Per-metal realistic close prices so both fall inside the sanity bounds
+    # added in fetch_historical_usd_per_gram (gold [$30/g,$500/g], silver
+    # [$0.20/g,$50/g]). Without this, silver at 100 USD/g would be rejected.
+    closes_by_ticker = {
+        "GC=F": {"2026-01-15": 3110.34768},   # 100 USD/g gold
+        "SI=F": {"2026-01-15": 31.1034768},   # 1 USD/g silver
+    }
+
     def stub(ticker: str, start: date, end: date) -> dict[str, float]:
         calls.append(ticker)
-        return {"2026-01-15": 3110.34768}
+        return dict(closes_by_ticker[ticker])
 
     with patch("app.spot._yf_closes", side_effect=stub):
         await fetch_historical_usd_per_gram("gold", date(2026, 1, 15))

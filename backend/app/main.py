@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -46,6 +47,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
     force=True,
 )
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Gold Bar Price Tracker")
 
@@ -86,6 +88,14 @@ app.include_router(portfolio_router)
 ALLOWED_SIZES = {2.5, 5.0, 10.0, 20.0}
 HISTORY_RANGES = {"24h": "24 hours", "7d": "7 days", "30d": "30 days"}
 DEALER_NAMES = {s.name for s in ALL_SCRAPERS}
+
+# Max allowed deviation between consecutive snapshot ticks for gold spot in DKK
+# per gram. If exceeded, the snapshot is logged + skipped instead of persisted.
+# 10% is intentionally generous: real gold rarely moves more than a couple of
+# percent in a 20-min window even during Fed announcements, but a 31x unit
+# flip, near-zero glitch, or ~7%+ FX drift would all be caught comfortably.
+# See CLAUDE.md "Conventions / gotchas".
+SNAPSHOT_OUTLIER_THRESHOLD = 0.10
 
 
 @app.get("/")
@@ -168,6 +178,34 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
     # each other, so we just persist one of them.
     results = await asyncio.gather(*[run(size_g=s) for s in sizes])
 
+    # Refuse to persist a snapshot if any run's FX lookup fell back to the
+    # static fallback in fx.py — that rate gets stale fast and even a ~7%
+    # gap from live silently corrupts every premium calc downstream, since
+    # bar_snapshots / coin_snapshots store the bad spot per row and history
+    # is recomputed from those columns forever. See incident 2026-05-14
+    # where one stale tick warped every dealer's premium chart for one
+    # tick. The /spot live endpoint can still serve the stale fallback —
+    # it disappears on the next 30s refresh — but the cron must NEVER bake
+    # a stale value into history. The cron retries in 20 min.
+    if any(r.fx_stale for r in results):
+        skipped_at = now_utc()
+        logger.warning(
+            "snapshot_skipped %s",
+            json.dumps({
+                "event": "snapshot_skipped",
+                "reason": "fx_stale",
+                "fetched_at": skipped_at.isoformat(),
+                "stale_sizes": [r.size_g for r in results if r.fx_stale],
+                "sizes_attempted": sizes,
+            }),
+        )
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "fx_stale",
+            "fetched_at": skipped_at.isoformat(),
+        }
+
     # Single canonical timestamp for the whole snapshot — easier to query
     # than keeping each Listing's individual fetched_at.
     fetched_at = now_utc()
@@ -177,6 +215,62 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
         if first_with_spot is not None and first_with_spot.spot is not None
         else None
     )
+
+    # Outlier guard: catches whatever the fx_stale check misses (a bad
+    # gold-api response, a Frankfurter return value that's wrong but didn't
+    # error, a future unit-change at an upstream API). Compares the new
+    # gold spot to the most recent spot_snapshots row within the last hour.
+    # Threshold is generous on purpose — gold rarely moves more than a few
+    # % in 20 minutes even during news events, but a 31x unit flip, a
+    # near-zero glitch, or a ~10% data corruption would all be caught. See
+    # CLAUDE.md "Conventions / gotchas" for the rationale + tuning notes.
+    #
+    # Non-transactional read is intentional: this is a single-runner cron
+    # (QStash gives us strict serial delivery), so there's no concurrent
+    # /snapshot writer to race with. Widening this into a transaction would
+    # mean holding a connection open across the scraper fan-out — bad.
+    # If we ever lose single-runner serialization, swap this for SELECT FOR
+    # UPDATE on a sentinel row or a unique constraint on (fetched_at::minute).
+    if spot_gold_dkk is not None:
+        async with pool.acquire() as guard_conn:
+            prev = await guard_conn.fetchrow(
+                """
+                SELECT gold_dkk_per_g FROM spot_snapshots
+                WHERE fetched_at >= NOW() - INTERVAL '60 minutes'
+                  AND gold_dkk_per_g IS NOT NULL
+                ORDER BY fetched_at DESC LIMIT 1
+                """
+            )
+        # No prior row in the 60-min window → accept whatever the upstream
+        # returned. Outage recovery depends on this: after a long downtime,
+        # the first tick has no baseline and must be allowed through;
+        # subsequent ticks 20 min later then compare against it.
+        # `prev_val > 0` guards against a (hypothetical) zero baseline from
+        # pre-fix legacy rows that would otherwise ZeroDivisionError below.
+        if prev is not None:
+            prev_val = float(prev["gold_dkk_per_g"])
+            new_val = float(spot_gold_dkk)
+            if prev_val > 0:
+                deviation = abs(new_val - prev_val) / prev_val
+                if deviation > SNAPSHOT_OUTLIER_THRESHOLD:
+                    logger.warning(
+                        "snapshot_skipped %s",
+                        json.dumps({
+                            "event": "snapshot_skipped",
+                            "reason": "outlier",
+                            "fetched_at": fetched_at.isoformat(),
+                            "new_gold_dkk_per_g": new_val,
+                            "prev_gold_dkk_per_g": prev_val,
+                            "deviation_pct": round(deviation * 100, 3),
+                            "threshold_pct": SNAPSHOT_OUTLIER_THRESHOLD * 100,
+                        }),
+                    )
+                    return {
+                        "ok": False,
+                        "skipped": True,
+                        "reason": "outlier",
+                        "fetched_at": fetched_at.isoformat(),
+                    }
 
     bar_rows = [
         (
