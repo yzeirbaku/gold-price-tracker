@@ -17,7 +17,8 @@ backend/         FastAPI on Render free tier (Python 3.12)
     auth.py            X-API-Key header check (constant-time compare)
     auth_session.py    magic-link auth: issue/verify, sessions, rate limit, require_session
     portfolio.py       per-user purchase CRUD + P&L assembly (cookie-auth)
-    email.py           Resend wrapper for the magic-link email (with MAGIC_LINK_DEV_PRINT bypass)
+    alerts.py          per-user premium-threshold alerts: CRUD + evaluate_alerts hook
+    email.py           Resend wrapper for magic-link + alert emails (with MAGIC_LINK_DEV_PRINT bypass)
     fx.py              USD→EUR/DKK via frankfurter.dev (+ stamped fallback + historical)
     spot.py            current spot via api.gold-api.com; historical via yfinance (GC=F / SI=F)
     orchestrator.py    fan-out bar scrapers, compute premium %, sort
@@ -66,6 +67,7 @@ Postgres tables (Neon in prod, local Docker in dev):
 - `magic_links` — one-time SHA-256-hashed tokens, 15-min TTL, single-use, `created_ip` for rate-limit
 - `sessions` — opaque UUID cookie tokens, 90-day sliding TTL via `last_seen_at`
 - `purchases` — per-user purchase rows; `spot_at_purchase_dkk_per_g` frozen at write
+- `alerts` — per-user premium-threshold alerts; `kind` ∈ {bar, coin}; `muted_until_recovery` + `last_fired_at` carry the fire/recover state machine
 
 ## Endpoints
 
@@ -93,6 +95,7 @@ Postgres tables (Neon in prod, local Docker in dev):
 | DELETE | `/portfolio/{id}` | session cookie | hard delete; 404 if not the caller's row |
 | GET    | `/alerts` | session cookie | list user's alerts + current_min_premium_pct enrichment |
 | GET    | `/alerts/options` | session cookie | bar sizes + coin registry for the dialog dropdowns |
+| GET    | `/alerts/preview` | session cookie | preview current min premium for a prospective target — powers the dialog's "Current: X%" hint |
 | POST   | `/alerts` | session cookie | create; bar requires size_g, coin requires (coin_type, fine_gold_g) |
 | PATCH  | `/alerts/{id}` | session cookie | edit threshold/enabled; threshold change resets muted state |
 | DELETE | `/alerts/{id}` | session cookie | hard delete; 404 if not the caller's row |
@@ -217,14 +220,16 @@ the `connect-src` URL if the backend host ever changes.
 
 Logged-in users can subscribe to **email alerts** that fire when a
 cross-dealer minimum premium drops below a configured threshold. One
-new table (`alerts`) + one module (`app/alerts.py`); evaluation
-piggybacks on `/snapshot` after persistence so the fx_stale + outlier
-guards already gate it. Endpoints:
+new table (`alerts`) + one module (`app/alerts.py`); evaluation is
+called from `/snapshot` *after* the snapshot transaction commits — the
+fx_stale + outlier guards have already gated whatever data lands in
+the just-persisted bar_rows/coin_rows. Endpoints:
 
 | Method | Path | Notes |
 |---|---|---|
-| GET    | `/alerts` | list user's alerts (with `current_min_premium_pct` + `current_best_dealer` enrichment from the most recent snapshot row) |
+| GET    | `/alerts` | list user's alerts (with `current_min_premium_pct` + `current_best_dealer` enrichment from the most recent snapshot row within 90 min) |
 | GET    | `/alerts/options` | bar sizes + coin registry (used by the dialog dropdowns; one-shot at view-open) |
+| GET    | `/alerts/preview` | look up the current cross-dealer min for a prospective target (`?kind=bar&size_g=10` or `?kind=coin&coin_type=Krugerrand&fine_gold_g=15.55`). Powers the "Current: 8.34% (Dealer)" hint inside the add/edit dialog so the user can pick a sensible threshold without alt-tabbing. |
 | POST   | `/alerts` | create; bar requires `size_g`, coin requires `(coin_type, fine_gold_g)`. The CHECK constraint on the table enforces shape; `_validate_kind_payload` returns a clean 400 first. |
 | PATCH  | `/alerts/{id}` | edit threshold or enabled flag. Threshold edits **reset** `muted_until_recovery=FALSE` so a 7%→6% change doesn't stay stuck muted. |
 | DELETE | `/alerts/{id}` | hard delete; 404 if not the caller's row |
@@ -233,7 +238,11 @@ guards already gate it. Endpoints:
 `(coin_type, fine_gold_g)`. Premium is min across all `status='ok'` rows
 in the just-persisted tick. The unit of matching is "what a buyer cares
 about" — they want any 10g bar / any 1/2oz Krugerrand below threshold,
-not a specific dealer.
+not a specific dealer. The `coins.resolve` function and
+`alerts._index_coin_mins` MUST agree on the `round(_, 4)` /
+`.quantize(Decimal("0.0001"))` for fine_gold_g, otherwise alert matching
+silently buckets the same coin differently — there's a comment on
+`coins.resolve` reminding future-you of the invariant.
 
 **Dedup / state machine.** Each alert has a `muted_until_recovery` flag.
 On fire: email sent → flag set TRUE + `last_fired_at = NOW()`. On any
@@ -251,14 +260,17 @@ events log `alert_email_throttled` (structured JSON for Render grep).
 **Failure isolation.** If Resend fails for one user, their alerts stay
 **un-muted** so the next tick retries; other users still get their
 emails. Logged as `alert_email_failed` with user_id + alert_ids.
-Evaluation is inside the `/snapshot` transaction but Resend calls
-happen via try/except — Resend hiccup does NOT roll back the snapshot.
+Evaluation runs *after* the snapshot transaction commits — so a slow or
+hanging Resend HTTP call cannot hold the snapshot connection open and
+cannot roll back snapshot data on timeout. The Resend SDK is synchronous;
+`send_alert_email` wraps it in `asyncio.to_thread` so a slow upstream
+blocks only the helper task, not the event loop.
 
 **Why piggyback on `/snapshot`.** Fresh data already in scope (zero
-extra DB read for the per-tick eval), atomic with the persistence
-(no race where we alert on data that wasn't recorded), one scheduler
-to manage. 20-min cadence is the natural alert latency — fine for
-this use case.
+extra DB read for the per-tick eval) and serial with the persistence
+(snapshot lands first; alerts evaluate against that committed data).
+One scheduler to manage. 20-min cadence is the natural alert latency —
+fine for this use case.
 
 ## Cron
 

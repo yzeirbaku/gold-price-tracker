@@ -210,6 +210,14 @@ def resolve(title: str) -> tuple[str, str, float, float, float] | None:
     On a coin_type alias hit but no matching size, we *continue* trying other
     coin_types — so a title like "Britannia Sovereign 2024" can fall through
     to Sovereign even if Britannia matches first.
+
+    INVARIANT: fine_gold_g is computed via `round(gross_g * purity, 4)` and
+    that 4-decimal rounding MUST stay in sync with
+    `alerts._index_coin_mins`'s `.quantize(Decimal("0.0001"))`. If you ever
+    change this rounding rule (or write a coin scraper that synthesizes
+    fine_gold_g without calling this function), update the alerts side too —
+    otherwise alert matching can silently bucket the same coin differently
+    on the scrape side vs the lookup side.
     """
     if not title:
         return None

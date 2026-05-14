@@ -4,6 +4,8 @@ Two helpers: send_magic_link (auth) and send_alert_email (premium alerts).
 Dev mode (MAGIC_LINK_DEV_PRINT=1) bypasses Resend for BOTH helpers and logs
 to stdout — saves quota and avoids needing a real inbox during local testing.
 """
+import asyncio
+import html
 import logging
 import os
 
@@ -110,8 +112,10 @@ async def send_alert_email(to_email: str, fires: list[dict]) -> None:
     html_body = _alert_html_body(fires)
     text_body = _alert_text_body(fires)
 
+    # Resend SDK is synchronous (blocking requests). Push it to a worker
+    # thread so a slow upstream blocks only this task, not the event loop.
     try:
-        resend.Emails.send({
+        await asyncio.to_thread(resend.Emails.send, {
             "from": from_addr,
             "to": [to_email],
             "subject": subject,
@@ -146,18 +150,24 @@ def _alert_html_body(fires: list[dict]) -> str:
     line_style = "margin: 4px 0; color: #444; font-size: 0.95em;"
     premium_style = "color: #2a6e2a; font-weight: 600;"
 
+    # Defense in depth: target + best_dealer both originate from scraper /
+    # registry data. They're trusted today (dealer names come from our own
+    # config), but escaping ensures a future scraper sourcing those from
+    # page content cannot inject HTML into anyone's inbox.
     sections = []
     for f in fires:
         price_fmt = f"{int(round(f['price_dkk'])):,}".replace(",", ".")
+        target_safe = html.escape(str(f["target"]))
+        dealer_safe = html.escape(str(f["best_dealer"]))
         sections.append(
             f'<div style="{card_style}">'
-            f'  <p style="{target_style}">▼ {f["target"]}</p>'
+            f'  <p style="{target_style}">▼ {target_safe}</p>'
             f'  <p style="{line_style}">'
             f'    Currently <span style="{premium_style}">{f["current_premium_pct"]:.2f}%</span> '
             f'    premium (you wanted ≤ {f["threshold_pct"]:.2f}%)'
             f'  </p>'
             f'  <p style="{line_style}">'
-            f'    Best: <strong>{f["best_dealer"]}</strong> at {price_fmt} dkk'
+            f'    Best: <strong>{dealer_safe}</strong> at {price_fmt} dkk'
             f'  </p>'
             f'</div>'
         )

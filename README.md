@@ -1,6 +1,6 @@
 # Gold Prices Tracker
 
-Personal tool to compare gold-bar prices (2.5 / 5 / 10 / 20 g) and gold-coin prices (≤ 20 g of fine gold) across Danish online dealers, plus live spot prices for gold and silver. Optional sign-in unlocks a per-user portfolio with live P&L.
+Personal tool to compare gold-bar prices (2.5 / 5 / 10 / 20 g) and gold-coin prices (≤ 20 g of fine gold) across Danish online dealers, plus live spot prices for gold and silver. Optional sign-in unlocks a per-user portfolio with live P&L and per-user email alerts when a bar or coin drops below a chosen premium threshold.
 
 ## Architecture
 
@@ -51,8 +51,14 @@ Coin coverage is bullion-only via a static registry in `backend/app/coins.py`: K
 | POST | `/portfolio`                                                 | create a purchase; freezes historical spot at write time |
 | PATCH | `/portfolio/{id}`                                           | edit; re-freezes spot if `purchased_at` or `metal` change |
 | DELETE | `/portfolio/{id}`                                          | hard delete; 404 if not the caller's row |
+| GET    | `/alerts`                                                  | current user's premium-threshold alerts + live "Current" enrichment |
+| GET    | `/alerts/options`                                          | bar sizes + coin registry for the add/edit dialog dropdowns |
+| GET    | `/alerts/preview`                                          | preview current min premium for a prospective target (used by the dialog hint) |
+| POST   | `/alerts`                                                  | create an alert (bar by `size_g`, coin by `(coin_type, fine_gold_g)`) |
+| PATCH  | `/alerts/{id}`                                             | edit threshold/enabled; threshold edits reset muted state |
+| DELETE | `/alerts/{id}`                                             | hard delete; 404 if not the caller's row |
 
-Endpoints up through `/health` use `X-API-Key` (legacy shared secret). The `/auth/*` and `/portfolio*` endpoints use a session cookie set during magic-link verification. Both schemes coexist — the site works fully without signing in.
+Endpoints up through `/health` use `X-API-Key` (legacy shared secret). The `/auth/*`, `/portfolio*`, and `/alerts*` endpoints use a session token sent as `Authorization: Bearer <token>`. Both schemes coexist — the site works fully without signing in.
 
 ## Local dev
 
@@ -111,6 +117,33 @@ Optional sign-in unlocks a per-user portfolio. Anyone with a valid email can sig
 A strict CSP in `frontend/_headers` limits script and connect origins to mitigate the XSS surface that comes with localStorage-stored tokens.
 
 The site continues to work fully without signing in — the existing X-API-Key endpoints (prices, history, spot, coins, reports) are untouched.
+
+## Alerts
+
+Logged-in users can configure email alerts that fire when a cross-dealer
+minimum premium drops below a chosen threshold. ☰ menu → **Alerts** →
+**+ Add alert** lets you watch a specific bar size (e.g. 10g) or coin
+variant (e.g. 1/2oz Krugerrand). The dialog previews the current min
+premium for the target so you can pick a sensible threshold.
+
+**How it fires.** After every successful `/snapshot` tick (20 min via
+QStash), `app/alerts.py:evaluate_alerts` computes the min premium per
+(size_g) for bars and per (coin_type, fine_gold_g) for coins from the
+just-persisted rows. Each enabled alert whose target's min premium hits
+≤ threshold and is not already muted gets emailed and flipped to muted.
+On a later tick where premium climbs back above `threshold + 0.5%`
+(hysteresis), the alert re-arms.
+
+Multiple alerts triggering for the same user on the same tick get
+bundled into one email. Per-user cap of 8 fire-events per rolling hour
+prevents flapping watches from spamming. Resend failures leave the
+alert un-muted so the next tick retries. The Resend HTTP call happens
+*after* the snapshot transaction commits — a hung upstream cannot roll
+back snapshot data.
+
+Resend dev-mode (`MAGIC_LINK_DEV_PRINT=1`) bypasses the SDK for both
+magic-link AND alert emails and logs the would-be subject + recipient
+to stdout. Useful for testing without burning quota.
 
 ## Reports
 

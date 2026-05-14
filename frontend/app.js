@@ -1870,11 +1870,19 @@ function renderAlerts() {
   emptyEl.hidden = true;
   tableEl.hidden = false;
   tbody.innerHTML = alertsCache.map((a) => {
+    // Kind column: Title-case to match the radio button labels in the dialog.
+    const kind = a.kind === 'bar' ? 'Bar' : 'Coin';
+    // Target column: just size for bars (no redundant "bar"; the Kind column
+    // already carries that). For coins: coin type + size, dimmed fine weight.
     const target = a.kind === 'bar'
-      ? `${formatBarSize(a.size_g)} g bar`
+      ? `${formatBarSize(a.size_g)} g`
       : `${escapeHtml(a.coin_type)} <span class="muted-tiny">(${formatFineG(a.fine_gold_g)} g fine)</span>`;
+    // Keep the row narrow enough to fit phone widths without overflow —
+    // dealer was duplicated info anyway (it's right there in the email
+    // when the alert fires, and a hover/tap on the alert detail can
+    // surface it later). Just the % is enough at-a-glance.
     const current = a.current_min_premium_pct != null
-      ? `${a.current_min_premium_pct.toFixed(2)}% <span class="muted-tiny">${escapeHtml(a.current_best_dealer || '')}</span>`
+      ? `${a.current_min_premium_pct.toFixed(2)}%`
       : '<span class="muted-tiny">—</span>';
     let statusCls = 'status-disabled';
     let statusTitle = 'Disabled';
@@ -1886,7 +1894,7 @@ function renderAlerts() {
     }
     return `
       <tr class="alert-row" data-id="${a.id}">
-        <td>${a.kind}</td>
+        <td>${kind}</td>
         <td>${target}</td>
         <td>≤ ${Number(a.threshold_pct).toFixed(2)}%</td>
         <td>${current}</td>
@@ -1904,7 +1912,7 @@ function renderAlerts() {
 
 function formatBarSize(g) {
   // Match the size labels used elsewhere (2.5 / 5 / 10 / 20).
-  return Number(g) % 1 === 0 ? String(Number(g)) : Number(g).toString();
+  return String(Number(g));
 }
 function formatFineG(g) {
   return Number(g).toFixed(2).replace(/\.?0+$/, '');
@@ -1938,12 +1946,18 @@ $('#alerts-table tbody').addEventListener('click', async (e) => {
         method: 'DELETE', headers: authHeaders(),
       });
       if (!res.ok && res.status !== 204) {
-        alert(`Delete failed (status ${res.status})`);
+        await infoDialog({
+          title: 'Delete failed',
+          message: `Could not delete alert (status ${res.status}). Try again in a moment.`,
+        });
         return;
       }
       await loadAlerts();
     } catch (err) {
-      alert(`Delete failed: ${err.message}`);
+      await infoDialog({
+        title: 'Delete failed',
+        message: `Network error: ${err.message}`,
+      });
     }
   }
 });
@@ -1964,9 +1978,9 @@ function openAlertDialog(mode, existing = null) {
     $(`input[name="alert-kind"][value="${existing.kind}"]`).checked = true;
     switchAlertKind(existing.kind);
     if (existing.kind === 'bar') {
-      $('#alert-bar-size').value = String(existing.size_g);
+      setDropdownValue($('#alert-bar-size'), String(existing.size_g), `${existing.size_g} g`);
     } else {
-      $('#alert-coin-type').value = existing.coin_type;
+      setDropdownValue($('#alert-coin-type'), existing.coin_type, existing.coin_type);
       refreshCoinSizeOptions(existing.coin_type, existing.fine_gold_g);
     }
     $('#alert-threshold').value = Number(existing.threshold_pct).toFixed(2);
@@ -1979,53 +1993,160 @@ function openAlertDialog(mode, existing = null) {
     $('#alert-enabled').checked = true;
   }
   $('#alert-error').hidden = true;
+  refreshAlertPreview();
   $('#alert-dialog').showModal();
 }
 
-function populateAlertDialogOptions(opts) {
-  const barSel = $('#alert-bar-size');
-  barSel.innerHTML = opts.bar_sizes.map((s) => `<option value="${s}">${s} g</option>`).join('');
-  const coinTypeSel = $('#alert-coin-type');
-  coinTypeSel.innerHTML = (opts.coin_options || [])
-    .map((co) => `<option value="${escapeHtml(co.coin_type)}">${escapeHtml(co.coin_type)}</option>`)
+// Render items into a .dd container's <ul>. `items` is [{value, label}] and
+// `preselect` is the value string to mark selected. Reuses setDropdownValue
+// (originally written for the reports filters) so both screens share the
+// same render / selection plumbing — the .dd component is centralized.
+function setDdItems(root, items, preselect = null) {
+  const list = root.querySelector('.dd-list');
+  list.innerHTML = items
+    .map((it) => `<li data-value="${escapeHtml(String(it.value))}">${escapeHtml(it.label)}</li>`)
     .join('');
-  // Default to first coin type's sizes
+  let target = null;
+  if (preselect != null) {
+    target = items.find((it) => String(it.value) === String(preselect)) || null;
+  }
+  if (target == null && items.length) target = items[0];
+  if (target) {
+    setDropdownValue(root, String(target.value), target.label);
+  } else {
+    setDropdownValue(root, '', root.querySelector('.dd-trigger').textContent);
+  }
+}
+
+function populateAlertDialogOptions(opts) {
+  setDdItems(
+    $('#alert-bar-size'),
+    opts.bar_sizes.map((s) => ({ value: s, label: `${s} g` })),
+  );
+  setDdItems(
+    $('#alert-coin-type'),
+    (opts.coin_options || []).map((co) => ({ value: co.coin_type, label: co.coin_type })),
+  );
   if (opts.coin_options && opts.coin_options.length) {
     refreshCoinSizeOptions(opts.coin_options[0].coin_type);
   }
-  coinTypeSel.addEventListener('change', (e) => {
-    refreshCoinSizeOptions(e.target.value);
-  }, { once: false });
 }
 
 function refreshCoinSizeOptions(coinType, preselectFine = null) {
   const opts = alertsOptions || { coin_options: [] };
   const entry = (opts.coin_options || []).find((c) => c.coin_type === coinType);
-  const sizeSel = $('#alert-coin-size');
+  const root = $('#alert-coin-size');
   if (!entry) {
-    sizeSel.innerHTML = '<option value="">—</option>';
+    setDdItems(root, []);
     return;
   }
-  sizeSel.innerHTML = entry.sizes
-    .map((s) => `<option value="${s.fine_gold_g}">${escapeHtml(s.size_label)} (${s.fine_gold_g.toFixed(2)} g)</option>`)
-    .join('');
+  const items = entry.sizes.map((s) => ({
+    value: s.fine_gold_g,
+    label: `${s.size_label} (${s.fine_gold_g.toFixed(2)} g)`,
+  }));
+  let preselect = null;
   if (preselectFine != null) {
-    // Pick the dropdown entry within 0.005g of the requested fine weight.
     const target = Number(preselectFine);
     const match = entry.sizes.find((s) => Math.abs(s.fine_gold_g - target) < 0.005);
-    if (match) sizeSel.value = String(match.fine_gold_g);
+    if (match) preselect = String(match.fine_gold_g);
   }
+  setDdItems(root, items, preselect);
 }
 
 function switchAlertKind(kind) {
   $('#alert-bar-fields').hidden = kind !== 'bar';
   $('#alert-coin-type-field').hidden = kind !== 'coin';
   $('#alert-coin-size-field').hidden = kind !== 'coin';
+  refreshAlertPreview();
+}
+
+// Hint shown inside the add/edit modal: "Current: 8.34% (Vitus Guld)" — looks
+// up the same min-premium-in-last-6h that the alerts table column uses, so
+// the user can pick a sensible threshold without alt-tabbing to the bars
+// or coins view first. Cancels any in-flight fetch when the target changes.
+let alertPreviewRequest = 0;
+
+// Minimum time the spinner+"Fetching current premium…" state stays on screen
+// before flipping to the result. Local DB lookups return in tens of ms which
+// makes the loading flash too quickly to read; this floor turns it into a
+// readable beat. Matches the loading-msg cadence used elsewhere in the app.
+const ALERT_PREVIEW_MIN_LOAD_MS = 550;
+
+function refreshAlertPreview() {
+  const previewEl = $('#alert-preview');
+  const kind = document.querySelector('input[name="alert-kind"]:checked')?.value;
+  if (!kind) { previewEl.hidden = true; return; }
+  let qs;
+  if (kind === 'bar') {
+    const size = $('#alert-bar-size').dataset.value;
+    if (!size) { previewEl.hidden = true; return; }
+    qs = `kind=bar&size_g=${encodeURIComponent(size)}`;
+  } else {
+    const coinType = $('#alert-coin-type').dataset.value;
+    const fine = $('#alert-coin-size').dataset.value;
+    if (!coinType || !fine) { previewEl.hidden = true; return; }
+    qs = `kind=coin&coin_type=${encodeURIComponent(coinType)}&fine_gold_g=${encodeURIComponent(fine)}`;
+  }
+  previewEl.hidden = false;
+  previewEl.classList.add('is-loading');
+  previewEl.innerHTML =
+    '<div class="spinner"><span></span><span></span><span></span></div>' +
+    '<div class="loading-text">Fetching current premium…</div>';
+  const reqId = ++alertPreviewRequest;
+  const startedAt = Date.now();
+
+  const settle = (renderFn) => {
+    if (reqId !== alertPreviewRequest) return;  // a newer request superseded
+    const elapsed = Date.now() - startedAt;
+    const remaining = Math.max(0, ALERT_PREVIEW_MIN_LOAD_MS - elapsed);
+    setTimeout(() => {
+      if (reqId !== alertPreviewRequest) return;
+      previewEl.classList.remove('is-loading');
+      renderFn();
+    }, remaining);
+  };
+
+  fetch(`${BACKEND_URL}/alerts/preview?${qs}`, { headers: authHeaders() })
+    .then((r) => {
+      if (r.status === 401) {
+        // Session expired between opening the dialog and the preview
+        // resolving. Kick the user back to sign-in like /alerts list does
+        // — preserves the auth invariant across the page.
+        $('#alert-dialog').close();
+        clearSessionToken(); currentUser = null; updateAuthUI();
+        showPricesView(); openLoginDialog();
+        return null;
+      }
+      return r.ok ? r.json() : null;
+    })
+    .then((data) => settle(() => {
+      if (!data || data.current_min_premium_pct == null) {
+        previewEl.innerHTML = 'Current: <span class="muted-tiny">no recent data</span>';
+        return;
+      }
+      previewEl.innerHTML =
+        `Current: <strong>${data.current_min_premium_pct.toFixed(2)}%</strong> ` +
+        `<span class="muted-tiny">${escapeHtml(data.current_best_dealer || '')}</span>`;
+    }))
+    .catch(() => settle(() => {
+      previewEl.innerHTML = 'Current: <span class="muted-tiny">unavailable</span>';
+    }));
 }
 
 document.querySelectorAll('input[name="alert-kind"]').forEach((r) => {
   r.addEventListener('change', (e) => switchAlertKind(e.target.value));
 });
+
+// Coin-type cascade: changing the Coin Type dropdown refreshes the Coin
+// Size dropdown to the matching variants from the registry. .dd dispatches
+// dd:change on selection — we listen at the root and dispatch a refresh.
+$('#alert-coin-type').addEventListener('dd:change', (e) => {
+  const coinType = e.currentTarget.dataset.value;
+  if (coinType) refreshCoinSizeOptions(coinType);
+  refreshAlertPreview();
+});
+$('#alert-bar-size').addEventListener('dd:change', () => refreshAlertPreview());
+$('#alert-coin-size').addEventListener('dd:change', () => refreshAlertPreview());
 
 $('#alerts-add-btn').addEventListener('click', () => {
   openAlertDialog({ kind: 'add' });
@@ -2065,10 +2186,23 @@ $('#alert-form').addEventListener('submit', async (e) => {
   } else {
     payload = { kind, threshold_pct: threshold };
     if (kind === 'bar') {
-      payload.size_g = parseFloat($('#alert-bar-size').value);
+      const v = $('#alert-bar-size').dataset.value;
+      if (!v) {
+        errEl.textContent = 'Pick a bar size.';
+        errEl.hidden = false;
+        return;
+      }
+      payload.size_g = parseFloat(v);
     } else {
-      payload.coin_type = $('#alert-coin-type').value;
-      payload.fine_gold_g = parseFloat($('#alert-coin-size').value);
+      const coinType = $('#alert-coin-type').dataset.value;
+      const fine = $('#alert-coin-size').dataset.value;
+      if (!coinType || !fine) {
+        errEl.textContent = 'Pick a coin type and size.';
+        errEl.hidden = false;
+        return;
+      }
+      payload.coin_type = coinType;
+      payload.fine_gold_g = parseFloat(fine);
     }
   }
 

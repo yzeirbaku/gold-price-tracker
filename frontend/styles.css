@@ -395,6 +395,48 @@ dialog input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0
   accent-color: var(--accent);
   margin: 0; width: auto;
 }
+
+/* Custom checkbox — matches the theme. Hide the native input, render a
+   styled box that flips to the accent gradient + checkmark when :checked.
+   Used inside dialogs alongside .theme-option radios for visual consistency. */
+.checkbox-option {
+  display: inline-flex; align-items: center; gap: 0.55rem;
+  margin: 0.35rem 1rem 0.1rem 0;
+  font-size: 0.9rem; color: var(--fg-soft); cursor: pointer;
+  user-select: none;
+}
+.checkbox-option input[type="checkbox"] {
+  /* Visually hide but keep accessible. Replace with .checkbox-box render. */
+  position: absolute; opacity: 0; pointer-events: none;
+}
+.checkbox-box {
+  display: inline-block;
+  width: 0.85rem; height: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  position: relative;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.checkbox-option input[type="checkbox"]:checked + .checkbox-box {
+  background: linear-gradient(180deg, var(--btn-active-top) 0%, var(--btn-active-bottom) 100%);
+  border-color: var(--btn-active-bottom);
+}
+.checkbox-option input[type="checkbox"]:checked + .checkbox-box::after {
+  /* Checkmark — sized to the dark accent shadow so it's legible against the
+     gold gradient without a separate svg. */
+  content: "";
+  position: absolute;
+  left: 0.24rem; top: 0.06rem;
+  width: 0.22rem; height: 0.44rem;
+  border-right: 1.5px solid #1a1300;
+  border-bottom: 1.5px solid #1a1300;
+  transform: rotate(45deg);
+}
+.checkbox-option input[type="checkbox"]:focus-visible + .checkbox-box {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
 dialog menu {
   display: flex; gap: 0.5rem; justify-content: flex-end;
   margin: 1rem 0 0; padding: 0;
@@ -638,9 +680,22 @@ tr.history-row > td {
 /* Subtle yellow tint on hover and current selection — much lighter than the
    solid bar-size button gradient so the dropdown feels softer, and shifted
    toward true yellow (rather than honey/beige) for more visual punch. */
-.dd-list li:hover { background: rgba(255, 224, 32, 0.20); }
-.dd-list li.selected { background: rgba(255, 224, 32, 0.32); }
-.dd-list li.selected:hover { background: rgba(255, 224, 32, 0.40); }
+/* Yellow tint on dropdown options. Base colour pushed all the way to
+   pure yellow (#FFF500) so the highlight reads unambiguously yellow against
+   the dark surface — earlier honey/amber shades drifted toward beige.
+   Hover-on-selected intentionally stays flat (no double-highlight): once
+   a row is the chosen one, moving the cursor over it doesn't change it.
+   Used by every .dd dropdown (reports filters, alerts dialog). */
+.dd-list li:hover { background: rgba(255, 245, 0, 0.22); }
+.dd-list li.selected,
+.dd-list li.selected:hover { background: rgba(255, 245, 0, 0.36); }
+
+/* Full-width variant for inline-in-fieldset usage (alerts dialog). The
+   default .dd uses display:inline-block + min-width:7rem; inside a tall
+   stacked dialog we want it to fill the field row. */
+.dd.dd-fullwidth { display: block; min-width: 0; width: 100%; }
+.dd.dd-fullwidth .dd-trigger { width: 100%; text-align: left; }
+.dd.dd-fullwidth .dd-list { left: 0; right: 0; }
 
 /* When an archive section is a <details>, the <summary> must sit on one
    line. The <h2> inside gets normalized so the disclosure triangle stays
@@ -914,6 +969,65 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
 }
 .row-delete:hover { color: var(--error, #e85a5a); }
+
+/* Alerts page header — title flush left, button flush right, description
+   on its own line below. The base .results-head uses justify-content:
+   flex-end which packs both children to the right; we override to
+   space-between for this card so the title gets the left margin it needs. */
+#alerts-summary .results-head { justify-content: space-between; }
+#alerts-summary .results-head h2 { margin: 0; }
+#alerts-summary .muted-tiny { margin: 0.5rem 0 0; }
+
+/* Modal preview line — shows "Current: 8.34% (Vitus Guld)" or a fetching
+   placeholder so the user can pick a sensible threshold without leaving
+   the dialog. */
+.alert-preview {
+  margin: 0.5rem 0 0;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface-2, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+.alert-preview strong { color: var(--fg); }
+/* Loading state — spinner above a smaller "Fetching…" line, vertically
+   centered inside the preview chip. Same spinner element used everywhere
+   else in the app; consistent feel + a deliberate min-display time
+   (ALERT_PREVIEW_MIN_LOAD_MS in app.js) so the state is readable instead
+   of flashing past. */
+.alert-preview.is-loading {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+}
+.alert-preview.is-loading .spinner { transform: scale(0.7); transform-origin: left center; }
+.alert-preview.is-loading .loading-text { font-size: 0.8rem; }
+
+/* Alerts table — uses the base table full-bleed layout from line 258
+   (negative-margins to extend across the card padding, first/last cell
+   paddings to re-indent content). Don't override width here. Just
+   collapse the Status + Actions columns to content-width so the Target
+   column gets the extra room on narrow viewports. Long coin targets
+   (e.g., "Krugerrand (15.55 g fine)") wrap inside the cell rather than
+   stretching the column. */
+#alerts-table tr.alert-row td:nth-child(5),
+#alerts-table thead th:nth-child(5),
+#alerts-table tr.alert-row td:nth-child(6),
+#alerts-table thead th:nth-child(6) {
+  width: 1%;
+  white-space: nowrap;
+}
+#alerts-table tr.alert-row td:nth-child(2) { white-space: normal; }
+@media (max-width: 480px) {
+  /* Tighten cell padding on phones so 6 columns fit without horizontal
+     overflow. Keep first/last cell paddings smaller too. */
+  #alerts-table th, #alerts-table td {
+    padding: 0.5rem 0.22rem;
+    font-size: 0.82rem;
+  }
+  #alerts-table th:first-child, #alerts-table td:first-child { padding-left: 0.85rem; }
+  #alerts-table th:last-child, #alerts-table td:last-child { padding-right: 0.85rem; }
+  #alerts-table th { font-size: 0.62rem; }
+}
 
 /* Alerts table — same compact layout as portfolio + status dot column.
    Last column right-aligned so the edit/delete buttons hug the right edge. */

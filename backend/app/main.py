@@ -364,14 +364,13 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
                     """,
                     coin_rows,
                 )
-            # Alerts evaluation runs *inside* the same transaction as the
-            # INSERTs so state changes (muted_until_recovery, last_fired_at)
-            # stay atomic with the snapshot data they reflect. The fx_stale
-            # and outlier guards above already gated us; whatever lands here
-            # is data the alerts can trust. Failure inside evaluate_alerts
-            # (network hiccup to Resend, etc.) is logged and swallowed
-            # per-user — it does NOT roll back the snapshot.
-            await evaluate_alerts(conn, fetched_at, bar_rows, coin_rows)
+    # Alerts evaluation runs *after* the snapshot transaction commits — so a
+    # hung Resend HTTP call cannot hold the snapshot connection open and
+    # cannot roll back the snapshot data on timeout. evaluate_alerts acquires
+    # its own short-lived connections per write. The fx_stale and outlier
+    # guards above already gated us; whatever evaluate_alerts reads from the
+    # just-committed bar_rows/coin_rows is data we trust.
+    await evaluate_alerts(pool, fetched_at, bar_rows, coin_rows)
 
     return {
         "ok": True,

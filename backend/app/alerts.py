@@ -113,45 +113,65 @@ def _row_to_json(row: dict) -> dict:
     return row
 
 
+async def _fetch_current_bar(conn: Any, size_g: Decimal) -> dict | None:
+    """Lowest current bar premium for size_g from the last 90 minutes of
+    bar_snapshots. Returns {premium_pct, dealer} or None if no recent row.
+
+    The 90-min window covers ~4 missed cron ticks while still surfacing real
+    outages — if the cron is healthy the most recent row is < 20 min old, so
+    the "—" placeholder beyond that genuinely means "we haven't snapshotted
+    recently". A wider window would silently mask broken cron with hours-old
+    data labeled the same as fresh."""
+    return await conn.fetchrow(
+        """
+        SELECT dealer,
+          (price_dkk - spot_gold_dkk_per_g * size_g) /
+          (spot_gold_dkk_per_g * size_g) * 100 AS premium_pct
+        FROM bar_snapshots
+        WHERE size_g = $1 AND status = 'ok'
+          AND price_dkk IS NOT NULL AND spot_gold_dkk_per_g IS NOT NULL
+          AND spot_gold_dkk_per_g > 0
+          AND fetched_at >= NOW() - INTERVAL '90 minutes'
+        ORDER BY (price_dkk - spot_gold_dkk_per_g * size_g) /
+                 (spot_gold_dkk_per_g * size_g) ASC
+        LIMIT 1
+        """,
+        size_g,
+    )
+
+
+async def _fetch_current_coin(
+    conn: Any, coin_type: str, fine_gold_g: Decimal,
+) -> dict | None:
+    """Lowest current coin premium for (coin_type, fine_gold_g) from the last
+    90 minutes. Same window rationale as _fetch_current_bar. 0.005g
+    tolerance on fine_gold_g matches the history endpoint."""
+    return await conn.fetchrow(
+        """
+        SELECT dealer,
+          (price_dkk - spot_gold_dkk_per_g * fine_gold_g) /
+          (spot_gold_dkk_per_g * fine_gold_g) * 100 AS premium_pct
+        FROM coin_snapshots
+        WHERE coin_type = $1
+          AND ABS(fine_gold_g - $2::numeric) < 0.005
+          AND status = 'ok'
+          AND price_dkk IS NOT NULL AND spot_gold_dkk_per_g IS NOT NULL
+          AND spot_gold_dkk_per_g > 0
+          AND fetched_at >= NOW() - INTERVAL '90 minutes'
+        ORDER BY (price_dkk - spot_gold_dkk_per_g * fine_gold_g) /
+                 (spot_gold_dkk_per_g * fine_gold_g) ASC
+        LIMIT 1
+        """,
+        coin_type, fine_gold_g,
+    )
+
+
 async def _decorate_with_current(conn: Any, row: dict) -> dict:
-    """Tack on current_min_premium_pct + current_best_dealer for UI context,
-    pulled from the most-recent snapshot row within the last 30 minutes."""
+    """Tack on current_min_premium_pct + current_best_dealer for UI context."""
     if row["kind"] == "bar":
-        rec = await conn.fetchrow(
-            """
-            SELECT dealer,
-              (price_dkk - spot_gold_dkk_per_g * size_g) /
-              (spot_gold_dkk_per_g * size_g) * 100 AS premium_pct
-            FROM bar_snapshots
-            WHERE size_g = $1 AND status = 'ok'
-              AND price_dkk IS NOT NULL AND spot_gold_dkk_per_g IS NOT NULL
-              AND spot_gold_dkk_per_g > 0
-              AND fetched_at >= NOW() - INTERVAL '30 minutes'
-            ORDER BY (price_dkk - spot_gold_dkk_per_g * size_g) /
-                     (spot_gold_dkk_per_g * size_g) ASC
-            LIMIT 1
-            """,
-            row["size_g"],
-        )
-    else:  # coin
-        rec = await conn.fetchrow(
-            """
-            SELECT dealer,
-              (price_dkk - spot_gold_dkk_per_g * fine_gold_g) /
-              (spot_gold_dkk_per_g * fine_gold_g) * 100 AS premium_pct
-            FROM coin_snapshots
-            WHERE coin_type = $1
-              AND ABS(fine_gold_g - $2::numeric) < 0.005
-              AND status = 'ok'
-              AND price_dkk IS NOT NULL AND spot_gold_dkk_per_g IS NOT NULL
-              AND spot_gold_dkk_per_g > 0
-              AND fetched_at >= NOW() - INTERVAL '30 minutes'
-            ORDER BY (price_dkk - spot_gold_dkk_per_g * fine_gold_g) /
-                     (spot_gold_dkk_per_g * fine_gold_g) ASC
-            LIMIT 1
-            """,
-            row["coin_type"], row["fine_gold_g"],
-        )
+        rec = await _fetch_current_bar(conn, row["size_g"])
+    else:
+        rec = await _fetch_current_coin(conn, row["coin_type"], row["fine_gold_g"])
     out = _row_to_json(row)
     if rec is not None and rec["premium_pct"] is not None:
         out["current_min_premium_pct"] = round(float(rec["premium_pct"]), 2)
@@ -191,6 +211,41 @@ async def list_options(_: AuthedUser = Depends(require_session)) -> dict:
     return {
         "bar_sizes": [float(s) for s in _ALLOWED_BAR_SIZES],
         "coin_options": coin_options,
+    }
+
+
+@router.get("/preview")
+async def preview_current(
+    kind: AlertKind,
+    size_g: Decimal | None = None,
+    coin_type: str | None = None,
+    fine_gold_g: Decimal | None = None,
+    _: AuthedUser = Depends(require_session),
+) -> dict:
+    """Look up the current cross-dealer min premium for a prospective alert
+    target. Powers the "Current: X% (Dealer)" hint inside the add/edit
+    dialog so the user can pick a sensible threshold without alt-tabbing
+    to the prices view first."""
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="database not configured")
+    async with pool.acquire() as conn:
+        if kind == "bar":
+            if size_g is None:
+                raise HTTPException(status_code=400, detail="size_g required for kind=bar")
+            rec = await _fetch_current_bar(conn, size_g)
+        else:
+            if coin_type is None or fine_gold_g is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="coin_type + fine_gold_g required for kind=coin",
+                )
+            rec = await _fetch_current_coin(conn, coin_type, fine_gold_g)
+    if rec is None or rec["premium_pct"] is None:
+        return {"current_min_premium_pct": None, "current_best_dealer": None}
+    return {
+        "current_min_premium_pct": round(float(rec["premium_pct"]), 2),
+        "current_best_dealer": rec["dealer"],
     }
 
 
@@ -363,25 +418,27 @@ def _format_fire(alert: asyncpg.Record, hit: dict) -> dict:
 
 
 async def evaluate_alerts(
-    conn: Any,
+    pool: Any,
     fetched_at: datetime,
     bar_rows: list[tuple],
     coin_rows: list[tuple],
 ) -> None:
-    """Fire/recover alerts and email users. Called from /snapshot inside the
-    same transaction as the INSERTs so state changes are atomic with the
-    data the alerts evaluated against.
+    """Fire/recover alerts and email users. Called from /snapshot AFTER the
+    snapshot transaction commits — Resend HTTP calls happen here and must
+    not be allowed to roll back snapshot data on timeout. Each DB write
+    acquires its own short-lived connection.
 
     Failure isolation: a Resend hiccup for one user does not affect others
     and does not mute their alerts (next tick retries). The whole function
-    swallows nothing else — uncaught exceptions propagate to /snapshot.
+    swallows nothing else — uncaught exceptions propagate to the caller.
     """
     bar_mins = _index_bar_mins(bar_rows)
     coin_mins = _index_coin_mins(coin_rows)
     if not bar_mins and not coin_mins:
         return
 
-    enabled_alerts = await conn.fetch("SELECT * FROM alerts WHERE enabled = TRUE")
+    async with pool.acquire() as conn:
+        enabled_alerts = await conn.fetch("SELECT * FROM alerts WHERE enabled = TRUE")
     if not enabled_alerts:
         return
 
@@ -408,42 +465,47 @@ async def evaluate_alerts(
             to_unmute_ids.append(alert["id"])
 
     if to_unmute_ids:
-        await conn.execute(
-            "UPDATE alerts SET muted_until_recovery = FALSE WHERE id = ANY($1::uuid[])",
-            to_unmute_ids,
-        )
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE alerts SET muted_until_recovery = FALSE WHERE id = ANY($1::uuid[])",
+                to_unmute_ids,
+            )
 
     for user_id, fires in per_user_fires.items():
-        # Per-user rate limit: count of alerts fired in the last hour. A
-        # bundled email of N alerts counts as N. Stops a flapping watch from
-        # carpet-bombing the inbox.
-        recent_fires = await conn.fetchval(
-            """
-            SELECT COUNT(*) FROM alerts
-            WHERE user_id = $1 AND last_fired_at >= NOW() - INTERVAL '1 hour'
-            """,
-            user_id,
-        )
-        if recent_fires and recent_fires >= MAX_FIRES_PER_HOUR_PER_USER:
-            logger.warning(
-                "alert_email_throttled %s",
-                json.dumps({
-                    "event": "alert_email_throttled",
-                    "user_id": str(user_id),
-                    "recent_hour_fires": int(recent_fires),
-                    "cap": MAX_FIRES_PER_HOUR_PER_USER,
-                    "fetched_at": fetched_at.isoformat(),
-                }),
+        async with pool.acquire() as conn:
+            # Per-user rate limit: count of alerts fired in the last hour. A
+            # bundled email of N alerts counts as N. Stops a flapping watch
+            # from carpet-bombing the inbox.
+            recent_fires = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM alerts
+                WHERE user_id = $1 AND last_fired_at >= NOW() - INTERVAL '1 hour'
+                """,
+                user_id,
             )
-            continue
+            if recent_fires and recent_fires >= MAX_FIRES_PER_HOUR_PER_USER:
+                logger.warning(
+                    "alert_email_throttled %s",
+                    json.dumps({
+                        "event": "alert_email_throttled",
+                        "user_id": str(user_id),
+                        "recent_hour_fires": int(recent_fires),
+                        "cap": MAX_FIRES_PER_HOUR_PER_USER,
+                        "fetched_at": fetched_at.isoformat(),
+                    }),
+                )
+                continue
 
-        email_row = await conn.fetchrow(
-            "SELECT email FROM users WHERE id = $1", user_id,
-        )
+            email_row = await conn.fetchrow(
+                "SELECT email FROM users WHERE id = $1", user_id,
+            )
         if email_row is None:
             continue  # user deleted between snapshot and evaluation
 
         formatted = [_format_fire(alert, hit) for alert, hit in fires]
+        # send_alert_email wraps the synchronous Resend SDK in asyncio.to_thread
+        # so a slow upstream blocks only the helper task, not the event loop.
+        # No DB connection is held while the HTTP call is in flight.
         try:
             await send_alert_email(to_email=email_row["email"], fires=formatted)
         except EmailSendError as e:
@@ -459,11 +521,12 @@ async def evaluate_alerts(
             )
             continue  # leave alerts un-muted so next tick retries
 
-        await conn.execute(
-            "UPDATE alerts SET muted_until_recovery = TRUE, last_fired_at = NOW() "
-            "WHERE id = ANY($1::uuid[])",
-            [a["id"] for a, _ in fires],
-        )
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE alerts SET muted_until_recovery = TRUE, last_fired_at = NOW() "
+                "WHERE id = ANY($1::uuid[])",
+                [a["id"] for a, _ in fires],
+            )
         logger.info(
             "alert_email_sent %s",
             json.dumps({
