@@ -1,6 +1,8 @@
+from decimal import Decimal
+
 import pytest
 
-from app.coins import COINS, resolve
+from app.coins import COINS, FINE_GOLD_PRECISION, fine_gold_g, resolve
 
 
 def test_registry_has_expected_types() -> None:
@@ -66,3 +68,35 @@ def test_one_oz_resolves_but_caller_filters() -> None:
     assert out is not None
     assert out[1] == "1 oz"
     assert out[4] > 20  # fine gold > 20g — caller will skip
+
+
+# ── precision invariant ─────────────────────────────────────────────────────
+# alerts._index_coin_mins quantizes scraper output via Decimal("0.0001"); the
+# user-facing alerts.fine_gold_g is sourced from /alerts/options which is also
+# computed via fine_gold_g(). These tests lock down that contract so a future
+# refactor can't silently bucket "same coin" under two different keys.
+
+
+def test_fine_gold_g_matches_decimal_quantize_invariant() -> None:
+    """Every (gross, purity) in the registry must round-trip through both
+    fine_gold_g() and Decimal.quantize at FINE_GOLD_PRECISION identically.
+    If this breaks, alerts and /history/coin can drift apart silently."""
+    for sizes in COINS.values():
+        for gross, purity in sizes.values():
+            via_helper = fine_gold_g(gross, purity)
+            via_decimal = (
+                Decimal(str(gross)) * Decimal(str(purity))
+            ).quantize(FINE_GOLD_PRECISION)
+            assert Decimal(str(via_helper)) == via_decimal
+
+
+def test_resolve_returns_helper_quantized_fine_gold_g() -> None:
+    """resolve() must return fine_gold_g via the canonical helper — not its
+    own ad-hoc round() — otherwise the invariant the helper guarantees is
+    bypassed for the scraper path."""
+    # Pick a non-trivial coin: Krugerrand 1/2 oz, 16.96 × 0.9167 should land
+    # somewhere with non-zero 4th-decimal digit.
+    out = resolve("Krugerrand 1/2 oz")
+    assert out is not None
+    _, _, gross_g, purity, fine_g = out
+    assert fine_g == fine_gold_g(gross_g, purity)

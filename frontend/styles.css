@@ -498,6 +498,18 @@ dialog menu button[value="save"]:disabled:hover { filter: none; }
 
 .muted-tiny { color: var(--muted); margin-top: 0.6rem; }
 
+/* Snapshot-cron freshness indicator. Sits at the bottom of the spot card so
+   the user can tell at a glance whether the 20-min snapshot cron is alive.
+   Goes red when >60 min — at that point either an outlier-skip or QStash
+   issue is making history charts go gappy in silence. */
+.snapshot-age {
+  text-align: right;
+  margin-top: 0.4rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.4rem;
+}
+.snapshot-age.is-stale { color: var(--error); }
+
 /* Inline history panel ———————————————————————————————————————————————— */
 tr.row-clickable { cursor: pointer; }
 tr.row-clickable:hover { background: var(--row-hover-strong); }
@@ -806,6 +818,9 @@ tr.history-row > td {
 #portfolio-view .results-head {
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 0.6rem;
+}
+#portfolio-view .results-head-actions {
+  display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
 }
 .portfolio-summary-grid {
   display: flex; gap: 1.5rem; flex-wrap: wrap;

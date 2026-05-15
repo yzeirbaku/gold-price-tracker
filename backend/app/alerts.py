@@ -17,7 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .auth_session import AuthedUser, require_session
-from .coins import COINS
+from .coins import COINS, FINE_GOLD_PRECISION
+from .coins import fine_gold_g as compute_fine_gold_g
 from .db import get_pool
 from .email import EmailSendError, send_alert_email
 
@@ -192,7 +193,7 @@ async def list_options(_: AuthedUser = Depends(require_session)) -> dict:
     for coin_type, sizes in COINS.items():
         seen_fine: dict[Decimal, str] = {}
         for size_label, (gross, purity) in sizes.items():
-            fine = Decimal(str(round(gross * purity, 4)))
+            fine = Decimal(str(compute_fine_gold_g(gross, purity)))
             if fine > _COIN_FINE_CAP_G:
                 continue
             # Dedupe by fine_gold_g — Danish 20kr has 3 monarchs with same
@@ -380,7 +381,7 @@ def _index_coin_mins(coin_rows: list[tuple]) -> dict[tuple[str, Decimal], dict]:
             continue
         if coin_type is None or fine_g is None:
             continue
-        fine_dec = Decimal(str(fine_g)).quantize(Decimal("0.0001"))
+        fine_dec = Decimal(str(fine_g)).quantize(FINE_GOLD_PRECISION)
         ref = Decimal(str(spot)) * fine_dec
         if ref <= 0:
             continue
@@ -451,7 +452,7 @@ async def evaluate_alerts(
         else:
             key = (
                 alert["coin_type"],
-                alert["fine_gold_g"].quantize(Decimal("0.0001")),
+                alert["fine_gold_g"].quantize(FINE_GOLD_PRECISION),
             )
             hit = coin_mins.get(key)
         if hit is None:

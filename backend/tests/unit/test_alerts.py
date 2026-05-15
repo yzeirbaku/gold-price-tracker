@@ -7,8 +7,11 @@ exercised live; the pure pieces it depends on are unit-tested here.
 
 Email template rendering is also covered against a plain-text snapshot.
 """
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
+from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
@@ -23,7 +26,12 @@ from app.alerts import (
     _index_coin_mins,
     _validate_kind_payload,
 )
-from app.email import _alert_html_body, _alert_subject, _alert_text_body
+from app.email import (
+    EmailSendError,
+    _alert_html_body,
+    _alert_subject,
+    _alert_text_body,
+)
 
 # --- _index_bar_mins -------------------------------------------------------
 
@@ -288,3 +296,468 @@ def test_allowed_update_cols_includes_threshold_and_enabled() -> None:
     # by the recovery path so it's allowed too.
     assert "threshold_pct" in alerts_module._ALLOWED_UPDATE_COLS
     assert "enabled" in alerts_module._ALLOWED_UPDATE_COLS
+
+
+# --- evaluate_alerts end-to-end -------------------------------------------
+#
+# These tests stub asyncpg + Resend so the fire/mute/recover/throttle/bundle
+# state machine can be exercised entirely in-memory. They are the only place
+# that locks down the **precision invariant** across coins.resolve →
+# _index_coin_mins → alerts.fine_gold_g matching: an alert at 15.55 matches a
+# scraper row that landed in DB as 15.5500, and does NOT collide with a
+# neighbouring 15.5501 bucket.
+#
+# Run-through of the contract under test:
+#   • fire: enabled alert below threshold + not muted → email + mute + log
+#   • mute: enabled alert below threshold + muted → no email (deduped)
+#   • recover: enabled alert above (threshold + HYSTERESIS_PCT) + muted →
+#       un-mute, no email
+#   • throttle: per-user fires/hour cap → skip with structured log
+#   • bundle: N alerts firing for one user in one tick → one email of N rows
+#   • Resend failure: alert stays un-muted (next tick retries)
+#   • empty inputs short-circuit before touching the DB
+
+class _FakeRecord(dict):
+    """asyncpg.Record-shaped: subscript access. The evaluate_alerts code uses
+    record["col"] everywhere; this stand-in is the minimum viable surface."""
+
+
+class _FakeConn:
+    """Records every fetch/fetchrow/fetchval/execute call and routes them to
+    canned return values keyed by query substring.
+
+    Why substring routing: evaluate_alerts issues 3-4 distinct queries; a flat
+    queue would couple tests to call order, and that order isn't part of the
+    contract we're testing. Substring routing keeps the tests order-agnostic.
+    """
+
+    def __init__(self) -> None:
+        self.alerts_to_return: list[_FakeRecord] = []
+        self.recent_fires: dict[UUID, int] = {}  # by user_id
+        self.user_emails: dict[UUID, str | None] = {}
+        self.executed: list[tuple[str, tuple]] = []  # (sql, args)
+
+    async def fetch(self, sql: str, *args):
+        if "FROM alerts WHERE enabled" in sql:
+            return self.alerts_to_return
+        raise AssertionError(f"unexpected fetch: {sql!r}")
+
+    async def fetchrow(self, sql: str, *args):
+        if "FROM users WHERE id" in sql:
+            user_id = args[0]
+            email = self.user_emails.get(user_id)
+            return None if email is None else _FakeRecord(email=email)
+        raise AssertionError(f"unexpected fetchrow: {sql!r}")
+
+    async def fetchval(self, sql: str, *args):
+        if "COUNT(*) FROM alerts" in sql:
+            user_id = args[0]
+            return self.recent_fires.get(user_id, 0)
+        raise AssertionError(f"unexpected fetchval: {sql!r}")
+
+    async def execute(self, sql: str, *args) -> None:
+        self.executed.append((sql, args))
+
+
+class _FakePool:
+    """asyncpg.Pool-shaped: a single connection handed out for every acquire().
+    evaluate_alerts acquires several short-lived connections — using one
+    underlying _FakeConn lets us assert against a unified call log."""
+
+    def __init__(self, conn: _FakeConn) -> None:
+        self._conn = conn
+
+    @asynccontextmanager
+    async def acquire(self):
+        yield self._conn
+
+
+def _alert(
+    *,
+    id: str = "00000000-0000-0000-0000-0000000000a1",
+    user_id: str = "00000000-0000-0000-0000-0000000000f1",
+    kind: str = "bar",
+    size_g: Decimal | None = None,
+    coin_type: str | None = None,
+    fine_gold_g: Decimal | None = None,
+    threshold_pct: Decimal = Decimal("7"),
+    enabled: bool = True,
+    muted_until_recovery: bool = False,
+) -> _FakeRecord:
+    return _FakeRecord(
+        id=UUID(id), user_id=UUID(user_id), kind=kind,
+        size_g=size_g, coin_type=coin_type, fine_gold_g=fine_gold_g,
+        threshold_pct=threshold_pct, enabled=enabled,
+        muted_until_recovery=muted_until_recovery,
+    )
+
+
+@pytest.fixture()
+def patch_send_alert_email(monkeypatch):
+    """Replace alerts.send_alert_email with an AsyncMock. evaluate_alerts
+    looks the function up via the module-level import inside alerts.py, so
+    patching there (not on .email) is what counts."""
+    mock = AsyncMock()
+    monkeypatch.setattr(alerts_module, "send_alert_email", mock)
+    return mock
+
+
+@pytest.fixture()
+def fetched_at():
+    return datetime(2026, 5, 15, 12, 0, tzinfo=UTC)
+
+
+# --- the basic shape ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_no_op_when_no_data(patch_send_alert_email, fetched_at):
+    """Empty bar_rows + empty coin_rows: short-circuits before touching the
+    DB. Confirms the cheap-path stays cheap when scrapers all failed."""
+    conn = _FakeConn()  # any fetch would raise — proves no DB hit
+    pool = _FakePool(conn)
+    await alerts_module.evaluate_alerts(pool, fetched_at, [], [])
+    patch_send_alert_email.assert_not_called()
+    assert conn.executed == []
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_no_op_when_no_enabled_alerts(patch_send_alert_email, fetched_at):
+    """Snapshot data lands but no user is subscribed → no work to do."""
+    conn = _FakeConn()
+    conn.alerts_to_return = []
+    pool = _FakePool(conn)
+    bar_rows = [_bar_row("Tavex", 10, 10500, 1000)]
+    await alerts_module.evaluate_alerts(pool, fetched_at, bar_rows, [])
+    patch_send_alert_email.assert_not_called()
+
+
+# --- fire path ------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_bar_below_threshold_fires(patch_send_alert_email, fetched_at):
+    """Premium 2% on a 7% threshold → fire one email + mute + bump fire_count."""
+    conn = _FakeConn()
+    alert = _alert(kind="bar", size_g=Decimal("10"), threshold_pct=Decimal("7"))
+    conn.alerts_to_return = [alert]
+    conn.user_emails[alert["user_id"]] = "user@example.com"
+    pool = _FakePool(conn)
+    # 2% premium → below 7% threshold → fires
+    bar_rows = [_bar_row("Vitus Guld", 10, 10200, 1000)]
+    await alerts_module.evaluate_alerts(pool, fetched_at, bar_rows, [])
+    patch_send_alert_email.assert_awaited_once()
+    kwargs = patch_send_alert_email.call_args.kwargs
+    assert kwargs["to_email"] == "user@example.com"
+    assert len(kwargs["fires"]) == 1
+    assert kwargs["fires"][0]["target"] == "10 g bar"
+    assert kwargs["fires"][0]["best_dealer"] == "Vitus Guld"
+    # Mute UPDATE must have landed.
+    mute_writes = [e for e in conn.executed if "muted_until_recovery = TRUE" in e[0]]
+    assert len(mute_writes) == 1
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_above_threshold_does_not_fire(patch_send_alert_email, fetched_at):
+    """Premium 10% on a 7% threshold → no email, no mute write."""
+    conn = _FakeConn()
+    alert = _alert(kind="bar", size_g=Decimal("10"), threshold_pct=Decimal("7"))
+    conn.alerts_to_return = [alert]
+    conn.user_emails[alert["user_id"]] = "user@example.com"
+    pool = _FakePool(conn)
+    bar_rows = [_bar_row("Vitus Guld", 10, 11000, 1000)]  # 10% premium
+    await alerts_module.evaluate_alerts(pool, fetched_at, bar_rows, [])
+    patch_send_alert_email.assert_not_called()
+
+
+# --- precision invariant (the bug that motivated the refactor) ------------
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_coin_precision_alert_15_55_matches_row_15_5500(
+    patch_send_alert_email, fetched_at,
+):
+    """User-facing 15.55 input bucketizes identically to scraper-stored 15.5500."""
+    conn = _FakeConn()
+    alert = _alert(
+        kind="coin", coin_type="Krugerrand",
+        fine_gold_g=Decimal("15.55"),
+        threshold_pct=Decimal("7"),
+    )
+    conn.alerts_to_return = [alert]
+    conn.user_emails[alert["user_id"]] = "user@example.com"
+    pool = _FakePool(conn)
+    coin_rows = [_coin_row("Tavex", "Krugerrand", 15.5500, 16500, 1000)]
+    await alerts_module.evaluate_alerts(pool, fetched_at, [], coin_rows)
+    patch_send_alert_email.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_coin_precision_alert_15_55_does_not_match_15_5501(
+    patch_send_alert_email, fetched_at,
+):
+    """A scraper row at 15.5501 lives in a different bucket from a 15.55
+    alert. The contract is: same logical coin → same bucket; different fine
+    weight → different bucket. No accidental cross-talk."""
+    conn = _FakeConn()
+    alert = _alert(
+        kind="coin", coin_type="Krugerrand",
+        fine_gold_g=Decimal("15.55"),
+        threshold_pct=Decimal("7"),
+    )
+    conn.alerts_to_return = [alert]
+    conn.user_emails[alert["user_id"]] = "user@example.com"
+    pool = _FakePool(conn)
+    coin_rows = [_coin_row("Tavex", "Krugerrand", 15.5501, 16500, 1000)]
+    await alerts_module.evaluate_alerts(pool, fetched_at, [], coin_rows)
+    patch_send_alert_email.assert_not_called()
+
+
+# --- mute / recovery state machine ----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_muted_alert_does_not_refire(patch_send_alert_email, fetched_at):
+    """An already-muted alert that's still below threshold → no email,
+    no further mute writes. This is the dedup core of the design."""
+    conn = _FakeConn()
+    alert = _alert(
+        kind="bar", size_g=Decimal("10"), threshold_pct=Decimal("7"),
+        muted_until_recovery=True,
+    )
+    conn.alerts_to_return = [alert]
+    conn.user_emails[alert["user_id"]] = "user@example.com"
+    pool = _FakePool(conn)
+    bar_rows = [_bar_row("Vitus Guld", 10, 10200, 1000)]  # 2%
+    await alerts_module.evaluate_alerts(pool, fetched_at, bar_rows, [])
+    patch_send_alert_email.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_recovery_unmutes_when_above_hysteresis(
+    patch_send_alert_email, fetched_at,
+):
+    """Muted alert + premium > threshold + HYSTERESIS_PCT → un-mute, no email.
+    Hysteresis prevents single-tick flap-recovery at threshold."""
+    conn = _FakeConn()
+    alert = _alert(
+        kind="bar", size_g=Decimal("10"), threshold_pct=Decimal("7"),
+        muted_until_recovery=True,
+    )
+    conn.alerts_to_return = [alert]
+    conn.user_emails[alert["user_id"]] = "user@example.com"
+    pool = _FakePool(conn)
+    # Premium needs to clear 7 + 0.5 = 7.5%. 8% does.
+    bar_rows = [_bar_row("Vitus Guld", 10, 10800, 1000)]  # 8%
+    await alerts_module.evaluate_alerts(pool, fetched_at, bar_rows, [])
+    patch_send_alert_email.assert_not_called()
+    unmute_writes = [e for e in conn.executed if "muted_until_recovery = FALSE" in e[0]]
+    assert len(unmute_writes) == 1
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_within_hysteresis_band_stays_muted(
+    patch_send_alert_email, fetched_at,
+):
+    """Premium between threshold and threshold + HYSTERESIS_PCT → not below
+    threshold (no fire) but not far enough above to un-mute either. Stays
+    in stable muted-armed limbo."""
+    conn = _FakeConn()
+    alert = _alert(
+        kind="bar", size_g=Decimal("10"), threshold_pct=Decimal("7"),
+        muted_until_recovery=True,
+    )
+    conn.alerts_to_return = [alert]
+    conn.user_emails[alert["user_id"]] = "user@example.com"
+    pool = _FakePool(conn)
+    # 7.2% — above 7% (no fire) but below 7.5% (no un-mute either)
+    bar_rows = [_bar_row("Vitus Guld", 10, 10720, 1000)]
+    await alerts_module.evaluate_alerts(pool, fetched_at, bar_rows, [])
+    patch_send_alert_email.assert_not_called()
+    unmute_writes = [e for e in conn.executed if "muted_until_recovery = FALSE" in e[0]]
+    assert len(unmute_writes) == 0
+
+
+# --- bundling -------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_bundles_per_user_into_one_email(
+    patch_send_alert_email, fetched_at,
+):
+    """Two alerts for one user, both fire on the same tick → exactly one
+    email is sent, with both in the fires list. Bundling is what keeps a
+    big multi-size dip from carpet-bombing the inbox."""
+    conn = _FakeConn()
+    user_id = "00000000-0000-0000-0000-0000000000a1"
+    alert_bar = _alert(
+        id="00000000-0000-0000-0000-0000000000b1",
+        user_id=user_id, kind="bar", size_g=Decimal("10"),
+        threshold_pct=Decimal("7"),
+    )
+    alert_coin = _alert(
+        id="00000000-0000-0000-0000-0000000000b2",
+        user_id=user_id, kind="coin",
+        coin_type="Krugerrand", fine_gold_g=Decimal("15.55"),
+        threshold_pct=Decimal("7"),
+    )
+    conn.alerts_to_return = [alert_bar, alert_coin]
+    conn.user_emails[alert_bar["user_id"]] = "user@example.com"
+    pool = _FakePool(conn)
+    bar_rows = [_bar_row("Vitus Guld", 10, 10200, 1000)]   # 2%
+    coin_rows = [_coin_row("Tavex", "Krugerrand", 15.5500, 16500, 1000)]  # 6.13%
+    await alerts_module.evaluate_alerts(pool, fetched_at, bar_rows, coin_rows)
+    patch_send_alert_email.assert_awaited_once()
+    fires = patch_send_alert_email.call_args.kwargs["fires"]
+    assert len(fires) == 2
+    targets = {f["target"] for f in fires}
+    assert "10 g bar" in targets
+    assert any("Krugerrand" in t for t in targets)
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_per_user_isolation(patch_send_alert_email, fetched_at):
+    """Two users with one alert each → two separate emails, one per user.
+    Bundling is per-user, not global."""
+    conn = _FakeConn()
+    a = _alert(
+        id="00000000-0000-0000-0000-0000000000b1",
+        user_id="00000000-0000-0000-0000-0000000000a1",
+        kind="bar", size_g=Decimal("10"), threshold_pct=Decimal("7"),
+    )
+    b = _alert(
+        id="00000000-0000-0000-0000-0000000000b2",
+        user_id="00000000-0000-0000-0000-0000000000a2",
+        kind="bar", size_g=Decimal("10"), threshold_pct=Decimal("7"),
+    )
+    conn.alerts_to_return = [a, b]
+    conn.user_emails[a["user_id"]] = "a@example.com"
+    conn.user_emails[b["user_id"]] = "b@example.com"
+    pool = _FakePool(conn)
+    bar_rows = [_bar_row("Vitus Guld", 10, 10200, 1000)]
+    await alerts_module.evaluate_alerts(pool, fetched_at, bar_rows, [])
+    assert patch_send_alert_email.await_count == 2
+    recipients = {c.kwargs["to_email"] for c in patch_send_alert_email.call_args_list}
+    assert recipients == {"a@example.com", "b@example.com"}
+
+
+# --- throttle -------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_throttle_skips_when_user_over_cap(
+    patch_send_alert_email, fetched_at,
+):
+    """MAX_FIRES_PER_HOUR_PER_USER already-reached → skip this fire entirely
+    (no email, no mute write). Stops a flapping watch from carpet-bombing."""
+    conn = _FakeConn()
+    alert = _alert(kind="bar", size_g=Decimal("10"), threshold_pct=Decimal("7"))
+    conn.alerts_to_return = [alert]
+    conn.user_emails[alert["user_id"]] = "user@example.com"
+    conn.recent_fires[alert["user_id"]] = MAX_FIRES_PER_HOUR_PER_USER  # at cap
+    pool = _FakePool(conn)
+    bar_rows = [_bar_row("Vitus Guld", 10, 10200, 1000)]
+    await alerts_module.evaluate_alerts(pool, fetched_at, bar_rows, [])
+    patch_send_alert_email.assert_not_called()
+    mute_writes = [e for e in conn.executed if "muted_until_recovery = TRUE" in e[0]]
+    assert mute_writes == []
+
+
+# --- failure isolation ----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_resend_failure_leaves_alert_unmuted(
+    patch_send_alert_email, fetched_at,
+):
+    """If Resend raises, the alert must NOT be muted — next tick retries.
+    A failure-mute would silence the user during a real outage."""
+    patch_send_alert_email.side_effect = EmailSendError("resend down")
+    conn = _FakeConn()
+    alert = _alert(kind="bar", size_g=Decimal("10"), threshold_pct=Decimal("7"))
+    conn.alerts_to_return = [alert]
+    conn.user_emails[alert["user_id"]] = "user@example.com"
+    pool = _FakePool(conn)
+    bar_rows = [_bar_row("Vitus Guld", 10, 10200, 1000)]
+    # Must NOT raise — failure is caught per-user and isolated.
+    await alerts_module.evaluate_alerts(pool, fetched_at, bar_rows, [])
+    mute_writes = [e for e in conn.executed if "muted_until_recovery = TRUE" in e[0]]
+    assert mute_writes == []
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_resend_failure_for_user_a_does_not_block_user_b(
+    patch_send_alert_email, fetched_at,
+):
+    """One user's Resend failure must not poison the loop for other users.
+    This is the cross-user isolation guarantee."""
+    failing_email = "a@example.com"
+    succeeding_email = "b@example.com"
+
+    async def selective_fail(*, to_email: str, fires):
+        if to_email == failing_email:
+            raise EmailSendError("a-specific failure")
+
+    patch_send_alert_email.side_effect = selective_fail
+    conn = _FakeConn()
+    a = _alert(
+        id="00000000-0000-0000-0000-0000000000b1",
+        user_id="00000000-0000-0000-0000-0000000000a1",
+        kind="bar", size_g=Decimal("10"), threshold_pct=Decimal("7"),
+    )
+    b = _alert(
+        id="00000000-0000-0000-0000-0000000000b2",
+        user_id="00000000-0000-0000-0000-0000000000a2",
+        kind="bar", size_g=Decimal("10"), threshold_pct=Decimal("7"),
+    )
+    conn.alerts_to_return = [a, b]
+    conn.user_emails[a["user_id"]] = failing_email
+    conn.user_emails[b["user_id"]] = succeeding_email
+    pool = _FakePool(conn)
+    bar_rows = [_bar_row("Vitus Guld", 10, 10200, 1000)]
+    await alerts_module.evaluate_alerts(pool, fetched_at, bar_rows, [])
+    # Both were attempted; b's mute write landed; a's did not.
+    assert patch_send_alert_email.await_count == 2
+    mute_writes = [e for e in conn.executed if "muted_until_recovery = TRUE" in e[0]]
+    assert len(mute_writes) == 1
+    # Mute write targets b's id, not a's.
+    muted_ids = mute_writes[0][1][0]
+    assert b["id"] in muted_ids
+    assert a["id"] not in muted_ids
+
+
+# --- silence on missing data ---------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_skips_alert_when_no_matching_scraper_row(
+    patch_send_alert_email, fetched_at,
+):
+    """User has a 20g-bar alert but only 10g rows landed this tick → no
+    fire (we don't know the 20g premium right now, so no decision to make)."""
+    conn = _FakeConn()
+    alert = _alert(kind="bar", size_g=Decimal("20"), threshold_pct=Decimal("7"))
+    conn.alerts_to_return = [alert]
+    conn.user_emails[alert["user_id"]] = "user@example.com"
+    pool = _FakePool(conn)
+    bar_rows = [_bar_row("Vitus Guld", 10, 10200, 1000)]
+    await alerts_module.evaluate_alerts(pool, fetched_at, bar_rows, [])
+    patch_send_alert_email.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_evaluate_alerts_skips_when_user_email_missing(
+    patch_send_alert_email, fetched_at,
+):
+    """Race condition: user deleted between snapshot and evaluation. Don't
+    crash, don't email, don't mute."""
+    conn = _FakeConn()
+    alert = _alert(kind="bar", size_g=Decimal("10"), threshold_pct=Decimal("7"))
+    conn.alerts_to_return = [alert]
+    # No entry in user_emails → fetchrow returns None
+    pool = _FakePool(conn)
+    bar_rows = [_bar_row("Vitus Guld", 10, 10200, 1000)]
+    await alerts_module.evaluate_alerts(pool, fetched_at, bar_rows, [])
+    patch_send_alert_email.assert_not_called()
+    mute_writes = [e for e in conn.executed if "muted_until_recovery = TRUE" in e[0]]
+    assert mute_writes == []

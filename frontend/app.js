@@ -106,6 +106,47 @@ async function fetchSpot() {
   }
 }
 
+// ── Snapshot-cron freshness indicator ────────────────────────────────────
+// Background signal that the 20-min snapshot cron is alive. Without this,
+// outlier-skip / fx_stale-skip / QStash issues / Render cold-start lockups
+// silently produce gappy history charts and stale alert-eval baselines —
+// nothing else in the UI surfaces "we haven't ingested in an hour."
+//
+// Threshold: >60 min flips the indicator to error color. The cron runs
+// every 20 min, so 60 min = 3 missed ticks. A single tick missed (~25-40
+// min ago) is normal jitter and not worth alarming about.
+
+const SNAPSHOT_STALE_THRESHOLD_S = 60 * 60;
+
+function fmtSnapshotAge(seconds) {
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return m === 0 ? `${h} h ago` : `${h} h ${m} min ago`;
+}
+
+async function fetchSnapshotAge() {
+  const apiKey = loadApiKey();
+  const el = $('#snapshot-age');
+  if (!apiKey || !el) return;
+  try {
+    const resp = await fetch(`${BACKEND_URL}/snapshot/age`, { headers: { 'X-API-Key': apiKey } });
+    if (!resp.ok) return;  // silent — secondary indicator, never block UI
+    const data = await resp.json();
+    if (data.age_seconds == null) {
+      // Fresh DB (no snapshots ever) — don't show a misleading "—" line.
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    el.textContent = `Snapshots: ${fmtSnapshotAge(data.age_seconds)}`;
+    el.classList.toggle('is-stale', data.age_seconds > SNAPSHOT_STALE_THRESHOLD_S);
+  } catch {
+    /* silent — secondary indicator */
+  }
+}
+
 async function fetchPrices(size) {
   const apiKey = loadApiKey();
   if (!apiKey) {
@@ -793,11 +834,13 @@ $('#settings-dialog').addEventListener('close', () => {
     saveTheme(theme);
     applyTheme(theme);
     fetchSpot();   // immediately try with the new key
+    fetchSnapshotAge();
   }
 });
 
 // Spot price: load on page open, then auto-refresh while visible.
 fetchSpot();
+fetchSnapshotAge();
 // Default size selection: load 10 g listings as soon as the page opens.
 fetchPrices(10);
 // Restore tab state from localStorage (defaults to 'bars').
@@ -805,8 +848,18 @@ setTab(currentTab);
 setInterval(() => {
   if (document.visibilityState === 'visible') fetchSpot();
 }, SPOT_REFRESH_MS);
+// Snapshot age changes every ~20 min (cron cadence). Re-check every 5 min
+// while visible — frequent enough to catch a freshly-stale cron quickly,
+// cheap enough not to matter (one tiny query).
+const SNAPSHOT_AGE_REFRESH_MS = 5 * 60 * 1000;
+setInterval(() => {
+  if (document.visibilityState === 'visible') fetchSnapshotAge();
+}, SNAPSHOT_AGE_REFRESH_MS);
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') fetchSpot();
+  if (document.visibilityState === 'visible') {
+    fetchSpot();
+    fetchSnapshotAge();
+  }
 });
 
 // Service worker registration
@@ -1722,8 +1775,13 @@ function renderPortfolioFilterBar() {
 function renderPortfolioTable(purchases) {
   const tableEl = $('#portfolio-table');
   const emptyEl = $('#portfolio-empty');
+  const exportBtn = $('#portfolio-export-btn');
   const tbody = tableEl.querySelector('tbody');
   renderPortfolioFilterBar();
+  // Export button visibility tracks "has any purchases" (independent of the
+  // metal filter — exporting the full set, not the current view, is the
+  // sensible default for a personal-records dump).
+  if (exportBtn) exportBtn.hidden = !purchases.length;
   if (!purchases.length) {
     tableEl.hidden = true;
     emptyEl.hidden = false;
@@ -1941,6 +1999,105 @@ $('#portfolio-add-btn').addEventListener('click', () => {
   openPurchaseDialog({ kind: 'add' });
 });
 
+// ── Portfolio CSV export ────────────────────────────────────────────────────
+// Client-side build from the already-loaded lastPortfolio.purchases. Exports
+// the full set (ignores the metal filter chip) — the file is a personal
+// records dump, not a view snapshot. Bearer-auth fetch wasn't needed since
+// the data is already in memory.
+
+const CSV_COLUMNS = [
+  // [header, getter]
+  ['purchased_at', p => p.purchased_at],
+  ['metal', p => p.metal],
+  ['label', p => p.label],
+  ['dealer', p => p.dealer ?? ''],
+  ['gross_weight_g', p => p.gross_weight_g],
+  ['purity', p => p.purity],
+  ['fine_weight_g', p => p.fine_weight_g],
+  ['price_paid_dkk', p => p.price_paid_dkk],
+  ['spot_at_purchase_dkk_per_g', p => p.spot_at_purchase_dkk_per_g ?? ''],
+  ['purchase_premium_pct', p => p.purchase_premium_pct ?? ''],
+  ['current_spot_dkk_per_g', p => p.current_spot_dkk_per_g],
+  ['current_value_dkk', p => p.current_value_dkk],
+  ['pnl_dkk', p => p.pnl_dkk],
+  ['pnl_pct', p => p.pnl_pct],
+  ['notes', p => p.notes ?? ''],
+];
+
+function csvEscape(value) {
+  // RFC 4180: quote if value contains comma, quote, CR, or LF; double any
+  // embedded quotes. Numbers and empty strings pass through bare.
+  // Formula-injection guard: Excel/Numbers/Sheets execute cells whose first
+  // char is =, +, -, @, tab, or CR. We prefix a single-quote which the
+  // spreadsheet strips on display but won't evaluate. Today's columns (label,
+  // dealer, notes) come from auth'd users typing into their own records so
+  // the actual risk is low — but the guard is two lines and future-proofs
+  // any column that ever pipes scraper-controlled text into the dump.
+  let s = String(value);
+  if (s === '') return '';
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function buildPortfolioCsv(purchases) {
+  const header = CSV_COLUMNS.map(c => c[0]).join(',');
+  const rows = purchases.map(p =>
+    CSV_COLUMNS.map(c => csvEscape(c[1](p))).join(',')
+  );
+  // Excel/Numbers prefer CRLF; the BOM coaxes Excel into reading as UTF-8
+  // rather than guessing the codepage and mangling Danish characters.
+  return '\ufeff' + [header, ...rows].join('\r\n') + '\r\n';
+}
+
+function exportPortfolioCsv() {
+  const purchases = lastPortfolio.purchases || [];
+  if (!purchases.length) return;
+  const csv = buildPortfolioCsv(purchases);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const today = new Date();
+  const dd = String(today.getDate()).padStart(2, '0');
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const yyyy = today.getFullYear();
+  a.href = url;
+  a.download = `portfolio-${yyyy}-${mm}-${dd}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Revoking too eagerly cancels the download in some Safari versions; a
+  // microtask is enough for the click to land.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+$('#portfolio-export-btn').addEventListener('click', exportPortfolioCsv);
+
+const FIELD_LABELS = {
+  purchased_at: 'Purchase date',
+  price_paid_dkk: 'Price paid',
+  gross_weight_g: 'Gross weight',
+  purity: 'Purity',
+  metal: 'Metal',
+  label: 'Label',
+};
+function humanizeSaveError(status, body) {
+  try {
+    const parsed = JSON.parse(body);
+    const detail = parsed.detail;
+    if (Array.isArray(detail) && detail.length) {
+      let msg = String(detail[0].msg || '').replace(/^Value error,\s*/i, '').trim();
+      for (const [k, v] of Object.entries(FIELD_LABELS)) {
+        msg = msg.replace(new RegExp(`\\b${k}\\b`, 'g'), v);
+      }
+      if (msg) return msg.charAt(0).toUpperCase() + msg.slice(1);
+    }
+    if (typeof detail === 'string' && detail.trim()) return detail;
+  } catch (_) { /* fall through */ }
+  if (status === 502) return "Couldn't look up the historical spot price. Try again in a moment.";
+  return `Save failed (status ${status}). Try again.`;
+}
+
 $('#purchase-form').addEventListener('submit', async (e) => {
   const submitter = e.submitter;
   if (!submitter || submitter.value === 'cancel') return;
@@ -2022,7 +2179,7 @@ $('#purchase-form').addEventListener('submit', async (e) => {
     }
     if (!res.ok) {
       const body = await res.text();
-      errEl.textContent = `Save failed (status ${res.status}): ${body.slice(0, 200)}`;
+      errEl.textContent = humanizeSaveError(res.status, body);
       errEl.hidden = false;
       return;
     }

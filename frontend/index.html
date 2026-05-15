@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=109" />
+  <link rel="stylesheet" href="styles.css?v=110" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
@@ -49,6 +49,7 @@
         <div class="loading-text">Fetching spot…</div>
       </div>
     </div>
+    <div id="snapshot-age" class="snapshot-age muted-tiny" hidden></div>
   </section>
 
   <div id="bars-view">
@@ -132,7 +133,10 @@
     <section id="portfolio-summary" class="card">
       <div class="results-head">
         <h2>Portfolio</h2>
-        <button id="portfolio-add-btn" class="site-btn-primary" type="button">+ Add purchase</button>
+        <div class="results-head-actions">
+          <button id="portfolio-export-btn" class="icon-btn" type="button" aria-label="Export CSV" title="Export CSV" hidden>⤓</button>
+          <button id="portfolio-add-btn" class="site-btn-primary" type="button">+ Add purchase</button>
+        </div>
       </div>
       <div id="portfolio-summary-content"></div>
     </section>
@@ -395,6 +399,6 @@
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="config.js?v=111"></script>
-  <script src="app.js?v=111"></script>
+  <script src="app.js?v=112"></script>
 </body>
 </html>

@@ -13,7 +13,7 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .auth_session import AuthedUser, require_session
 from .db import get_pool
@@ -40,6 +40,22 @@ _ALLOWED_UPDATE_COLS: frozenset[str] = frozenset({
 })
 
 
+# Small tolerance to absorb clock skew between client and server when a user
+# submits a purchase at "now" — without it, a request stamped at the moment
+# of click can land microseconds in the future and 422 spuriously.
+_FUTURE_PURCHASED_AT_TOLERANCE = timedelta(minutes=5)
+
+
+def _reject_future_purchased_at(v: datetime) -> datetime:
+    """Frozen historical-spot lookup walks back 7 days from `purchased_at`;
+    a future date walks back from 'future' and bakes an undefined/stale spot
+    into the row forever. Block it at API parse time."""
+    cutoff = datetime.now(UTC) + _FUTURE_PURCHASED_AT_TOLERANCE
+    if v > cutoff:
+        raise ValueError("Purchase date cannot be in the future")
+    return v
+
+
 class PurchaseCreate(BaseModel):
     metal: Metal
     gross_weight_g: Decimal = Field(gt=0)
@@ -49,6 +65,8 @@ class PurchaseCreate(BaseModel):
     label: str = Field(min_length=1, max_length=200)
     dealer: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=2000)
+
+    _v_purchased_at = field_validator("purchased_at")(_reject_future_purchased_at)
 
 
 class PurchaseUpdate(BaseModel):
@@ -60,6 +78,11 @@ class PurchaseUpdate(BaseModel):
     label: str | None = Field(default=None, min_length=1, max_length=200)
     dealer: str | None = Field(default=None, max_length=200)
     notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("purchased_at")
+    @classmethod
+    def _v_purchased_at(cls, v: datetime | None) -> datetime | None:
+        return None if v is None else _reject_future_purchased_at(v)
 
 
 async def _fetch_historical_spot_dkk_per_g(metal: Metal, purchased_at: datetime) -> Decimal:

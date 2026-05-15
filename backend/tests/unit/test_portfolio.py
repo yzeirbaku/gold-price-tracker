@@ -1,20 +1,26 @@
 """Tests for portfolio decoration + summary math. Route-level CRUD tests
 are integration-only (require DB) and out of scope for CI."""
-from datetime import UTC, datetime
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 
+from app.auth_session import AuthedUser
 from app.portfolio import (
     _ALLOWED_UPDATE_COLS,
+    PurchaseCreate,
+    PurchaseUpdate,
     _decorate,
     _downsample,
     _fetch_historical_spot_dkk_per_g,
     _period_change,
     _reconstruct_value_series,
     _summary,
+    portfolio_history,
 )
 
 
@@ -398,6 +404,48 @@ def test_period_change_pct_zero_when_denominator_is_zero() -> None:
     assert c["period_change_pct"] == 0.0
 
 
+def _valid_create_payload(**overrides) -> dict:
+    base = {
+        "metal": "gold",
+        "gross_weight_g": "10",
+        "purity": "0.9999",
+        "price_paid_dkk": "8000",
+        "purchased_at": datetime(2026, 1, 15, tzinfo=UTC),
+        "label": "10g bar",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_purchase_create_rejects_future_purchased_at() -> None:
+    """Walking back 7 days from a future date in _fetch_historical_spot_dkk_per_g
+    bakes an undefined spot into the row forever. API must refuse."""
+    future = datetime.now(UTC) + timedelta(days=1)
+    with pytest.raises(ValidationError) as exc:
+        PurchaseCreate(**_valid_create_payload(purchased_at=future))
+    assert "future" in str(exc.value).lower()
+
+
+def test_purchase_create_allows_now_within_tolerance() -> None:
+    """Client/server clock skew can make 'just-now' look microseconds in the
+    future. A 5-minute tolerance window must accept it."""
+    near_future = datetime.now(UTC) + timedelta(seconds=30)
+    PurchaseCreate(**_valid_create_payload(purchased_at=near_future))
+
+
+def test_purchase_update_rejects_future_purchased_at() -> None:
+    future = datetime.now(UTC) + timedelta(days=1)
+    with pytest.raises(ValidationError):
+        PurchaseUpdate(purchased_at=future)
+
+
+def test_purchase_update_allows_omitting_purchased_at() -> None:
+    """A PATCH that only changes `label` must not be blocked by the validator."""
+    body = PurchaseUpdate(label="renamed")
+    assert body.label == "renamed"
+    assert body.purchased_at is None
+
+
 def test_allowed_update_cols_lists_all_pydantic_fields() -> None:
     """If PurchaseUpdate gains a new field, this allowlist must grow with
     it — otherwise PATCH on the new field will 400. Catches the drift."""
@@ -406,3 +454,245 @@ def test_allowed_update_cols_lists_all_pydantic_fields() -> None:
     pydantic_fields = set(PurchaseUpdate.model_fields.keys())
     missing = pydantic_fields - _ALLOWED_UPDATE_COLS
     assert not missing, f"PurchaseUpdate fields not in _ALLOWED_UPDATE_COLS: {missing}"
+
+
+# ── /portfolio/history route orchestration ──────────────────────────────────
+#
+# The pure helpers (_reconstruct_value_series / _downsample / _period_change)
+# already have deep tests above. This block covers the route function itself
+# — the glue that picks range_start, clamps to first_purchase_at, appends a
+# synthetic now point, and short-circuits empty portfolios. Bugs would not
+# show up in helper tests because they all live in the glue.
+
+class _FakeHistoryConn:
+    """Routes fetches by SQL substring. Real route does two queries: one for
+    purchases, one for spot_snapshots. Returning canned lists keeps tests
+    order-agnostic."""
+
+    def __init__(
+        self,
+        purchase_rows: list[dict],
+        spot_rows: list[dict],
+    ) -> None:
+        self._purchase_rows = purchase_rows
+        self._spot_rows = spot_rows
+
+    async def fetch(self, sql: str, *args):
+        if "FROM purchases" in sql:
+            return self._purchase_rows
+        if "FROM spot_snapshots" in sql:
+            return self._spot_rows
+        raise AssertionError(f"unexpected fetch: {sql!r}")
+
+
+class _FakeHistoryPool:
+    def __init__(self, conn) -> None:
+        self._conn = conn
+
+    @asynccontextmanager
+    async def acquire(self):
+        yield self._conn
+
+
+@pytest.fixture()
+def authed_user() -> AuthedUser:
+    return AuthedUser(id=uuid4(), email="u@example.com")
+
+
+@pytest.fixture()
+def patch_pool(monkeypatch):
+    """Helper: install a fake pool factory for app.portfolio."""
+
+    def install(conn) -> None:
+        pool = _FakeHistoryPool(conn)
+
+        async def fake() -> object:
+            return pool
+        monkeypatch.setattr("app.portfolio.get_pool", fake)
+    return install
+
+
+@pytest.fixture()
+def patch_current_spot(monkeypatch):
+    """Helper: install a fake live-spot helper. Default behavior returns a
+    fixed gold/silver pair so the synthetic 'now' point is predictable."""
+    from app.portfolio import _current_spot_dkk_per_g as _real
+    del _real  # silence import-not-used; we replace it below
+
+    def install(gold: str = "800", silver: str = "10") -> None:
+        async def fake() -> dict:
+            return {"gold": Decimal(gold), "silver": Decimal(silver)}
+        monkeypatch.setattr("app.portfolio._current_spot_dkk_per_g", fake)
+    return install
+
+
+@pytest.mark.asyncio
+async def test_history_rejects_unknown_range(authed_user) -> None:
+    """Range pill outside {1w, 1m, 6m, 1y, all} → clean 400. Without this,
+    a typo or malicious query param would either crash or silently behave."""
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        await portfolio_history(range="42d", metal="all", user=authed_user)
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_history_returns_empty_envelope_when_no_purchases(
+    authed_user, patch_pool,
+) -> None:
+    """User has signed in but never made a purchase. Must not throw, must
+    not try to fetch spot, must return the empty-state envelope the
+    frontend's chart-empty card looks for."""
+    conn = _FakeHistoryConn(purchase_rows=[], spot_rows=[])
+    patch_pool(conn)
+    out = await portfolio_history(range="1m", metal="all", user=authed_user)
+    assert out["points"] == []
+    assert out["current_value_dkk"] == 0.0
+    assert out["first_purchase_at"] is None
+    assert out["clamped_to_first_purchase"] is False
+
+
+@pytest.mark.asyncio
+async def test_history_appends_synthetic_now_point_when_spot_rows_exist(
+    authed_user, patch_pool, patch_current_spot,
+) -> None:
+    """The chart tail must include a 'now' point so the line matches the
+    summary card's live value. Without it the chart lags by up to 20 min
+    behind every other live value on the page."""
+    t0 = datetime(2026, 5, 1, tzinfo=UTC)
+    purchase_rows = [{
+        "purchased_at": t0,
+        "metal": "gold",
+        "gross_weight_g": Decimal("10"),
+        "purity": Decimal("1.0"),
+        "price_paid_dkk": Decimal("8000"),
+    }]
+    spot_rows = [{
+        "fetched_at": t0,
+        "gold_dkk_per_g": Decimal("800"),
+        "silver_dkk_per_g": Decimal("10"),
+    }]
+    conn = _FakeHistoryConn(purchase_rows=purchase_rows, spot_rows=spot_rows)
+    patch_pool(conn)
+    patch_current_spot(gold="850")  # different from snapshot to detect
+    out = await portfolio_history(range="all", metal="all", user=authed_user)
+    # Two points expected: the seeded snapshot at t0 and a synthetic now-point.
+    assert len(out["points"]) == 2
+    # Last point uses live spot 850, not snapshot 800: 10g × 850 = 8500.
+    assert out["points"][-1]["value_dkk"] == 8500.0
+
+
+@pytest.mark.asyncio
+async def test_history_skips_synthetic_now_when_no_spot_rows(
+    authed_user, patch_pool, patch_current_spot,
+) -> None:
+    """No spot_snapshots in the range (fresh DB or all purchases newer than
+    every snapshot row) → return empty points so the frontend's 'not enough
+    history' empty state renders cleanly. A lone synthetic point would draw
+    a single dot on the chart."""
+    t0 = datetime(2026, 5, 1, tzinfo=UTC)
+    purchase_rows = [{
+        "purchased_at": t0,
+        "metal": "gold",
+        "gross_weight_g": Decimal("10"),
+        "purity": Decimal("1.0"),
+        "price_paid_dkk": Decimal("8000"),
+    }]
+    conn = _FakeHistoryConn(purchase_rows=purchase_rows, spot_rows=[])
+    patch_pool(conn)
+    patch_current_spot()
+    out = await portfolio_history(range="1m", metal="all", user=authed_user)
+    assert out["points"] == []
+
+
+@pytest.mark.asyncio
+async def test_history_flags_clamped_when_window_exceeds_holding_age(
+    authed_user, patch_pool, patch_current_spot,
+) -> None:
+    """User picks '1Y' but has only held 2 weeks. The line starts at first
+    purchase, not 350 days of zero. clamped_to_first_purchase=True so the
+    frontend can render an honest 'since DD-MM-YYYY' caption."""
+    recent = datetime.now(UTC) - timedelta(days=14)
+    purchase_rows = [{
+        "purchased_at": recent,
+        "metal": "gold",
+        "gross_weight_g": Decimal("10"),
+        "purity": Decimal("1.0"),
+        "price_paid_dkk": Decimal("8000"),
+    }]
+    spot_rows = [{
+        "fetched_at": recent,
+        "gold_dkk_per_g": Decimal("800"),
+        "silver_dkk_per_g": Decimal("10"),
+    }]
+    conn = _FakeHistoryConn(purchase_rows=purchase_rows, spot_rows=spot_rows)
+    patch_pool(conn)
+    patch_current_spot()
+    out = await portfolio_history(range="1y", metal="all", user=authed_user)
+    assert out["clamped_to_first_purchase"] is True
+
+
+@pytest.mark.asyncio
+async def test_history_does_not_flag_clamped_for_all_range(
+    authed_user, patch_pool, patch_current_spot,
+) -> None:
+    """range='all' is by definition unbounded — the user explicitly asked
+    for everything they own, so the clamp flag is meaningless and must
+    stay False (otherwise the 'since DD-MM-YYYY' caption fires spuriously
+    on the explicit ALL ask)."""
+    t0 = datetime(2026, 5, 1, tzinfo=UTC)
+    purchase_rows = [{
+        "purchased_at": t0,
+        "metal": "gold",
+        "gross_weight_g": Decimal("10"),
+        "purity": Decimal("1.0"),
+        "price_paid_dkk": Decimal("8000"),
+    }]
+    spot_rows = [{
+        "fetched_at": t0,
+        "gold_dkk_per_g": Decimal("800"),
+        "silver_dkk_per_g": Decimal("10"),
+    }]
+    conn = _FakeHistoryConn(purchase_rows=purchase_rows, spot_rows=spot_rows)
+    patch_pool(conn)
+    patch_current_spot()
+    out = await portfolio_history(range="all", metal="all", user=authed_user)
+    assert out["clamped_to_first_purchase"] is False
+
+
+@pytest.mark.asyncio
+async def test_history_falls_back_to_snapshot_tail_when_live_spot_times_out(
+    authed_user, patch_pool, monkeypatch,
+) -> None:
+    """Live spot upstream slow → bail with a warning, return snapshot-only
+    series (chart tail can lag by ≤ 20 min but the endpoint stays prompt).
+    Tests that the 3s LIVE_SPOT_TIMEOUT_S guard actually catches and
+    degrades cleanly rather than blocking the request."""
+    t0 = datetime(2026, 5, 1, tzinfo=UTC)
+    purchase_rows = [{
+        "purchased_at": t0,
+        "metal": "gold",
+        "gross_weight_g": Decimal("10"),
+        "purity": Decimal("1.0"),
+        "price_paid_dkk": Decimal("8000"),
+    }]
+    spot_rows = [{
+        "fetched_at": t0,
+        "gold_dkk_per_g": Decimal("800"),
+        "silver_dkk_per_g": Decimal("10"),
+    }]
+    conn = _FakeHistoryConn(purchase_rows=purchase_rows, spot_rows=spot_rows)
+    patch_pool(conn)
+
+    async def hangs_forever() -> dict:
+        import asyncio
+        await asyncio.sleep(10)  # would exceed LIVE_SPOT_TIMEOUT_S = 3
+        return {"gold": Decimal("800"), "silver": Decimal("10")}
+    monkeypatch.setattr("app.portfolio._current_spot_dkk_per_g", hangs_forever)
+    # Shrink the timeout so the test doesn't actually wait 3s.
+    monkeypatch.setattr("app.portfolio.LIVE_SPOT_TIMEOUT_S", 0.05)
+
+    out = await portfolio_history(range="all", metal="all", user=authed_user)
+    # Only the snapshot point remains — no synthetic now-point.
+    assert len(out["points"]) == 1

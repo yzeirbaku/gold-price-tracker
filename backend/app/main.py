@@ -411,6 +411,35 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
     }
 
 
+@app.get("/snapshot/age")
+async def snapshot_age(_: None = Depends(require_api_key)) -> dict[str, object]:
+    """Age of the most recent spot_snapshots row. Frontend uses this to
+    surface a "snapshots N min ago" indicator and warn when the cron has
+    stalled — outlier/fx_stale skips, QStash issues, or Render cold-starts
+    are all invisible to the user otherwise.
+
+    spot_snapshots is the canonical signal because every successful tick
+    writes one row regardless of whether bar/coin scrapers individually
+    succeeded; a bar table dry-spell could be a one-off scraper failure
+    rather than a cron outage.
+    """
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    async with pool.acquire() as conn:
+        last_at = await conn.fetchval(
+            "SELECT MAX(fetched_at) FROM spot_snapshots",
+        )
+    if last_at is None:
+        # Fresh DB, no snapshots ever. Frontend renders the "—" placeholder.
+        return {"last_at": None, "age_seconds": None}
+    age_seconds = int((datetime.now(UTC) - last_at).total_seconds())
+    return {
+        "last_at": last_at.isoformat(),
+        "age_seconds": age_seconds,
+    }
+
+
 @app.get("/history/bar/{dealer}/{size}")
 async def get_bar_history(
     dealer: str,

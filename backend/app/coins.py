@@ -18,6 +18,30 @@ Sources for weights/purity:
   spec — they're tracked as separate size_labels so per-monarch premiums
   surface independently.
 """
+from decimal import Decimal
+
+# Single source of truth for how fine_gold_g is computed and quantized.
+# Used by resolve(), by alerts.list_options(), and indirectly by every
+# downstream lookup (alerts._index_coin_mins quantizes to the same precision;
+# /history/coin and alerts._fetch_current_coin match with ABS < 0.005). Bump
+# FINE_GOLD_PRECISION and FINE_GOLD_MATCH_TOLERANCE_G together if you ever
+# need more decimals.
+FINE_GOLD_PRECISION = Decimal("0.0001")
+FINE_GOLD_MATCH_TOLERANCE_G = 0.005
+
+
+def fine_gold_g(gross_g: float, purity: float) -> float:
+    """Canonical fine-gold weight in grams, quantized to 4 decimal places.
+
+    Every site in the codebase that materializes fine_gold_g from
+    (gross, purity) MUST go through this function. The 4dp precision is the
+    invariant alerts._index_coin_mins relies on when bucketing scraper output
+    against alerts.fine_gold_g, and that /history/coin's ABS-tolerance lookup
+    expects.
+    """
+    return float(
+        (Decimal(str(gross_g)) * Decimal(str(purity))).quantize(FINE_GOLD_PRECISION)
+    )
 
 # Each entry: coin_type → { size_label: (gross_weight_g, purity) }
 COINS: dict[str, dict[str, tuple[float, float]]] = {
@@ -211,13 +235,11 @@ def resolve(title: str) -> tuple[str, str, float, float, float] | None:
     coin_types — so a title like "Britannia Sovereign 2024" can fall through
     to Sovereign even if Britannia matches first.
 
-    INVARIANT: fine_gold_g is computed via `round(gross_g * purity, 4)` and
-    that 4-decimal rounding MUST stay in sync with
-    `alerts._index_coin_mins`'s `.quantize(Decimal("0.0001"))`. If you ever
-    change this rounding rule (or write a coin scraper that synthesizes
-    fine_gold_g without calling this function), update the alerts side too —
-    otherwise alert matching can silently bucket the same coin differently
-    on the scrape side vs the lookup side.
+    INVARIANT: fine_gold_g is computed via `fine_gold_g(gross_g, purity)` —
+    Decimal-quantized to FINE_GOLD_PRECISION (4dp). Every site in the
+    codebase that materializes fine_gold_g from (gross, purity) MUST go
+    through that helper; alerts._index_coin_mins relies on this 4dp
+    precision to bucket scraper output against alert targets.
     """
     if not title:
         return None
@@ -228,7 +250,7 @@ def resolve(title: str) -> tuple[str, str, float, float, float] | None:
         # Sovereign default — bare "sovereign" with no qualifier means Full.
         if coin_type == "Sovereign" and "half" not in tl and "quarter" not in tl:
             gross_g, purity = COINS["Sovereign"]["Full"]
-            return ("Sovereign", "Full", gross_g, purity, round(gross_g * purity, 4))
+            return ("Sovereign", "Full", gross_g, purity, fine_gold_g(gross_g, purity))
         # Try size labels by specificity descending, so "1/10 oz" beats
         # "1 oz" on titles that contain both substrings.
         candidates = sorted(
@@ -248,7 +270,7 @@ def resolve(title: str) -> tuple[str, str, float, float, float] | None:
                     gross_g, purity = COINS[coin_type][size_label]
                     return (
                         coin_type, size_label, gross_g, purity,
-                        round(gross_g * purity, 4),
+                        fine_gold_g(gross_g, purity),
                     )
         # Fall through to next coin_type instead of giving up immediately.
     return None
