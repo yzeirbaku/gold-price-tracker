@@ -370,12 +370,6 @@ dialog form { position: relative; }
 }
 .dialog-close:hover { color: var(--accent); background: var(--surface-2); }
 .dialog-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-@media (max-width: 480px) {
-  dialog { padding: 1.1rem 1rem; width: min(82vw, 300px); }
-  dialog h2 { font-size: 0.95rem; }
-  dialog input { padding: 0.5rem 0.6rem; font-size: 0.95rem; }
-  dialog menu button { padding: 0.5rem 0.85rem; }
-}
 dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blur(2px); }
 dialog h2 { margin: 0 0 0.75rem 0; font-size: 1rem; }
 dialog label { display: block; margin: 0.75rem 0; font-size: 0.85rem; color: var(--fg-soft); }
@@ -475,6 +469,25 @@ dialog menu button[value="save"] {
 }
 dialog menu button[value="save"]:hover { filter: brightness(1.05); }
 dialog menu button[value="save"]:disabled:hover { filter: none; }
+
+/* Mobile dialog overrides — placed AFTER all desktop dialog rules so the
+   media query actually wins on selectors that get redeclared later in the
+   file (h2, input, menu button). Don't move this back above the desktop
+   dialog rules — same-specificity selectors would let the later desktop
+   rules clobber the mobile values. Width override on `dialog` works
+   regardless because the base dialog rule is upstream. */
+@media (max-width: 480px) {
+  /* Dialogs use most of the screen so multi-field forms (purchase, alerts)
+     don't feel cramped. 92vw matches the pre-existing #alert-dialog override. */
+  dialog { padding: 1.1rem 1rem; width: min(92vw, 420px); }
+  dialog h2 { font-size: 0.95rem; }
+  dialog input { padding: 0.5rem 0.6rem; font-size: 0.95rem; }
+  /* Cancel/Save match `.site-btn-primary` sizing exactly so the dialog
+     pair reads at the same weight as the top-of-page Add purchase / Add
+     alert buttons. Keeps the visual rhythm consistent across affirmative
+     actions. Bumped together with .site-btn-primary — keep these in sync. */
+  dialog menu button { padding: 0.375rem 0.75rem; font-size: 0.82rem; }
+}
 
 .spot-row {
   display: flex; justify-content: space-between; align-items: baseline;
@@ -796,7 +809,7 @@ tr.history-row > td {
 .site-btn-primary:hover { filter: brightness(1.05); }
 .site-btn-primary:disabled { opacity: 0.55; cursor: wait; }
 @media (max-width: 600px) {
-  .site-btn-primary { padding: 0.35rem 0.7rem; font-size: 0.78rem; }
+  .site-btn-primary { padding: 0.375rem 0.75rem; font-size: 0.82rem; }
 }
 
 .dialog-helper {
@@ -1029,32 +1042,25 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   gap: 0.15rem;
   justify-content: flex-end;
 }
-.row-edit {
-  font-size: 0.9rem;
+.row-edit, .row-delete {
+  font-size: 1.05rem;
   color: var(--muted);
   background: transparent; border: none;
   padding: 0.2rem 0.35rem;
   cursor: pointer;
+  line-height: 1;
 }
 .row-edit:hover { color: var(--accent); }
-.row-delete {
-  font-size: 0.85rem;
-  color: var(--muted);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
 .row-delete:hover { color: var(--error, #e85a5a); }
 @media (max-width: 480px) {
-  /* Phones: keep icons a bit bigger than desktop for tap-friendliness but
-     hold the column width down so it doesn't eat into the left columns.
-     The earlier larger padding pushed the actions column noticeably wide
-     on a 380px viewport; this dials it back. */
+  /* Phones: bump the visible glyph above desktop for tap-readability while
+     keeping the button bounding-box close to the same width — visible
+     weight, not hit-area weight. The actions column shouldn't crowd the
+     left columns on a 380px viewport. */
   .row-actions { gap: 0.05rem; }
   .row-edit, .row-delete {
-    font-size: 0.95rem;
-    padding: 0.3rem 0.25rem;
-    line-height: 1;
+    font-size: 1.15rem;
+    padding: 0.2rem 0.2rem;
   }
 }
 
