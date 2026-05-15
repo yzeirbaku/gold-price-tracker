@@ -1,0 +1,21 @@
+# Normalize line endings to LF everywhere — in the repo AND in the working
+# tree on checkout. Silences the "LF will be replaced by CRLF" warnings
+# that fire on every commit from Windows when core.autocrlf=true. Safe for
+# this project: every text format used here (Python, JS, HTML, CSS, MD,
+# YAML, SQL, webmanifest) is LF-tolerant.
+* text=auto eol=lf
+
+# Binaries — text=auto would normally detect these correctly, but being
+# explicit avoids any chance of a future tracked binary getting "normalized".
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
