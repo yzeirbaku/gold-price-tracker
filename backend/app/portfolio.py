@@ -45,6 +45,15 @@ _ALLOWED_UPDATE_COLS: frozenset[str] = frozenset({
 # of click can land microseconds in the future and 422 spuriously.
 _FUTURE_PURCHASED_AT_TOLERANCE = timedelta(minutes=5)
 
+# Hard ceiling on the live-spot HTTP fan-out used by every portfolio response.
+# api.gold-api.com + frankfurter.dev each carry httpx's default timeouts and
+# compound serially inside _current_spot_dkk_per_g — worst case ~20s without
+# this cap. 3s is well above their p95 and tight enough that a flaky upstream
+# surfaces as 502 rather than a hung request hogging a worker thread. Applied
+# inside _current_spot_dkk_per_g so every caller (list/create/update/history)
+# inherits the protection.
+LIVE_SPOT_TIMEOUT_S = 3.0
+
 
 def _reject_future_purchased_at(v: datetime) -> datetime:
     """Frozen historical-spot lookup walks back 7 days from `purchased_at`;
@@ -109,17 +118,28 @@ async def _fetch_historical_spot_dkk_per_g(metal: Metal, purchased_at: datetime)
 
 
 async def _current_spot_dkk_per_g() -> dict[Metal, Decimal]:
-    """Live spot in DKK/g for both metals. Uses today's FX."""
-    async with httpx.AsyncClient() as client:
-        usd_per_g = await fetch_spot_usd_per_gram(client)
-        rates, _ = await fetch_usd_to(client)
-    if usd_per_g is None:
-        raise HTTPException(status_code=502, detail="live spot unavailable")
-    dkk = rates["DKK"]
-    return {
-        "gold": Decimal(str(usd_per_g["gold"] * dkk)).quantize(Decimal("0.0001")),
-        "silver": Decimal(str(usd_per_g["silver"] * dkk)).quantize(Decimal("0.0001")),
-    }
+    """Live spot in DKK/g for both metals. Uses today's FX.
+
+    Self-protected with LIVE_SPOT_TIMEOUT_S — every portfolio endpoint depends
+    on this and the two upstream calls' httpx defaults compound. Surfaces
+    upstream failure OR timeout as HTTPException(502) so the frontend always
+    sees a single retry-able error mode.
+    """
+    async def _inner() -> dict[Metal, Decimal]:
+        async with httpx.AsyncClient() as client:
+            usd_per_g = await fetch_spot_usd_per_gram(client)
+            rates, _ = await fetch_usd_to(client)
+        if usd_per_g is None:
+            raise HTTPException(status_code=502, detail="live spot unavailable")
+        dkk = rates["DKK"]
+        return {
+            "gold": Decimal(str(usd_per_g["gold"] * dkk)).quantize(Decimal("0.0001")),
+            "silver": Decimal(str(usd_per_g["silver"] * dkk)).quantize(Decimal("0.0001")),
+        }
+    try:
+        return await asyncio.wait_for(_inner(), timeout=LIVE_SPOT_TIMEOUT_S)
+    except TimeoutError as e:
+        raise HTTPException(status_code=502, detail="live spot unavailable") from e
 
 
 def _decorate(row: dict, current_spot: dict[Metal, Decimal]) -> dict:
@@ -318,14 +338,6 @@ MetalFilter = Literal["all", "gold", "silver"]
 # decimation to ≤ HISTORY_MAX_POINTS keeps everything snappy.
 HISTORY_MAX_POINTS = 500
 
-# Cap the live-spot fetch inside /portfolio/history so a flaky upstream
-# (api.gold-api.com / frankfurter.dev) can only delay the chart by ~3s.
-# httpx's default timeouts can compound across the two upstream calls to
-# ~20s worst case — too long for an auxiliary chart. Pre-existing
-# /portfolio path has the same risk; consider capping there too if it
-# ever bites.
-LIVE_SPOT_TIMEOUT_S = 3.0
-
 
 def _reconstruct_value_series(
     purchases: list[dict[str, Any]],
@@ -511,9 +523,13 @@ async def portfolio_history(
     # stay empty lets that empty state render correctly.
     if spot_rows_raw:
         try:
-            current = await asyncio.wait_for(
-                _current_spot_dkk_per_g(), timeout=LIVE_SPOT_TIMEOUT_S,
-            )
+            # _current_spot_dkk_per_g self-protects with LIVE_SPOT_TIMEOUT_S
+            # and raises HTTPException(502) on either upstream failure or
+            # timeout. Caught here so the chart degrades to "snapshot tail
+            # only" instead of failing the whole endpoint — for the other
+            # portfolio endpoints (list/create/update) the 502 propagates,
+            # since they can't produce a useful response without live spot.
+            current = await _current_spot_dkk_per_g()
             now_t = datetime.now(tz=UTC)
             spot_rows.append({
                 "fetched_at": now_t,
@@ -526,10 +542,9 @@ async def portfolio_history(
             # _reconstruct_value_series assumes ascending order — one
             # cheap sort here keeps it bulletproof.
             spot_rows.sort(key=lambda r: r["fetched_at"])
-        except (HTTPException, TimeoutError):
-            # Live spot temporarily unavailable / slow — fall back to
-            # snapshot-only. Chart tail will lag by ≤ 20 min but the
-            # endpoint still returns promptly.
+        except HTTPException:
+            # Live spot temporarily unavailable / slow — chart tail will
+            # lag by ≤ 20 min but the endpoint still returns promptly.
             logger.warning("portfolio_history: live spot unavailable; using snapshot tail")
 
     points = _reconstruct_value_series(purchases, spot_rows)

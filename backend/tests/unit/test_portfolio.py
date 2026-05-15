@@ -662,13 +662,13 @@ async def test_history_does_not_flag_clamped_for_all_range(
 
 
 @pytest.mark.asyncio
-async def test_history_falls_back_to_snapshot_tail_when_live_spot_times_out(
+async def test_history_falls_back_to_snapshot_tail_when_live_spot_unavailable(
     authed_user, patch_pool, monkeypatch,
 ) -> None:
-    """Live spot upstream slow → bail with a warning, return snapshot-only
-    series (chart tail can lag by ≤ 20 min but the endpoint stays prompt).
-    Tests that the 3s LIVE_SPOT_TIMEOUT_S guard actually catches and
-    degrades cleanly rather than blocking the request."""
+    """Live spot raises HTTPException(502) → chart degrades to snapshot-only
+    instead of failing the whole endpoint. _current_spot_dkk_per_g raises 502
+    on either upstream failure or timeout (it self-protects with
+    LIVE_SPOT_TIMEOUT_S), so this single fallback path covers both."""
     t0 = datetime(2026, 5, 1, tzinfo=UTC)
     purchase_rows = [{
         "purchased_at": t0,
@@ -685,14 +685,33 @@ async def test_history_falls_back_to_snapshot_tail_when_live_spot_times_out(
     conn = _FakeHistoryConn(purchase_rows=purchase_rows, spot_rows=spot_rows)
     patch_pool(conn)
 
-    async def hangs_forever() -> dict:
-        import asyncio
-        await asyncio.sleep(10)  # would exceed LIVE_SPOT_TIMEOUT_S = 3
-        return {"gold": Decimal("800"), "silver": Decimal("10")}
-    monkeypatch.setattr("app.portfolio._current_spot_dkk_per_g", hangs_forever)
-    # Shrink the timeout so the test doesn't actually wait 3s.
-    monkeypatch.setattr("app.portfolio.LIVE_SPOT_TIMEOUT_S", 0.05)
+    async def upstream_fails() -> dict:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=502, detail="live spot unavailable")
+    monkeypatch.setattr("app.portfolio._current_spot_dkk_per_g", upstream_fails)
 
     out = await portfolio_history(range="all", metal="all", user=authed_user)
     # Only the snapshot point remains — no synthetic now-point.
     assert len(out["points"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_current_spot_raises_502_on_timeout(monkeypatch) -> None:
+    """The timeout guard lives inside _current_spot_dkk_per_g itself. If the
+    underlying httpx fan-out hangs past LIVE_SPOT_TIMEOUT_S, the wrapper must
+    raise HTTPException(502) — list/create/update can't degrade, only
+    history can, and they all share this single contract."""
+    from fastapi import HTTPException
+
+    from app.portfolio import _current_spot_dkk_per_g
+
+    async def hangs_forever(_client):
+        import asyncio
+        await asyncio.sleep(10)
+        return {"gold": 0.0, "silver": 0.0}
+    monkeypatch.setattr("app.portfolio.fetch_spot_usd_per_gram", hangs_forever)
+    monkeypatch.setattr("app.portfolio.LIVE_SPOT_TIMEOUT_S", 0.05)
+
+    with pytest.raises(HTTPException) as ei:
+        await _current_spot_dkk_per_g()
+    assert ei.value.status_code == 502

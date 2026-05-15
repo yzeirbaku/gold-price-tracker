@@ -167,12 +167,127 @@ async def _fetch_current_coin(
     )
 
 
+async def _fetch_current_bars_batch(
+    conn: Any, size_gs: list[Decimal],
+) -> dict[Decimal, dict]:
+    """Cross-dealer min premium per `size_g`, batched. Returns
+    {size_g: {dealer, premium_pct}} for the cheapest dealer in the last 90
+    minutes. One query regardless of how many targets — used by /alerts list
+    to avoid an N+1 against bar_snapshots."""
+    if not size_gs:
+        return {}
+    rows = await conn.fetch(
+        """
+        WITH ranked AS (
+          SELECT size_g, dealer,
+            (price_dkk - spot_gold_dkk_per_g * size_g) /
+            (spot_gold_dkk_per_g * size_g) * 100 AS premium_pct,
+            ROW_NUMBER() OVER (
+              PARTITION BY size_g
+              ORDER BY (price_dkk - spot_gold_dkk_per_g * size_g) /
+                       (spot_gold_dkk_per_g * size_g) ASC
+            ) AS rn
+          FROM bar_snapshots
+          WHERE size_g = ANY($1::numeric[])
+            AND status = 'ok'
+            AND price_dkk IS NOT NULL AND spot_gold_dkk_per_g IS NOT NULL
+            AND spot_gold_dkk_per_g > 0
+            AND fetched_at >= NOW() - INTERVAL '90 minutes'
+        )
+        SELECT size_g, dealer, premium_pct FROM ranked WHERE rn = 1
+        """,
+        size_gs,
+    )
+    return {
+        r["size_g"]: {"premium_pct": r["premium_pct"], "dealer": r["dealer"]}
+        for r in rows
+    }
+
+
+async def _fetch_current_coins_batch(
+    conn: Any, targets: list[tuple[str, Decimal]],
+) -> dict[tuple[str, Decimal], dict]:
+    """Cross-dealer min premium per (coin_type, fine_gold_g), batched.
+
+    Same 90-minute window + 0.005g fine_gold_g tolerance as the single-target
+    helper. The UNNEST-join collapses N decorations into one query and keys
+    the result by the *target* fine_gold_g (the caller's value), so dict
+    lookups in `_attach_current` line up with what went in.
+    """
+    if not targets:
+        return {}
+    coin_types = [t[0] for t in targets]
+    fine_gs = [t[1] for t in targets]
+    rows = await conn.fetch(
+        """
+        WITH targets AS (
+          SELECT * FROM UNNEST($1::text[], $2::numeric[])
+                       AS t(coin_type, fine_gold_g)
+        ),
+        ranked AS (
+          SELECT t.coin_type AS t_coin_type,
+                 t.fine_gold_g AS t_fine_gold_g,
+                 c.dealer,
+                 (c.price_dkk - c.spot_gold_dkk_per_g * c.fine_gold_g) /
+                 (c.spot_gold_dkk_per_g * c.fine_gold_g) * 100 AS premium_pct,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY t.coin_type, t.fine_gold_g
+                   ORDER BY (c.price_dkk - c.spot_gold_dkk_per_g * c.fine_gold_g) /
+                            (c.spot_gold_dkk_per_g * c.fine_gold_g) ASC
+                 ) AS rn
+          FROM coin_snapshots c
+          JOIN targets t
+            ON c.coin_type = t.coin_type
+           AND ABS(c.fine_gold_g - t.fine_gold_g) < 0.005
+          WHERE c.status = 'ok'
+            AND c.price_dkk IS NOT NULL AND c.spot_gold_dkk_per_g IS NOT NULL
+            AND c.spot_gold_dkk_per_g > 0
+            AND c.fetched_at >= NOW() - INTERVAL '90 minutes'
+        )
+        SELECT t_coin_type, t_fine_gold_g, dealer, premium_pct
+        FROM ranked WHERE rn = 1
+        """,
+        coin_types, fine_gs,
+    )
+    return {
+        (r["t_coin_type"], r["t_fine_gold_g"]): {
+            "premium_pct": r["premium_pct"], "dealer": r["dealer"],
+        }
+        for r in rows
+    }
+
+
 async def _decorate_with_current(conn: Any, row: dict) -> dict:
-    """Tack on current_min_premium_pct + current_best_dealer for UI context."""
+    """Tack on current_min_premium_pct + current_best_dealer for UI context.
+    Single-row variant — used by create/update where there's only one alert
+    to decorate. List path uses the batched helpers above."""
     if row["kind"] == "bar":
         rec = await _fetch_current_bar(conn, row["size_g"])
     else:
         rec = await _fetch_current_coin(conn, row["coin_type"], row["fine_gold_g"])
+    out = _row_to_json(row)
+    if rec is not None and rec["premium_pct"] is not None:
+        out["current_min_premium_pct"] = round(float(rec["premium_pct"]), 2)
+        out["current_best_dealer"] = rec["dealer"]
+    else:
+        out["current_min_premium_pct"] = None
+        out["current_best_dealer"] = None
+    return out
+
+
+def _attach_current(
+    row: dict,
+    bar_mins: dict[Decimal, dict],
+    coin_mins: dict[tuple[str, Decimal], dict],
+) -> dict:
+    """In-memory variant of _decorate_with_current driven by precomputed batch
+    maps. Returns the same shape so list-endpoint callers can't tell the
+    difference."""
+    if row["kind"] == "bar":
+        rec = bar_mins.get(row["size_g"])
+    else:
+        key = (row["coin_type"], row["fine_gold_g"].quantize(FINE_GOLD_PRECISION))
+        rec = coin_mins.get(key)
     out = _row_to_json(row)
     if rec is not None and rec["premium_pct"] is not None:
         out["current_min_premium_pct"] = round(float(rec["premium_pct"]), 2)
@@ -260,7 +375,24 @@ async def list_alerts(user: AuthedUser = Depends(require_session)) -> dict:
             "SELECT * FROM alerts WHERE user_id = $1 ORDER BY created_at DESC",
             user.id,
         )
-        decorated = [await _decorate_with_current(conn, dict(r)) for r in rows]
+        alerts = [dict(r) for r in rows]
+        # Batch decoration: one query per kind across all targets, instead of
+        # one query per alert. Pre-quantize fine_gold_g to FINE_GOLD_PRECISION
+        # so the keys we send into _fetch_current_coins_batch line up with
+        # what _attach_current will look up by.
+        bar_sizes = sorted({
+            a["size_g"] for a in alerts
+            if a["kind"] == "bar" and a["size_g"] is not None
+        })
+        coin_targets = sorted({
+            (a["coin_type"], a["fine_gold_g"].quantize(FINE_GOLD_PRECISION))
+            for a in alerts
+            if a["kind"] == "coin"
+            and a["coin_type"] is not None and a["fine_gold_g"] is not None
+        })
+        bar_mins = await _fetch_current_bars_batch(conn, list(bar_sizes))
+        coin_mins = await _fetch_current_coins_batch(conn, list(coin_targets))
+    decorated = [_attach_current(a, bar_mins, coin_mins) for a in alerts]
     return {"alerts": decorated}
 
 

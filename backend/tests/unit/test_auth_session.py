@@ -3,6 +3,7 @@ integration (require DB) and are out of scope for CI."""
 import hashlib
 import os
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from fastapi import HTTPException
 from app.auth_session import (
     RATE_LIMIT_PER_EMAIL,
     RATE_LIMIT_PER_IP,
+    SESSION_LAST_SEEN_DEBOUNCE,
     AuthedUser,
     _build_magic_link_url,
     _check_rate_limit,
@@ -210,14 +212,17 @@ async def test_resolve_session_returns_none_when_no_row(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_session_slides_last_seen_at_on_hit(monkeypatch) -> None:
-    """The happy path side-effect: every successful resolution must slide
-    last_seen_at forward. Otherwise a daily user gets logged out at 90 days
-    even though they've been active the whole time."""
+async def test_resolve_session_slides_last_seen_at_when_stale(monkeypatch) -> None:
+    """The happy-path side-effect with debounce: if last_seen_at is older than
+    SESSION_LAST_SEEN_DEBOUNCE, slide it forward. Otherwise a daily user gets
+    logged out at 90 days even though they've been active the whole time."""
     user_id = uuid4()
     session_id = uuid4()
+    # Past the debounce window → UPDATE must fire.
+    stale_last_seen = datetime.now(UTC) - SESSION_LAST_SEEN_DEBOUNCE - timedelta(minutes=5)
     conn = _FakeSessionConn(row={
         "id": session_id, "user_id": user_id, "email": "user@example.com",
+        "last_seen_at": stale_last_seen,
     })
     pool = _FakeSessionPool(conn)
 
@@ -235,3 +240,29 @@ async def test_resolve_session_slides_last_seen_at_on_hit(monkeypatch) -> None:
     assert "UPDATE sessions" in sql
     assert "last_seen_at" in sql
     assert args == (session_id,)
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_skips_write_when_recently_seen(monkeypatch) -> None:
+    """Debounce: a session refreshed inside the debounce window does NOT
+    trigger another UPDATE. This is the write-amplification fix — a chatty
+    UI hitting authed endpoints multiple times per minute should only ever
+    fire one UPDATE per hour."""
+    user_id = uuid4()
+    session_id = uuid4()
+    # Well inside the debounce window → no UPDATE should fire.
+    fresh_last_seen = datetime.now(UTC) - timedelta(minutes=5)
+    conn = _FakeSessionConn(row={
+        "id": session_id, "user_id": user_id, "email": "user@example.com",
+        "last_seen_at": fresh_last_seen,
+    })
+    pool = _FakeSessionPool(conn)
+
+    async def fake_pool():
+        return pool
+    monkeypatch.setattr("app.auth_session.get_pool", fake_pool)
+
+    user = await _resolve_session(str(session_id))
+    assert isinstance(user, AuthedUser)
+    # No UPDATE — debounce held the write.
+    assert conn.executed == []

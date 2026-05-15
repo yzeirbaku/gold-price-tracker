@@ -41,6 +41,13 @@ RATE_LIMIT_PER_EMAIL_WINDOW_MIN = 10
 RATE_LIMIT_PER_IP = 30
 RATE_LIMIT_PER_IP_WINDOW_MIN = 60
 
+# Debounce window for sliding `last_seen_at` forward. Without this we'd issue
+# an UPDATE on every authed request — chatty UIs (e.g. the portfolio view
+# refreshing on focus + the alerts view loading) can fire several per minute.
+# 1 hour cuts write load by ~100× and the worst-case session-expiry drift it
+# introduces (1 hour) is invisible against the 90-day sliding TTL.
+SESSION_LAST_SEEN_DEBOUNCE = timedelta(hours=1)
+
 
 @dataclass(frozen=True)
 class AuthedUser:
@@ -183,17 +190,22 @@ async def _resolve_session(session_id_str: str | None) -> AuthedUser | None:
     cutoff = datetime.now(UTC) - timedelta(days=SESSION_SLIDING_DAYS)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT s.id, s.user_id, u.email "
+            "SELECT s.id, s.user_id, s.last_seen_at, u.email "
             "FROM sessions s JOIN users u ON u.id = s.user_id "
             "WHERE s.id = $1 AND s.last_seen_at > $2",
             session_id, cutoff,
         )
         if row is None:
             return None
-        await conn.execute(
-            "UPDATE sessions SET last_seen_at = now() WHERE id = $1",
-            session_id,
-        )
+        # Debounced write: only refresh last_seen_at if it's stale enough to
+        # be worth a UPDATE. The 90-day sliding TTL still slides forward on
+        # every active hour; a chatty UI no longer carpets the DB with
+        # per-request writes. See SESSION_LAST_SEEN_DEBOUNCE.
+        if datetime.now(UTC) - row["last_seen_at"] > SESSION_LAST_SEEN_DEBOUNCE:
+            await conn.execute(
+                "UPDATE sessions SET last_seen_at = now() WHERE id = $1",
+                session_id,
+            )
     return AuthedUser(id=row["user_id"], email=row["email"])
 
 
