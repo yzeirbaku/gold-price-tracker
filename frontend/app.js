@@ -1870,35 +1870,18 @@ function renderAlerts() {
   emptyEl.hidden = true;
   tableEl.hidden = false;
   tbody.innerHTML = alertsCache.map((a) => {
-    // Kind column: Title-case to match the radio button labels in the dialog.
+    // Type column: Title-case to match the radio button labels in the dialog.
     const kind = a.kind === 'bar' ? 'Bar' : 'Coin';
-    // Target column: just size for bars (no redundant "bar"; the Kind column
-    // already carries that). For coins: coin type + size, dimmed fine weight.
+    // Target column: just size for bars (no redundant "bar"; Type column
+    // carries that). For coins: coin type + dimmed fine weight.
     const target = a.kind === 'bar'
       ? `${formatBarSize(a.size_g)} g`
       : `${escapeHtml(a.coin_type)} <span class="muted-tiny">(${formatFineG(a.fine_gold_g)} g fine)</span>`;
-    // Keep the row narrow enough to fit phone widths without overflow —
-    // dealer was duplicated info anyway (it's right there in the email
-    // when the alert fires, and a hover/tap on the alert detail can
-    // surface it later). Just the % is enough at-a-glance.
-    const current = a.current_min_premium_pct != null
-      ? `${a.current_min_premium_pct.toFixed(2)}%`
-      : '<span class="muted-tiny">—</span>';
-    let statusCls = 'status-disabled';
-    let statusTitle = 'Disabled';
-    if (a.enabled && !a.muted_until_recovery) { statusCls = 'status-armed'; statusTitle = 'Armed — watching'; }
-    else if (a.enabled && a.muted_until_recovery) {
-      statusCls = 'status-muted';
-      const lastFired = a.last_fired_at ? fmtDateTime(a.last_fired_at) : '';
-      statusTitle = lastFired ? `Muted — fired ${lastFired}; will re-arm when premium recovers` : 'Muted — will re-arm when premium recovers';
-    }
     return `
       <tr class="alert-row" data-id="${a.id}">
         <td>${kind}</td>
         <td>${target}</td>
         <td>≤ ${Number(a.threshold_pct).toFixed(2)}%</td>
-        <td>${current}</td>
-        <td><span class="status-dot ${statusCls}" title="${escapeHtml(statusTitle)}" aria-label="${escapeHtml(statusTitle)}"></span></td>
         <td>
           <div class="row-actions">
             <button class="row-edit icon-btn" aria-label="Edit" data-id="${a.id}" type="button">✎</button>
@@ -1908,6 +1891,67 @@ function renderAlerts() {
       </tr>
     `;
   }).join('');
+}
+
+function buildAlertDetail(a) {
+  let statusCls = 'status-disabled';
+  let statusLabel = 'Disabled';
+  let statusDescription = 'Toggle this alert on in the edit dialog to start watching.';
+  if (a.enabled && !a.muted_until_recovery) {
+    statusCls = 'status-armed';
+    statusLabel = 'Armed';
+    statusDescription = "Watching the market. We'll email you when the premium drops to your threshold.";
+  } else if (a.enabled && a.muted_until_recovery) {
+    statusCls = 'status-muted';
+    statusLabel = 'Muted';
+    statusDescription = 'Already fired. Will re-arm once the premium climbs back above your threshold.';
+  }
+  const currentPrem = a.current_min_premium_pct != null
+    ? `${a.current_min_premium_pct.toFixed(2)}%`
+    : 'No data';
+  const bestDealer = a.current_best_dealer ? escapeHtml(a.current_best_dealer) : 'No data';
+  const fires = Number.isFinite(a.fire_count) ? a.fire_count : 0;
+  const lastFired = a.last_fired_at ? fmtDateTime(a.last_fired_at) : 'Never';
+  return `
+    <div class="purchase-detail">
+      <section class="pd-section pd-section-status">
+        <h4 class="pd-section-head">Status</h4>
+        <div class="pd-section-grid">
+          <div class="pd-cell">
+            <span class="pd-label">State</span>
+            <span class="pd-value"><span class="status-dot ${statusCls}" aria-hidden="true"></span> ${statusLabel}</span>
+          </div>
+          <div class="pd-cell">
+            <span class="pd-label">Description</span>
+            <span class="pd-value">${statusDescription}</span>
+          </div>
+        </div>
+      </section>
+      <section class="pd-section">
+        <h4 class="pd-section-head">Now</h4>
+        <div class="pd-section-grid">
+          <div class="pd-cell"><span class="pd-label">Current premium</span><span class="pd-value">${currentPrem}</span></div>
+          <div class="pd-cell"><span class="pd-label">Best dealer</span><span class="pd-value">${bestDealer}</span></div>
+        </div>
+      </section>
+      <section class="pd-section">
+        <h4 class="pd-section-head">History</h4>
+        <div class="pd-section-grid">
+          <div class="pd-cell"><span class="pd-label">Times triggered</span><span class="pd-value">${fires}</span></div>
+          <div class="pd-cell"><span class="pd-label">Last fired</span><span class="pd-value">${lastFired}</span></div>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function collapseAlertDetail() {
+  const open = document.querySelector('#alerts-table tr.alert-row.is-expanded');
+  if (open) {
+    open.classList.remove('is-expanded');
+    const next = open.nextElementSibling;
+    if (next && next.classList.contains('portfolio-detail-row')) next.remove();
+  }
 }
 
 function formatBarSize(g) {
@@ -1922,7 +1966,7 @@ function fmtDateTime(iso) {
   return `${fmtDate(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-// Table click delegate — edit + delete actions.
+// Table click delegate — edit + delete actions + row-expand.
 $('#alerts-table tbody').addEventListener('click', async (e) => {
   const edit = e.target.closest('.row-edit');
   if (edit) {
@@ -1959,7 +2003,24 @@ $('#alerts-table tbody').addEventListener('click', async (e) => {
         message: `Network error: ${err.message}`,
       });
     }
+    return;
   }
+
+  // Row-expand: toggle the detail panel directly under the clicked row.
+  // Mirrors the portfolio table pattern (one row expanded at a time).
+  const row = e.target.closest('tr.alert-row');
+  if (!row) return;
+  const wasOpen = row.classList.contains('is-expanded');
+  collapseAlertDetail();
+  if (wasOpen) return;
+  const a = alertsCache.find((x) => x.id === row.dataset.id);
+  if (!a) return;
+  const tr = document.createElement('tr');
+  // Reuses the portfolio detail row class so the styling matches exactly.
+  tr.className = 'alert-detail-row portfolio-detail-row';
+  tr.innerHTML = `<td colspan="4">${buildAlertDetail(a)}</td>`;
+  row.after(tr);
+  row.classList.add('is-expanded');
 });
 
 // Add / edit dialog ----------------------------------------------------------

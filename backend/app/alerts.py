@@ -523,7 +523,8 @@ async def evaluate_alerts(
 
         async with pool.acquire() as conn:
             await conn.execute(
-                "UPDATE alerts SET muted_until_recovery = TRUE, last_fired_at = NOW() "
+                "UPDATE alerts SET muted_until_recovery = TRUE, last_fired_at = NOW(), "
+                "  fire_count = fire_count + 1 "
                 "WHERE id = ANY($1::uuid[])",
                 [a["id"] for a, _ in fires],
             )

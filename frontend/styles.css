@@ -74,10 +74,8 @@ body {
 }
 
 header {
-  display: flex; align-items: center;
+  display: flex; align-items: flex-end;
   gap: 0.5rem;
-  /* 1rem horizontal padding matches the cards' margin so the menu
-     button lines up exactly with the card edge at every viewport size. */
   padding: 1rem;
   border-bottom: 1px solid var(--border);
   background: var(--header-bg);
@@ -156,15 +154,25 @@ header h1 {
 main { max-width: 720px; margin: 0 auto; }
 
 /* Header layout — title on the left, tabs immediately after the title,
-   settings on the far right. Tabs read as navigation, not primary CTAs. */
+   settings on the far right. Tabs read as navigation, not primary CTAs.
+   `align-items: flex-end` bottom-aligns the h1 with the burger button
+   AND the tab strip — so all three share the same bottom baseline.
+   The `padding-bottom` on .header-title lifts the title + tabs up a few
+   pixels so the title glyphs don't visually float below the burger's
+   center — the line-height around the h1 text otherwise pushes the
+   visible glyphs lower than the burger icon's optical bottom. */
 .header-title {
-  display: flex; align-items: center; gap: 2rem;
+  display: flex; align-items: flex-end; gap: 2rem;
   min-width: 0;  /* let the h1 truncate if narrow */
   flex: 1;
+  /* Desktop h1 is bigger (1.3rem vs mobile's 1.15rem) so the glyph sits
+     proportionally higher inside its line box — needs a bit more lift
+     than mobile to visually settle against the burger's optical bottom.
+     Mobile override below restores the smaller value. */
+  padding-bottom: 0.5rem;
 }
 .tab-strip {
   display: flex; gap: 1.1rem;
-  transform: translateY(2px);
 }
 /* The `hidden` HTML attribute sets `display: none` at attribute specificity,
    which the `.tab-strip { display: flex }` rule above out-ranks. Restore
@@ -190,12 +198,19 @@ main { max-width: 720px; margin: 0 auto; }
      left edge lines up exactly with the cards. Title and tabs spread
      to opposite ends so tabs hug the right edge. */
   header { padding: 0.7rem 1rem; gap: 0.35rem; }
-  header h1 { font-size: 1.05rem; }
-  .header-title { gap: 0.5rem; justify-content: space-between; }
+  header h1 { font-size: 1.15rem; }
+  .header-title {
+    gap: 0.5rem;
+    justify-content: space-between;
+    padding-bottom: 0.35rem;  /* smaller lift on mobile than desktop */
+  }
   .tab-strip { gap: 0.75rem; }
   .tab-strip button { font-size: 0.7rem; }
-  .icon-btn { width: 38px; height: 38px; font-size: 1.1rem; }
-  #menu-btn { font-size: 1.1rem; }
+  /* A touch larger than the original 38px but smaller than the iOS 44px
+     guideline — the icon should read as tappable without dominating the
+     header. */
+  .icon-btn { width: 40px; height: 40px; font-size: 1.2rem; }
+  #menu-btn { font-size: 1.25rem; }
 }
 .card {
   margin: 1rem; padding: 1.1rem 1.1rem 1.25rem;
@@ -969,6 +984,18 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
 }
 .row-delete:hover { color: var(--error, #e85a5a); }
+@media (max-width: 480px) {
+  /* Phones: keep icons a bit bigger than desktop for tap-friendliness but
+     hold the column width down so it doesn't eat into the left columns.
+     The earlier larger padding pushed the actions column noticeably wide
+     on a 380px viewport; this dials it back. */
+  .row-actions { gap: 0.05rem; }
+  .row-edit, .row-delete {
+    font-size: 0.95rem;
+    padding: 0.3rem 0.25rem;
+    line-height: 1;
+  }
+}
 
 /* Alerts page header — title flush left, button flush right, description
    on its own line below. The base .results-head uses justify-content:
@@ -1002,39 +1029,29 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .alert-preview.is-loading .spinner { transform: scale(0.7); transform-origin: left center; }
 .alert-preview.is-loading .loading-text { font-size: 0.8rem; }
 
-/* Alerts table — uses the base table full-bleed layout from line 258
-   (negative-margins to extend across the card padding, first/last cell
-   paddings to re-indent content). Don't override width here. Just
-   collapse the Status + Actions columns to content-width so the Target
-   column gets the extra room on narrow viewports. Long coin targets
-   (e.g., "Krugerrand (15.55 g fine)") wrap inside the cell rather than
-   stretching the column. */
-#alerts-table tr.alert-row td:nth-child(5),
-#alerts-table thead th:nth-child(5),
-#alerts-table tr.alert-row td:nth-child(6),
-#alerts-table thead th:nth-child(6) {
-  width: 1%;
-  white-space: nowrap;
+/* Alerts table — slim 4-column layout (Type/Target/Threshold/actions).
+   Current premium + status + fire history live in the expandable detail
+   row below; click anywhere on the row (except edit/delete) to toggle.
+   The detail row reuses .portfolio-detail-row + .purchase-detail / .pd-*
+   classes verbatim so the look matches the portfolio table exactly. */
+/* Status section: give State a wider min column so Description starts
+   roughly a quarter of the way in instead of jammed against State. The
+   minmax floor (8rem) is what pushes the second column rightward; State's
+   actual chip is narrower, so the space between the two cells reads as
+   breathing room. Collapses to single-column on phones. */
+.pd-section-status .pd-section-grid {
+  grid-template-columns: minmax(8rem, max-content) 1fr;
+  gap: 0.4rem 1.25rem;
 }
-#alerts-table tr.alert-row td:nth-child(2) { white-space: normal; }
 @media (max-width: 480px) {
-  /* Tighten cell padding on phones so 6 columns fit without horizontal
-     overflow. Keep first/last cell paddings smaller too. */
-  #alerts-table th, #alerts-table td {
-    padding: 0.5rem 0.22rem;
-    font-size: 0.82rem;
-  }
-  #alerts-table th:first-child, #alerts-table td:first-child { padding-left: 0.85rem; }
-  #alerts-table th:last-child, #alerts-table td:last-child { padding-right: 0.85rem; }
-  #alerts-table th { font-size: 0.62rem; }
+  .pd-section-status .pd-section-grid { grid-template-columns: 1fr; }
 }
-
-/* Alerts table — same compact layout as portfolio + status dot column.
-   Last column right-aligned so the edit/delete buttons hug the right edge. */
+#alerts-table tr.alert-row { cursor: pointer; }
+#alerts-table tr.alert-row:hover { background: var(--hover-bg); }
+#alerts-table tr.alert-row.is-expanded { background: var(--hover-bg); }
+#alerts-table tr.alert-row td:nth-child(2) { white-space: normal; }
 #alerts-table thead th:last-child,
-#alerts-table tr.alert-row td:last-child { text-align: right; width: 1%; }
-#alerts-table tr.alert-row td:last-child,
-#alerts-table thead th:last-child { padding-right: 0.3rem; }
+#alerts-table tr.alert-row td:last-child { text-align: right; width: 1%; padding-right: 0.3rem; }
 .status-dot {
   display: inline-block;
   width: 0.65rem; height: 0.65rem;

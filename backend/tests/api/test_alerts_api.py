@@ -113,6 +113,9 @@ async def test_create_bar_alert(client, pool):
     assert body["threshold_pct"] == 5.0
     assert body["enabled"] is True
     assert body["muted_until_recovery"] is False
+    # New alerts start at zero fires; the UI uses this in the expanded
+    # detail row ("Times triggered").
+    assert body["fire_count"] == 0
 
 
 async def test_create_coin_alert(client, pool):

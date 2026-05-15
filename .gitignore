@@ -26,3 +26,7 @@ build/
 # Local-only superpowers specs/plans — kept on disk, never committed
 docs/superpowers/
 .claude/
+
+# Local-only one-command dev spin-up — gitignored on purpose so other
+# contributors aren't pointed at a script with hardcoded local creds.
+backend/scripts/dev_spinup.py

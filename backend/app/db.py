@@ -149,12 +149,16 @@ CREATE TABLE IF NOT EXISTS alerts (
     enabled               BOOLEAN NOT NULL DEFAULT TRUE,
     muted_until_recovery  BOOLEAN NOT NULL DEFAULT FALSE,
     last_fired_at         TIMESTAMPTZ,
+    fire_count            INT NOT NULL DEFAULT 0,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (
         (kind = 'bar'  AND size_g IS NOT NULL AND coin_type IS NULL AND fine_gold_g IS NULL) OR
         (kind = 'coin' AND coin_type IS NOT NULL AND fine_gold_g IS NOT NULL AND size_g IS NULL)
     )
 );
+-- Additive migration for DBs created before fire_count existed.
+ALTER TABLE alerts ADD COLUMN IF NOT EXISTS fire_count INT NOT NULL DEFAULT 0;
+
 CREATE INDEX IF NOT EXISTS idx_alerts_user ON alerts (user_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_enabled ON alerts (enabled) WHERE enabled = TRUE;
 """
