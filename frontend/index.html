@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=107" />
+  <link rel="stylesheet" href="styles.css?v=109" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
@@ -135,6 +135,26 @@
         <button id="portfolio-add-btn" class="site-btn-primary" type="button">+ Add purchase</button>
       </div>
       <div id="portfolio-summary-content"></div>
+    </section>
+    <section id="portfolio-chart" class="card" hidden>
+      <div class="pc-head">
+        <div class="pc-current">
+          <span class="pc-value" id="pc-value">—</span>
+          <span class="pc-change" id="pc-change"></span>
+          <span class="pc-since muted-tiny" id="pc-since"></span>
+        </div>
+        <div class="range-toggle" id="pc-ranges" role="tablist">
+          <button data-range="1w" type="button">1W</button>
+          <button data-range="1m" class="active" type="button">1M</button>
+          <button data-range="6m" type="button">6M</button>
+          <button data-range="1y" type="button">1Y</button>
+          <button data-range="all" type="button">ALL</button>
+        </div>
+      </div>
+      <div id="pc-status" class="loading-msg" hidden></div>
+      <div class="pc-canvas-wrap">
+        <canvas id="portfolio-chart-canvas"></canvas>
+      </div>
     </section>
     <section id="portfolio-list" class="card">
       <div id="portfolio-loading" class="loading-msg" hidden></div>
@@ -374,7 +394,7 @@
 
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="config.js?v=105"></script>
-  <script src="app.js?v=105"></script>
+  <script src="config.js?v=111"></script>
+  <script src="app.js?v=111"></script>
 </body>
 </html>

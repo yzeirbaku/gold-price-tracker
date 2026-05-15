@@ -4,10 +4,11 @@ All endpoints require a session cookie (require_session). Historical spot is
 fetched once at write time and frozen onto the row in DKK/gram; current value
 is computed from live spot at read time.
 """
+import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 import httpx
@@ -274,3 +275,252 @@ async def delete_purchase(
         )
     if result == "DELETE 0":
         raise HTTPException(status_code=404, detail="purchase not found")
+
+
+# ── /portfolio/history ──────────────────────────────────────────────────────
+# Reconstructs portfolio market value over time from spot_snapshots + purchases.
+# No new table; everything is computed on demand. See CLAUDE.md for the design.
+
+RANGE_TO_DAYS: dict[str, int | None] = {
+    "1w": 7,
+    "1m": 30,
+    "6m": 183,   # ~6 calendar months
+    "1y": 365,
+    "all": None,
+}
+MetalFilter = Literal["all", "gold", "silver"]
+
+# Max points returned to the chart. 1y at 20-min cadence is ~26k rows, which
+# would dwarf the JSON payload and slow the chart for no visual gain — uniform
+# decimation to ≤ HISTORY_MAX_POINTS keeps everything snappy.
+HISTORY_MAX_POINTS = 500
+
+# Cap the live-spot fetch inside /portfolio/history so a flaky upstream
+# (api.gold-api.com / frankfurter.dev) can only delay the chart by ~3s.
+# httpx's default timeouts can compound across the two upstream calls to
+# ~20s worst case — too long for an auxiliary chart. Pre-existing
+# /portfolio path has the same risk; consider capping there too if it
+# ever bites.
+LIVE_SPOT_TIMEOUT_S = 3.0
+
+
+def _reconstruct_value_series(
+    purchases: list[dict[str, Any]],
+    spot_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """For each spot row, sum fine_g × spot_per_g over all purchases held at
+    that time. Purchases are expected sorted by purchased_at asc; spot_rows
+    by fetched_at asc. Two-pointer walk, O(N+M).
+
+    Purchases from BEFORE the first spot row are included naturally — at the
+    first iteration we advance through every purchase whose `purchased_at`
+    is ≤ the first spot's `fetched_at`, so prior holdings contribute to the
+    period's opening value.
+    """
+    gold_fine = Decimal("0")
+    silver_fine = Decimal("0")
+    pi = 0
+    points: list[dict[str, Any]] = []
+    for sr in spot_rows:
+        t = sr["fetched_at"]
+        while pi < len(purchases) and purchases[pi]["purchased_at"] <= t:
+            p = purchases[pi]
+            fine = Decimal(p["gross_weight_g"]) * Decimal(p["purity"])
+            if p["metal"] == "gold":
+                gold_fine += fine
+            else:
+                silver_fine += fine
+            pi += 1
+        gold_spot = sr["gold_dkk_per_g"]
+        silver_spot = sr["silver_dkk_per_g"]
+        value = Decimal("0")
+        if gold_spot is not None:
+            value += gold_fine * Decimal(gold_spot)
+        if silver_spot is not None:
+            value += silver_fine * Decimal(silver_spot)
+        points.append({"t": t, "value_dkk": float(value)})
+    return points
+
+
+def _downsample(
+    points: list[dict[str, Any]], max_points: int = HISTORY_MAX_POINTS,
+) -> list[dict[str, Any]]:
+    """Uniform-stride decimation that always keeps the first and last point.
+    Returns the input unchanged when already ≤ max_points."""
+    n = len(points)
+    if n <= max_points:
+        return points
+    step = (n - 1) / (max_points - 1)
+    return [points[round(i * step)] for i in range(max_points)]
+
+
+def _period_change(
+    points: list[dict[str, Any]],
+    purchases: list[dict[str, Any]],
+) -> dict[str, float]:
+    """Deposit-adjusted change over the period spanned by `points`.
+
+    Modified Dietz simplified: treat each purchase made strictly after the
+    first point as a deposit at its purchased_at. The change is
+    `current - start - net_purchases`; the percent uses
+    `start + net_purchases` as denominator so a pure capital injection
+    shows 0% (not infinite). Returns zeros for an empty series.
+    """
+    if not points:
+        return {
+            "period_start_value_dkk": 0.0,
+            "current_value_dkk": 0.0,
+            "net_purchases_in_period_dkk": 0.0,
+            "period_change_dkk": 0.0,
+            "period_change_pct": 0.0,
+        }
+    period_start = points[0]["t"]
+    period_end = points[-1]["t"]
+    start_value = points[0]["value_dkk"]
+    current_value = points[-1]["value_dkk"]
+    # Strict-greater on the lower bound: a purchase at exactly the first
+    # spot row's timestamp is already reflected in start_value (see the
+    # `<=` advance condition in _reconstruct_value_series).
+    net_purchases = sum(
+        float(p["price_paid_dkk"])
+        for p in purchases
+        if period_start < p["purchased_at"] <= period_end
+    )
+    change_dkk = current_value - start_value - net_purchases
+    denom = start_value + net_purchases
+    change_pct = (change_dkk / denom * 100) if denom > 0 else 0.0
+    return {
+        "period_start_value_dkk": round(start_value, 2),
+        "current_value_dkk": round(current_value, 2),
+        "net_purchases_in_period_dkk": round(net_purchases, 2),
+        "period_change_dkk": round(change_dkk, 2),
+        "period_change_pct": round(change_pct, 2),
+    }
+
+
+@router.get("/history")
+async def portfolio_history(
+    range: str = "1m",
+    metal: MetalFilter = "all",
+    user: AuthedUser = Depends(require_session),
+) -> dict[str, Any]:
+    """Time series of portfolio market value in DKK over the selected range.
+
+    Range pills: 1w / 1m / 6m / 1y / all. `metal` mirrors the gold/silver
+    filter chip in the summary panel so the chart follows the table.
+
+    No new table — we reconstruct on demand by joining `purchases` against
+    `spot_snapshots` rows in the range, plus a final synthetic point from
+    live spot so the chart's tail stays consistent with the summary card's
+    live current-value number (otherwise the chart can lag by up to 20 min).
+    """
+    if range not in RANGE_TO_DAYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"range must be one of {sorted(RANGE_TO_DAYS)}",
+        )
+    # `metal` is a Literal — FastAPI validates it at request parse time and
+    # returns 422 for anything else. No runtime check needed.
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="database not configured")
+
+    async with pool.acquire() as conn:
+        if metal == "all":
+            purchase_rows = await conn.fetch(
+                "SELECT purchased_at, metal, gross_weight_g, purity, "
+                "price_paid_dkk FROM purchases WHERE user_id = $1 "
+                "ORDER BY purchased_at ASC",
+                user.id,
+            )
+        else:
+            purchase_rows = await conn.fetch(
+                "SELECT purchased_at, metal, gross_weight_g, purity, "
+                "price_paid_dkk FROM purchases WHERE user_id = $1 "
+                "AND metal = $2 ORDER BY purchased_at ASC",
+                user.id, metal,
+            )
+
+        if not purchase_rows:
+            return {
+                "range": range, "metal": metal, "points": [],
+                "current_value_dkk": 0.0, "period_start_value_dkk": 0.0,
+                "net_purchases_in_period_dkk": 0.0,
+                "period_change_dkk": 0.0, "period_change_pct": 0.0,
+                "first_purchase_at": None,
+                "clamped_to_first_purchase": False,
+            }
+
+        purchases = [dict(r) for r in purchase_rows]
+        first_purchase_at: datetime = purchases[0]["purchased_at"]
+
+        # Range start: clamp to first_purchase_at so "1Y" on a 2-week-old
+        # portfolio shows the line starting at the first purchase, not 14
+        # days of flatline-zero followed by a tiny tail. `clamped` is
+        # surfaced to the frontend so it can render an honest
+        # "since DD-MM-YYYY" caption when the requested window is wider
+        # than the user's holding history.
+        days = RANGE_TO_DAYS[range]
+        if days is None:
+            range_start = first_purchase_at
+            clamped = False  # "all" was the explicit ask — no surprise to flag
+        else:
+            window_start = datetime.now(tz=UTC) - timedelta(days=days)
+            clamped = first_purchase_at > window_start
+            range_start = max(window_start, first_purchase_at)
+
+        spot_rows_raw = await conn.fetch(
+            "SELECT fetched_at, gold_dkk_per_g, silver_dkk_per_g "
+            "FROM spot_snapshots WHERE fetched_at >= $1 "
+            "ORDER BY fetched_at ASC",
+            range_start,
+        )
+
+    spot_rows = [dict(r) for r in spot_rows_raw]
+
+    # Append a synthetic "now" point using live spot so the chart's last
+    # value matches the summary card. A purchase added 1 minute ago wouldn't
+    # otherwise be visible on the line until the next 20-min snapshot.
+    #
+    # Skip the synthetic point if the DB returned zero rows in range — a
+    # lone synthetic point produces a single-dot chart and confuses the
+    # frontend's "not enough snapshot history" empty state. Letting points
+    # stay empty lets that empty state render correctly.
+    if spot_rows_raw:
+        try:
+            current = await asyncio.wait_for(
+                _current_spot_dkk_per_g(), timeout=LIVE_SPOT_TIMEOUT_S,
+            )
+            now_t = datetime.now(tz=UTC)
+            spot_rows.append({
+                "fetched_at": now_t,
+                "gold_dkk_per_g": current["gold"],
+                "silver_dkk_per_g": current["silver"],
+            })
+            # Defensive sort: in pathological cases (clock skew, test seed
+            # data with future fetched_at) the synthetic point may not be
+            # strictly latest. The two-pointer walk in
+            # _reconstruct_value_series assumes ascending order — one
+            # cheap sort here keeps it bulletproof.
+            spot_rows.sort(key=lambda r: r["fetched_at"])
+        except (HTTPException, TimeoutError):
+            # Live spot temporarily unavailable / slow — fall back to
+            # snapshot-only. Chart tail will lag by ≤ 20 min but the
+            # endpoint still returns promptly.
+            logger.warning("portfolio_history: live spot unavailable; using snapshot tail")
+
+    points = _reconstruct_value_series(purchases, spot_rows)
+    points = _downsample(points)
+    change = _period_change(points, purchases)
+
+    return {
+        "range": range,
+        "metal": metal,
+        "points": [
+            {"t": p["t"].isoformat(), "value_dkk": round(p["value_dkk"], 2)}
+            for p in points
+        ],
+        "first_purchase_at": first_purchase_at.isoformat(),
+        "clamped_to_first_purchase": clamped,
+        **change,
+    }

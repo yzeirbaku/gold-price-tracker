@@ -23,6 +23,14 @@ function fmtNum(n, decimals, locale = 'en-US') {
 // shows dots only — no commas anywhere. Spot uses en-US so its '.' is the
 // decimal separator. Both yield dots-only output.
 function fmtDKK(n) { return `${fmtNum(n, 0, 'da-DK')} dkk`; }
+// Compact form for tight contexts (mobile chart axes): 124567 → "125k",
+// 1240000 → "1.2M". Trims the trailing ".0" so "1k" stays clean, not "1.0k".
+function fmtCompactDKK(n) {
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (abs >= 1_000)     return Math.round(n / 1_000) + 'k';
+  return String(Math.round(n));
+}
 function fmtEUR(n) { return `${fmtNum(n, 2)} eur`; }
 function fmtSpotDKK(n) { return `${fmtNum(n, 2)} dkk`; }
 function fmtSpotEUR(n) { return `${fmtNum(n, 2)} eur`; }
@@ -1120,6 +1128,13 @@ let currentUser = null;
 let lastPortfolio = { purchases: [], summary: null };
 let portfolioSort = { col: 'date', dir: 'desc' };
 
+// Portfolio worth chart state. Range is the selected pill (1w/1m/6m/1y/all).
+// The Chart.js instance is held so we can update in place on range/filter
+// changes — destroying and recreating causes a width flicker (same reason
+// as the inline bar/coin history chart, see drawChart()).
+let portfolioChartRange = '1m';
+let portfolioChartInstance = null;
+
 function getSessionToken() {
   try { return localStorage.getItem(SESSION_TOKEN_KEY) || ''; } catch { return ''; }
 }
@@ -1337,12 +1352,229 @@ async function loadPortfolio() {
     lastPortfolio = data;
     renderPortfolioSummary(data.summary);
     renderPortfolioTable(data.purchases);
+    loadPortfolioHistory();
   } catch (e) {
     loadingEl.innerHTML = `Network error: ${escapeHtml(e.message)}`;
   } finally {
     loadingEl.hidden = true;
   }
 }
+
+async function loadPortfolioHistory() {
+  // Mirrors loadPortfolio's auth-handling for 401, but doesn't blow away the
+  // whole view on a transient error — the chart card just shows a soft
+  // status message inside its own card.
+  //
+  // Spinner + min display time: see feedback memory feedback_loading_states.md.
+  // On a fast local backend the fetch completes in <50ms, so the bare-text
+  // "Loading…" appeared and vanished in a flash. We use the canonical
+  // .spinner / .loading-text pattern + a ~LOADING_MIN_MS floor so the load
+  // state actually reads as one.
+  const card = $('#portfolio-chart');
+  const statusEl = $('#pc-status');
+  const metal = portfolioMetalFilter || 'all';
+  const url = `${BACKEND_URL}/portfolio/history?range=${encodeURIComponent(portfolioChartRange)}&metal=${encodeURIComponent(metal)}`;
+  const started = performance.now();
+  try {
+    statusEl.hidden = false;
+    statusEl.innerHTML = '<div class="spinner"><span></span><span></span><span></span></div><div class="loading-text">Loading chart…</div>';
+    const res = await fetch(url, { headers: authHeaders() });
+    if (res.status === 401) {
+      clearSessionToken(); currentUser = null; updateAuthUI();
+      showPricesView(); openLoginDialog(); return;
+    }
+    if (!res.ok) {
+      // Error paths skip the min-wait — surface the failure immediately.
+      statusEl.textContent = `Chart unavailable (status ${res.status}).`;
+      card.hidden = false; return;
+    }
+    const data = await res.json();
+    if (data.first_purchase_at == null) {
+      // No purchases at all → don't show the chart card. The summary card's
+      // empty state already handles "add your first purchase".
+      card.hidden = true;
+      return;
+    }
+    // Honour the min display time before swapping spinner → final UI.
+    await loadingMinWait(started);
+    if (!data.points.length) {
+      // Have purchases, but no snapshot history yet (fresh DB or all
+      // purchases newer than every snapshot row). Keep the card visible
+      // but show a placeholder instead of an empty chart.
+      card.hidden = false;
+      statusEl.hidden = false;
+      statusEl.textContent = 'Not enough snapshot history yet for this range.';
+      $('#pc-value').textContent = '—';
+      $('#pc-change').textContent = '';
+      $('#pc-since').textContent = '';
+      destroyPortfolioChart();
+      return;
+    }
+    card.hidden = false;
+    statusEl.hidden = true;
+    renderPortfolioChart(data);
+  } catch (e) {
+    statusEl.hidden = false;
+    statusEl.textContent = `Network error: ${escapeHtml(e.message)}`;
+  }
+}
+
+const LOADING_MIN_MS = 500;
+async function loadingMinWait(startedAt) {
+  const elapsed = performance.now() - startedAt;
+  if (elapsed < LOADING_MIN_MS) {
+    await new Promise(r => setTimeout(r, LOADING_MIN_MS - elapsed));
+  }
+}
+
+function renderPortfolioChart(data) {
+  const valueEl = $('#pc-value');
+  const changeEl = $('#pc-change');
+  const sinceEl = $('#pc-since');
+
+  valueEl.textContent = fmtDKK(data.current_value_dkk);
+  const chgDkk = data.period_change_dkk || 0;
+  const chgPct = data.period_change_pct || 0;
+  const cls = chgDkk >= 0 ? 'pnl-pos' : 'pnl-neg';
+  changeEl.className = `pc-change ${cls}`;
+  changeEl.textContent = `${fmtDKKSigned(chgDkk)} (${fmtPctSigned(chgPct)})`;
+
+  // If the requested range pre-dates the user's first purchase, the line
+  // starts at first_purchase_at — surface that so "+5% on 1Y" doesn't look
+  // misleading when the user has only held for two months.
+  sinceEl.textContent = portfolioRangeSinceLabel(data);
+
+  // Green when up, red when down — match the change-number colour. Faint
+  // fill so a flat chart still reads as "the area under the line".
+  const positive = chgDkk >= 0;
+  const lineColor = positive ? '#5ec27a' : '#e85a5a';
+  const points = data.points.map(p => ({ x: new Date(p.t).getTime(), y: p.value_dkk }));
+
+  if (portfolioChartInstance) {
+    portfolioChartInstance.data.datasets[0].data = points;
+    portfolioChartInstance.data.datasets[0].borderColor = lineColor;
+    portfolioChartInstance.data.datasets[0].backgroundColor = lineColor + '22';
+    portfolioChartInstance.data.datasets[0].pointRadius = points.length < 60 ? 2 : 0;
+    portfolioChartInstance.update('none');
+    return;
+  }
+
+  const isMobile = window.matchMedia('(max-width: 600px)').matches;
+  const tickFontSize = isMobile ? 10 : 12;
+  // Compact "22k" / "1.2M" labels at every breakpoint — full Danish-grouped
+  // DKK numbers ("22.000") read like dates and force a 50–70px gutter that
+  // eats the plot. Stocks apps universally abbreviate; this matches that
+  // convention and lets the line stretch closer to both card edges.
+  const yAxisWidth = isMobile ? 30 : 38;
+  const yTickFmt = (v) => fmtCompactDKK(v);
+  const xMaxTicks = isMobile ? 3 : 6;
+  const ctx = document.getElementById('portfolio-chart-canvas').getContext('2d');
+  portfolioChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [{
+        data: points,
+        borderColor: lineColor,
+        backgroundColor: lineColor + '22',
+        borderWidth: 2,
+        tension: 0.25,
+        pointRadius: points.length < 60 ? 2 : 0,
+        pointHoverRadius: 4,
+        fill: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      layout: { padding: 0 },
+      scales: {
+        x: {
+          type: 'linear',
+          bounds: 'data',
+          ticks: {
+            color: '#8a8a90',
+            maxTicksLimit: xMaxTicks,
+            padding: 2,
+            font: { size: tickFontSize },
+            callback: v => new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+          },
+          grid: { color: 'rgba(255,255,255,0.04)' },
+          afterFit: (axis) => { axis.paddingRight = 4; },
+        },
+        y: {
+          ticks: {
+            color: '#8a8a90',
+            padding: 0,   // hug the plot's left edge — the card has its
+                          // own padding already, no need for a second gutter
+            font: { size: tickFontSize },
+            callback: yTickFmt,
+          },
+          grid: { color: 'rgba(255,255,255,0.04)' },
+          afterFit: (axis) => {
+            axis.width = yAxisWidth;
+            axis.paddingTop = 0;
+            axis.paddingBottom = 0;
+          },
+        },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: items => fmtDate(new Date(items[0].parsed.x)) + ' ' + new Date(items[0].parsed.x).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            label: item => fmtDKK(item.parsed.y),
+          },
+        },
+      },
+    },
+  });
+}
+
+function portfolioRangeSinceLabel(data) {
+  // Two distinct "the chart starts later than the requested range" cases —
+  // both need to be surfaced so the period-change percent reads honestly
+  // (otherwise "+5% on 1Y" misleads when only 2 months are actually plotted):
+  //
+  //   1. Backend clamped range_start to first_purchase_at because the user
+  //      requested more history than they hold. Authoritative via the
+  //      `clamped_to_first_purchase` flag the backend now sets.
+  //   2. spot_snapshots in the DB don't go back as far as the user has
+  //      held — backend's clamp is moot, the line still starts at the
+  //      oldest available snapshot. Detect locally by comparing
+  //      first_purchase_at against points[0].t.
+  if (!data.points.length || !data.first_purchase_at) return '';
+  if (data.clamped_to_first_purchase) {
+    return `since ${fmtDate(data.first_purchase_at)}`;
+  }
+  const firstPoint = new Date(data.points[0].t).getTime();
+  const firstPurchase = new Date(data.first_purchase_at).getTime();
+  if (firstPoint - firstPurchase > 86_400_000) {
+    return `since ${fmtDate(data.points[0].t)} (limited history)`;
+  }
+  return '';
+}
+
+function destroyPortfolioChart() {
+  if (portfolioChartInstance) {
+    portfolioChartInstance.destroy();
+    portfolioChartInstance = null;
+  }
+}
+
+// Range pill clicks. Wired once at startup — the pill bar lives inside the
+// always-present #portfolio-chart section so we don't need to re-bind on
+// each render.
+$('#pc-ranges').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-range]');
+  if (!btn || btn.dataset.range === portfolioChartRange) return;
+  portfolioChartRange = btn.dataset.range;
+  $('#pc-ranges').querySelectorAll('button').forEach(b => {
+    b.classList.toggle('active', b.dataset.range === portfolioChartRange);
+  });
+  loadPortfolioHistory();
+});
 
 function renderPortfolioSummary(s) {
   const pnlClass = s.total_pnl_dkk >= 0 ? 'pnl-pos' : 'pnl-neg';
@@ -1393,6 +1625,9 @@ function setPortfolioFilter(metal) {
   portfolioMetalFilter = (portfolioMetalFilter === metal) ? null : metal;
   if (lastPortfolio.summary) renderPortfolioSummary(lastPortfolio.summary);
   if (lastPortfolio.purchases) renderPortfolioTable(lastPortfolio.purchases);
+  // Chart follows the filter: re-fetch the time series for the new metal
+  // scope so the value line matches what the table is showing.
+  if (currentUser) loadPortfolioHistory();
 }
 
 // Delegated click + keyboard on the summary card: any .metal-panel with a

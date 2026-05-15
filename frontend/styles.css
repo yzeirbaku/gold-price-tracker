@@ -897,6 +897,52 @@ tr.history-row > td {
 @media (max-width: 600px) {
   .metal-breakdown { grid-template-columns: 1fr; gap: 0.55rem; }
 }
+/* Portfolio worth chart — single value-over-time line between the summary
+   card and the table. The range pills reuse `.range-toggle` (same styling
+   as the bar/coin inline history toggles). */
+#portfolio-chart .pc-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 0.75rem; margin-bottom: 0.6rem;
+  flex-wrap: wrap;
+}
+.pc-current {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  min-width: 0;
+}
+.pc-value {
+  font-size: 1.35rem; font-weight: 600; color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.pc-change {
+  font-size: 0.85rem; font-variant-numeric: tabular-nums;
+}
+.pc-change.pnl-pos { color: var(--success, #5ec27a); }
+.pc-change.pnl-neg { color: var(--error, #e85a5a); }
+.pc-since {
+  margin-top: 0.1rem;
+}
+.pc-canvas-wrap {
+  position: relative;
+  height: 220px;
+  width: 100%;
+}
+@media (max-width: 600px) {
+  /* Tighter padding on the chart card so the plot can stretch wider — at
+     360px viewport the default 1.1rem on each side ate ~35px of horizontal
+     room that's better spent on the line itself. Keep the bottom roomier
+     so the x-axis labels don't graze the card border. */
+  #portfolio-chart.card { padding: 0.8rem 0.45rem 0.7rem; }
+  #portfolio-chart .pc-head {
+    gap: 0.5rem;
+    /* Restore a small head inset so the value/change/pills don't hug
+       the card edge once the card's own padding shrinks. */
+    padding: 0 0.35rem;
+  }
+  .pc-value { font-size: 1.15rem; }
+  .pc-canvas-wrap { height: 180px; }
+}
+
 .metal-gold { background: rgba(226, 192, 84, 0.18); color: #e2c054; border: 1px solid rgba(226, 192, 84, 0.3); }
 .metal-silver { background: rgba(192, 192, 192, 0.18); color: #c9c9c9; border: 1px solid rgba(192, 192, 192, 0.3); }
 [data-theme="light"] .metal-gold { color: #8a6512; background: rgba(184,147,42,0.14); border-color: rgba(184,147,42,0.32); }

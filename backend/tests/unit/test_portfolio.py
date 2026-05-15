@@ -10,7 +10,10 @@ import pytest
 from app.portfolio import (
     _ALLOWED_UPDATE_COLS,
     _decorate,
+    _downsample,
     _fetch_historical_spot_dkk_per_g,
+    _period_change,
+    _reconstruct_value_series,
     _summary,
 )
 
@@ -193,6 +196,206 @@ async def test_fetch_historical_spot_dkk_per_g_surfaces_unavailable_as_http_502(
                 "gold", datetime(2026, 1, 15, tzinfo=UTC),
             )
     assert exc.value.status_code == 502
+
+
+# ── /portfolio/history helpers ──────────────────────────────────────────────
+
+
+def _purchase(
+    *,
+    metal: str = "gold",
+    gross: str = "10",
+    purity: str = "1.0",
+    price: str = "8000",
+    at: datetime,
+) -> dict:
+    return {
+        "metal": metal,
+        "gross_weight_g": Decimal(gross),
+        "purity": Decimal(purity),
+        "price_paid_dkk": Decimal(price),
+        "purchased_at": at,
+    }
+
+
+def _spot_row(
+    *, at: datetime, gold: str | None = "800", silver: str | None = "10",
+) -> dict:
+    return {
+        "fetched_at": at,
+        "gold_dkk_per_g": Decimal(gold) if gold is not None else None,
+        "silver_dkk_per_g": Decimal(silver) if silver is not None else None,
+    }
+
+
+def test_reconstruct_value_series_basic_single_purchase() -> None:
+    """One 10g gold purchase, three spot ticks — value = 10 × spot at each."""
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    purchases = [_purchase(gross="10", purity="1.0", at=t0)]
+    spots = [
+        _spot_row(at=t0, gold="800"),
+        _spot_row(at=t0.replace(hour=1), gold="810"),
+        _spot_row(at=t0.replace(hour=2), gold="820"),
+    ]
+    points = _reconstruct_value_series(purchases, spots)
+    assert [p["value_dkk"] for p in points] == [8000.0, 8100.0, 8200.0]
+
+
+def test_reconstruct_value_series_purchase_before_first_spot_counts() -> None:
+    """A purchase made before any spot row in the range is included from
+    the first point. This is the 'user with 6 months of history clicks 1W'
+    case — old holdings still need to contribute."""
+    t_old = datetime(2025, 1, 1, tzinfo=UTC)
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    purchases = [_purchase(gross="5", purity="1.0", at=t_old)]
+    spots = [_spot_row(at=t0, gold="800")]
+    points = _reconstruct_value_series(purchases, spots)
+    assert points[0]["value_dkk"] == 4000.0  # 5g × 800
+
+
+def test_reconstruct_value_series_purchase_mid_range_jumps_value() -> None:
+    """A purchase made between two spot rows contributes from the next tick
+    onward, producing a visible step in the value line."""
+    t0 = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+    t_buy = datetime(2026, 1, 1, 0, 10, tzinfo=UTC)
+    t1 = datetime(2026, 1, 1, 0, 20, tzinfo=UTC)
+    purchases = [
+        _purchase(gross="10", purity="1.0", at=datetime(2025, 12, 1, tzinfo=UTC)),
+        _purchase(gross="5", purity="1.0", at=t_buy),  # +5g mid-range
+    ]
+    spots = [_spot_row(at=t0, gold="800"), _spot_row(at=t1, gold="800")]
+    points = _reconstruct_value_series(purchases, spots)
+    assert points[0]["value_dkk"] == 8000.0   # 10g × 800
+    assert points[1]["value_dkk"] == 12000.0  # 15g × 800
+
+
+def test_reconstruct_value_series_silver_uses_silver_spot() -> None:
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    purchases = [_purchase(metal="silver", gross="100", purity="1.0", at=t0)]
+    spots = [_spot_row(at=t0, gold="800", silver="10")]
+    points = _reconstruct_value_series(purchases, spots)
+    assert points[0]["value_dkk"] == 1000.0  # 100g × 10
+
+
+def test_reconstruct_value_series_mixed_metals_sum_correctly() -> None:
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    purchases = [
+        _purchase(metal="gold", gross="10", purity="1.0", at=t0),
+        _purchase(metal="silver", gross="100", purity="1.0", at=t0),
+    ]
+    spots = [_spot_row(at=t0, gold="800", silver="10")]
+    points = _reconstruct_value_series(purchases, spots)
+    assert points[0]["value_dkk"] == 9000.0  # 10×800 + 100×10
+
+
+def test_reconstruct_value_series_empty_purchases_returns_zero_line() -> None:
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    points = _reconstruct_value_series([], [_spot_row(at=t0)])
+    assert points == [{"t": t0, "value_dkk": 0.0}]
+
+
+def test_reconstruct_value_series_handles_null_spot_gracefully() -> None:
+    """An old spot_snapshots row with NULL gold (rare but possible if the
+    upstream spot fetch failed during persistence) must not crash. That
+    metal simply contributes 0 to value for that tick."""
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    purchases = [_purchase(gross="10", purity="1.0", at=t0)]
+    spots = [_spot_row(at=t0, gold=None, silver="10")]
+    points = _reconstruct_value_series(purchases, spots)
+    assert points[0]["value_dkk"] == 0.0
+
+
+def test_downsample_noop_when_under_max() -> None:
+    points = [{"t": i, "value_dkk": float(i)} for i in range(50)]
+    assert _downsample(points, max_points=500) == points
+
+
+def test_downsample_exact_length_and_endpoints_preserved() -> None:
+    points = [{"t": i, "value_dkk": float(i)} for i in range(10_000)]
+    out = _downsample(points, max_points=500)
+    assert len(out) == 500
+    assert out[0] == points[0]
+    assert out[-1] == points[-1]
+
+
+def test_downsample_preserves_monotonic_order() -> None:
+    """Decimation must not reorder — chart relies on t-ascending input."""
+    points = [{"t": i, "value_dkk": float(i)} for i in range(2_000)]
+    out = _downsample(points, max_points=100)
+    ts = [p["t"] for p in out]
+    assert ts == sorted(ts)
+
+
+def test_period_change_simple_no_new_purchases() -> None:
+    """100k → 110k with no purchases mid-period: +10k / +10%."""
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    t1 = datetime(2026, 2, 1, tzinfo=UTC)
+    points = [
+        {"t": t0, "value_dkk": 100_000.0},
+        {"t": t1, "value_dkk": 110_000.0},
+    ]
+    purchases = [_purchase(at=datetime(2025, 1, 1, tzinfo=UTC), price="50000")]
+    c = _period_change(points, purchases)
+    assert c["period_change_dkk"] == 10_000.0
+    assert c["period_change_pct"] == 10.0
+    assert c["net_purchases_in_period_dkk"] == 0.0
+
+
+def test_period_change_subtracts_purchases_made_during_period() -> None:
+    """100k start, user buys a 20k bar mid-period, market doesn't move →
+    end value is 120k. Naive change would be +20k (+20%); deposit-adjusted
+    must report ~0 because all of the gain is the user's own money."""
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    t_buy = datetime(2026, 1, 15, tzinfo=UTC)
+    t1 = datetime(2026, 2, 1, tzinfo=UTC)
+    points = [
+        {"t": t0, "value_dkk": 100_000.0},
+        {"t": t1, "value_dkk": 120_000.0},
+    ]
+    purchases = [
+        _purchase(at=datetime(2025, 1, 1, tzinfo=UTC), price="50000"),
+        _purchase(at=t_buy, price="20000"),
+    ]
+    c = _period_change(points, purchases)
+    assert c["net_purchases_in_period_dkk"] == 20_000.0
+    assert c["period_change_dkk"] == 0.0
+    assert c["period_change_pct"] == 0.0
+
+
+def test_period_change_purchase_at_exact_period_start_not_double_counted() -> None:
+    """A purchase made AT the first spot row's timestamp is already in
+    period_start_value. Counting it again as a net purchase would
+    double-subtract and produce a misleading negative change."""
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    t1 = datetime(2026, 2, 1, tzinfo=UTC)
+    points = [
+        {"t": t0, "value_dkk": 50_000.0},
+        {"t": t1, "value_dkk": 55_000.0},
+    ]
+    purchases = [_purchase(at=t0, price="50000")]  # at exact period_start
+    c = _period_change(points, purchases)
+    assert c["net_purchases_in_period_dkk"] == 0.0
+    assert c["period_change_dkk"] == 5_000.0
+
+
+def test_period_change_empty_points_returns_zeros() -> None:
+    c = _period_change([], [])
+    assert c == {
+        "period_start_value_dkk": 0.0,
+        "current_value_dkk": 0.0,
+        "net_purchases_in_period_dkk": 0.0,
+        "period_change_dkk": 0.0,
+        "period_change_pct": 0.0,
+    }
+
+
+def test_period_change_pct_zero_when_denominator_is_zero() -> None:
+    """No prior holdings, no in-period purchases: avoid ZeroDivisionError."""
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    t1 = datetime(2026, 2, 1, tzinfo=UTC)
+    points = [{"t": t0, "value_dkk": 0.0}, {"t": t1, "value_dkk": 0.0}]
+    c = _period_change(points, [])
+    assert c["period_change_pct"] == 0.0
 
 
 def test_allowed_update_cols_lists_all_pydantic_fields() -> None:
