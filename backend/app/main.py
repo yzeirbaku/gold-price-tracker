@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
@@ -26,6 +26,7 @@ from app.fx import fetch_usd_to
 from app.models import CoinListing, PriceResponse
 from app.orchestrator import flag_coin_premium_outliers, run
 from app.portfolio import router as portfolio_router
+from app.rate_limit import IPRateLimiter
 from app.reports.builder import build_report
 from app.reports.storage import fetch_report_html, list_reports, upsert_report
 from app.reports.windows import (
@@ -105,6 +106,34 @@ DEALER_NAMES = {s.name for s in ALL_SCRAPERS}
 # flip, near-zero glitch, or ~7%+ FX drift would all be caught comfortably.
 # See CLAUDE.md "Conventions / gotchas".
 SNAPSHOT_OUTLIER_THRESHOLD = 0.10
+
+# Public /coins fan-out throttle: each client IP gets one call per 5 seconds.
+# /coins hits 5 dealer sites per request, so a leaked X-API-Key could quickly
+# get our Render egress blocked by dealer WAFs without this guard. Keep it
+# loose enough that the PWA's own usage (one fetch on view-open + optional
+# manual refresh) never hits it.
+_COINS_RATE_LIMITER = IPRateLimiter(min_interval_s=5.0)
+
+
+def _client_ip(request: Request) -> str:
+    """Same X-Forwarded-For-aware extraction as auth_session._client_ip; the
+    fallback string keeps this dependency total even when request.client is
+    None (test client without an explicit host)."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+async def rate_limit_coins(request: Request) -> None:
+    """FastAPI dependency: throttle /coins per client IP."""
+    wait_s = _COINS_RATE_LIMITER.check(_client_ip(request))
+    if wait_s > 0:
+        raise HTTPException(
+            status_code=429,
+            detail="too many requests; please slow down",
+            headers={"Retry-After": str(max(1, int(wait_s) + 1))},
+        )
 
 
 @app.get("/")
@@ -473,7 +502,10 @@ async def get_coin_context(
 
 
 @app.get("/coins")
-async def get_coins(_: None = Depends(require_api_key)) -> dict[str, object]:
+async def get_coins(
+    _: None = Depends(require_api_key),
+    __: None = Depends(rate_limit_coins),
+) -> dict[str, object]:
     """Live-scrape every coin dealer in parallel and rank by premium asc.
 
     No DB read \u2014 same model as `/prices/{size}`. Spot + FX run in the same

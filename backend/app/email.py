@@ -6,8 +6,10 @@ to stdout — saves quota and avoids needing a real inbox during local testing.
 """
 import asyncio
 import html
+import json
 import logging
 import os
+from typing import Any
 
 import resend
 
@@ -19,9 +21,46 @@ _DEFAULT_FROM = "Gold Price Tracker <onboarding@resend.dev>"
 # env var used by the magic-link flow — Cloudflare Pages origin in prod.
 _FRONTEND_BASE = os.environ.get("MAGIC_LINK_BASE_URL", "").rstrip("/")
 
+# Hard ceiling on a single Resend SDK call. The SDK is synchronous and uses
+# `requests`, which has no default timeout — a stalled upstream could
+# otherwise hang the snapshot response past QStash's 2-min delivery budget
+# and trigger a retry that would re-send every alert from the same tick.
+# 10s is generous for a single HTTP POST; tune down if Resend latency p99
+# starts brushing it.
+_RESEND_TIMEOUT_S = 10.0
+
 
 class EmailSendError(RuntimeError):
     """Raised when Resend fails. Surfaces as 500 to the client."""
+
+
+async def _resend_send(payload: Any, *, to_email: str, context: str) -> None:
+    """Push the synchronous Resend SDK call into a worker thread with a hard
+    timeout. Raises EmailSendError on any failure (timeout, SDK exception,
+    network) so callers handle a single failure mode.
+
+    `context` is a short identifier ("magic_link" / "alert_email") used in
+    the timeout log line for grep-ability.
+    """
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(resend.Emails.send, payload),
+            timeout=_RESEND_TIMEOUT_S,
+        )
+    except TimeoutError as e:
+        logger.warning(
+            "resend_timeout %s",
+            json.dumps({
+                "event": "resend_timeout",
+                "context": context,
+                "to": to_email,
+                "timeout_s": _RESEND_TIMEOUT_S,
+            }),
+        )
+        raise EmailSendError(f"resend send timed out after {_RESEND_TIMEOUT_S:g}s") from e
+    except Exception as e:
+        logger.exception("resend send failed for %s (%s)", to_email, context)
+        raise EmailSendError(str(e)) from e
 
 
 async def send_magic_link(to_email: str, link_url: str) -> None:
@@ -35,20 +74,17 @@ async def send_magic_link(to_email: str, link_url: str) -> None:
     resend.api_key = api_key
 
     from_addr = os.environ.get("RESEND_FROM", _DEFAULT_FROM)
-    html_body = _html_body(link_url)
-    text_body = _text_body(link_url)
-
-    try:
-        resend.Emails.send({
+    await _resend_send(
+        {
             "from": from_addr,
             "to": [to_email],
             "subject": "Sign in to Gold Price Tracker",
-            "html": html_body,
-            "text": text_body,
-        })
-    except Exception as e:
-        logger.exception("resend send failed for %s", to_email)
-        raise EmailSendError(str(e)) from e
+            "html": _html_body(link_url),
+            "text": _text_body(link_url),
+        },
+        to_email=to_email,
+        context="magic_link",
+    )
 
 
 def _html_body(link_url: str) -> str:
@@ -109,22 +145,17 @@ async def send_alert_email(to_email: str, fires: list[dict]) -> None:
     resend.api_key = api_key
 
     from_addr = os.environ.get("RESEND_FROM", _DEFAULT_FROM)
-    html_body = _alert_html_body(fires)
-    text_body = _alert_text_body(fires)
-
-    # Resend SDK is synchronous (blocking requests). Push it to a worker
-    # thread so a slow upstream blocks only this task, not the event loop.
-    try:
-        await asyncio.to_thread(resend.Emails.send, {
+    await _resend_send(
+        {
             "from": from_addr,
             "to": [to_email],
             "subject": subject,
-            "html": html_body,
-            "text": text_body,
-        })
-    except Exception as e:
-        logger.exception("resend send failed for %s (alert email)", to_email)
-        raise EmailSendError(str(e)) from e
+            "html": _alert_html_body(fires),
+            "text": _alert_text_body(fires),
+        },
+        to_email=to_email,
+        context="alert_email",
+    )
 
 
 def _alert_subject(fires: list[dict]) -> str:

@@ -18,3 +18,8 @@ warn_unused_ignores = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Share one event loop across the whole session so the asyncpg pool created
+# in tests/api/conftest.py (session-scoped) can be used by every test. Pure-
+# logic tests in tests/unit don't depend on loop isolation, so this is safe.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
