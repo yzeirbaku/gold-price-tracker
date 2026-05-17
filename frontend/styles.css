@@ -214,7 +214,14 @@ main { max-width: 720px; margin: 0 auto; }
     justify-content: space-between;
     padding-bottom: 0.35rem;  /* smaller lift on mobile than desktop */
   }
-  .tab-strip { gap: 0.75rem; }
+  /* Nudge the tabs a few px down relative to the title baseline. The
+     parent `.header-title` is `align-items: flex-end`, which bottom-
+     aligns both children to the same line — but the h1's line-height
+     adds descender space below its visible glyphs, while the tab
+     buttons hug their box bottom. Net effect: tabs read as sitting
+     too high vs the title text. translateY shifts them visually
+     without affecting the flexbox layout. */
+  .tab-strip { gap: 0.75rem; transform: translateY(3px); }
   /* Primary in-page nav — 0.7rem (~11px) was below platform legibility
      minimums. 0.8rem (~13px) reads as proper tab labels without crowding
      the header on a 380px viewport. */
@@ -260,6 +267,13 @@ main { max-width: 720px; margin: 0 auto; }
   background: linear-gradient(180deg, var(--btn-active-top) 0%, var(--btn-active-bottom) 100%);
   color: #1a1300; border-color: var(--btn-active-bottom);
   box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 6px 16px rgba(184,147,42,0.18);
+}
+/* On phones, size pills shrink to the same dimensions as the dialog
+   Cancel/Save buttons so the prices view and dialog footer share one
+   visual scale. Desktop keeps the original chunky size (0.7/0.75/0.95)
+   since there's no parity concern at that viewport. */
+@media (max-width: 480px) {
+  .buttons button { padding: 0.45rem 0.82rem; font-size: 0.87rem; }
 }
 
 .results-head {
@@ -379,10 +393,10 @@ dialog {
 dialog form { position: relative; }
 .dialog-close {
   position: absolute;
-  /* Inside the dialog frame, not outside. The previous -0.5rem placement
-     could clip against the viewport edge on narrow phones; sitting inside
-     the padding band keeps the X reachable on every breakpoint. */
-  top: 0.5rem; right: 0.5rem;
+  /* Hugging the top-right corner from inside. 0.5rem sat under the corner,
+     0.25rem still read as drooping — 0.1rem snaps the button into the
+     corner without overlapping the dialog's 14px rounded radius. */
+  top: 0.1rem; right: 0.1rem;
   width: 32px; height: 32px;
   display: inline-flex; align-items: center; justify-content: center;
   background: transparent; border: none;
@@ -395,7 +409,13 @@ dialog form { position: relative; }
 @media (hover: hover) and (pointer: fine) {
   .dialog-close:hover { color: var(--accent); background: var(--surface-2); }
 }
-.dialog-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* No focus ring. The button has tabindex="-1" so it can't be reached via
+   keyboard Tab (ESC closes the dialog instead), and iOS Safari was
+   painting `:focus-visible` on autofocus despite the tabindex hint —
+   showing a yellow ring on every dialog open. Cancel both modes
+   explicitly. */
+.dialog-close:focus,
+.dialog-close:focus-visible { outline: none; }
 dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blur(2px); }
 dialog h2 { margin: 0 0 0.75rem 0; font-size: 1rem; }
 dialog label { display: block; margin: 0.75rem 0; font-size: 0.85rem; color: var(--fg-soft); }
@@ -517,12 +537,14 @@ dialog menu button[value="save"] {
   dialog { padding: 1.1rem 1rem; width: min(92vw, 420px); }
   dialog h2 { font-size: 0.95rem; }
   dialog input { padding: 0.5rem 0.6rem; font-size: 0.95rem; }
-  /* Cancel/Save sit a touch above `.site-btn-primary` so they feel
-     properly tappable inside the focused dialog context, without crossing
-     into "page CTA" weight. Add purchase / Add alert buttons stay at
-     `.site-btn-primary`'s mobile values — these two used to be matched
-     but were deliberately separated. */
-  dialog menu button { padding: 0.4rem 0.78rem; font-size: 0.84rem; }
+  /* Cancel/Save: tiny bump above the previous (0.4rem 0.78rem / 0.84rem)
+     sizing. Size-picker pills (`.buttons button`) are then shrunk to this
+     same dimension so the dialog footer and the size pills share one
+     visual scale on mobile. */
+  dialog menu button {
+    padding: 0.45rem 0.82rem;
+    font-size: 0.87rem;
+  }
 }
 
 .spot-row {
