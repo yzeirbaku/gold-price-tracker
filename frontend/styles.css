@@ -156,6 +156,14 @@ header h1 {
   font-size: 0.95rem; line-height: 1;
   transition: color 100ms ease;
 }
+/* The ⚙︎ gear glyph (with the U+FE0E text-style selector) renders smaller
+   than the other icons in the set because the gear shape doesn't fill
+   its em-box like $ / ▦ / ◆ / ◉ do. Bump it specifically on mobile
+   where the discrepancy is most visible. Desktop renders the same
+   glyphs at proportions where the gear holds its own; leave it alone. */
+@media (max-width: 480px) {
+  .menu-item[data-action="settings"] .menu-icon { font-size: 1.15rem; }
+}
 /* Brand wordmark at the top of the drawer — uses the same gold gradient
    as the page header h1 so the drawer reads as part of the app, not a
    detached panel. */

@@ -1538,6 +1538,31 @@ async function loadingMinWait(startedAt) {
   }
 }
 
+// Scriptable backgroundColor for the portfolio chart: builds a vertical
+// linear gradient from "more opaque near the line" → "fully transparent
+// at the bottom". The modern finance-app fill style (Nordnet et al.) —
+// gives the area under the line a sense of weight without dominating
+// the chart. Chart.js calls this on every layout; we read the current
+// dataset color from a custom `lineColor` property so the green↔red
+// flip on positive/negative change carries through to the gradient.
+function portfolioChartGradient(context) {
+  const chart = context.chart;
+  const chartArea = chart.chartArea;
+  // Chart.js calls scriptables before chartArea is calculated on the
+  // very first render; returning null lets Chart.js fall back without
+  // throwing. The next render call will have the layout in hand.
+  if (!chartArea) return null;
+  const color = (context.dataset && context.dataset.lineColor) || '#5ec27a';
+  const canvasCtx = chart.ctx;
+  const gradient = canvasCtx.createLinearGradient(
+    0, chartArea.top, 0, chartArea.bottom,
+  );
+  gradient.addColorStop(0, color + '66');     // ~40% alpha near the line
+  gradient.addColorStop(0.5, color + '1f');   // ~12% mid-fade
+  gradient.addColorStop(1, color + '00');     //   0% at the bottom
+  return gradient;
+}
+
 function renderPortfolioChart(data) {
   const valueEl = $('#pc-value');
   const changeEl = $('#pc-change');
@@ -1562,10 +1587,12 @@ function renderPortfolioChart(data) {
   const points = data.points.map(p => ({ x: new Date(p.t).getTime(), y: p.value_dkk }));
 
   if (portfolioChartInstance) {
-    portfolioChartInstance.data.datasets[0].data = points;
-    portfolioChartInstance.data.datasets[0].borderColor = lineColor;
-    portfolioChartInstance.data.datasets[0].backgroundColor = lineColor + '22';
-    portfolioChartInstance.data.datasets[0].pointRadius = points.length < 60 ? 2 : 0;
+    const ds = portfolioChartInstance.data.datasets[0];
+    ds.data = points;
+    ds.borderColor = lineColor;
+    ds.lineColor = lineColor;  // gradient reads from this on each layout
+    ds.backgroundColor = portfolioChartGradient;
+    ds.pointRadius = points.length < 60 ? 2 : 0;
     portfolioChartInstance.update('none');
     return;
   }
@@ -1586,7 +1613,9 @@ function renderPortfolioChart(data) {
       datasets: [{
         data: points,
         borderColor: lineColor,
-        backgroundColor: lineColor + '22',
+        // Custom prop read by portfolioChartGradient on each layout pass.
+        lineColor: lineColor,
+        backgroundColor: portfolioChartGradient,
         borderWidth: 2,
         tension: 0.25,
         pointRadius: points.length < 60 ? 2 : 0,
