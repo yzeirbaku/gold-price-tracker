@@ -162,7 +162,7 @@ header h1 {
    where the discrepancy is most visible. Desktop renders the same
    glyphs at proportions where the gear holds its own; leave it alone. */
 @media (max-width: 480px) {
-  .menu-item[data-action="settings"] .menu-icon { font-size: 1.15rem; }
+  .menu-item[data-action="settings"] .menu-icon { font-size: 1.25rem; }
 }
 /* Brand wordmark at the top of the drawer — uses the same gold gradient
    as the page header h1 so the drawer reads as part of the app, not a
