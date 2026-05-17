@@ -69,6 +69,10 @@ body {
   padding-top: env(safe-area-inset-top);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Kill iOS Safari's default grey flash on every tap. Our own :active /
+     :focus / :hover states provide all the press feedback we need; the
+     system flash is dated and breaks the dialed-in feel of the buttons. */
+  -webkit-tap-highlight-color: transparent;
   overflow-x: hidden;
   transition: background-color 200ms ease, color 200ms ease;
 }
@@ -133,7 +137,9 @@ header h1 {
   border-radius: 8px;
   transition: background 100ms ease, color 100ms ease;
 }
-.menu-item:hover { background: var(--hover-bg); color: var(--fg); }
+@media (hover: hover) and (pointer: fine) {
+  .menu-item:hover { background: var(--hover-bg); color: var(--fg); }
+}
 .menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .menu-item[hidden], .menu-account-info[hidden], .menu-divider[hidden] { display: none; }
 
@@ -147,7 +153,9 @@ header h1 {
   border-radius: 999px; font-size: 1.45rem; cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
-.icon-btn:hover { background: var(--surface-2); color: var(--fg); border-color: var(--border); }
+@media (hover: hover) and (pointer: fine) {
+  .icon-btn:hover { background: var(--surface-2); color: var(--fg); border-color: var(--border); }
+}
 .icon-btn:active { transform: scale(0.96); }
 .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -187,7 +195,9 @@ main { max-width: 720px; margin: 0 auto; }
   text-transform: uppercase; letter-spacing: 0.08em;
   transition: color 120ms ease, border-color 120ms ease;
 }
-.tab-strip button:hover { color: var(--fg-soft); }
+@media (hover: hover) and (pointer: fine) {
+  .tab-strip button:hover { color: var(--fg-soft); }
+}
 .tab-strip button.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
@@ -205,7 +215,10 @@ main { max-width: 720px; margin: 0 auto; }
     padding-bottom: 0.35rem;  /* smaller lift on mobile than desktop */
   }
   .tab-strip { gap: 0.75rem; }
-  .tab-strip button { font-size: 0.7rem; }
+  /* Primary in-page nav — 0.7rem (~11px) was below platform legibility
+     minimums. 0.8rem (~13px) reads as proper tab labels without crowding
+     the header on a 380px viewport. */
+  .tab-strip button { font-size: 0.8rem; }
   /* A touch larger than the original 38px but smaller than the iOS 44px
      guideline — the icon should read as tappable without dominating the
      header. */
@@ -239,7 +252,9 @@ main { max-width: 720px; margin: 0 auto; }
   font-size: 0.95rem; font-weight: 500; cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
-.buttons button:hover { background: var(--hover-bg); color: var(--fg); }
+@media (hover: hover) and (pointer: fine) {
+  .buttons button:hover { background: var(--hover-bg); color: var(--fg); }
+}
 .buttons button:active { transform: scale(0.98); }
 .buttons button.active {
   background: linear-gradient(180deg, var(--btn-active-top) 0%, var(--btn-active-bottom) 100%);
@@ -288,7 +303,9 @@ th { color: var(--muted); font-weight: 500; font-size: 0.7rem; text-transform: u
    filled triangle in --accent; inactive columns show no indicator. JS
    toggles `sort-active` + `sort-asc` / `sort-desc` on the <th>. */
 th.sortable { cursor: pointer; user-select: none; transition: color 120ms ease; }
-th.sortable:hover { color: var(--fg-soft); }
+@media (hover: hover) and (pointer: fine) {
+  th.sortable:hover { color: var(--fg-soft); }
+}
 th.sortable.sort-active { color: var(--accent); }
 th.sortable .sort-indicator::after {
   content: ""; margin-left: 0.3em; opacity: 0.5; font-size: 0.85em;
@@ -298,7 +315,9 @@ th.sortable.sort-asc  .sort-indicator::after { content: " ▲"; }
 th.sortable.sort-desc .sort-indicator::after { content: " ▼"; }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr { transition: background 120ms ease; }
-tbody tr:hover { background: var(--row-hover); }
+@media (hover: hover) and (pointer: fine) {
+  tbody tr:hover { background: var(--row-hover); }
+}
 tr.error td { color: var(--error); }
 tr.unavailable td { color: var(--muted); }
 tr.out_of_stock td { color: var(--muted); }
@@ -335,7 +354,9 @@ tr.out_of_stock td { color: var(--muted); }
   border-bottom: 1px dotted rgba(226,192,84,0.35);
   transition: color 120ms ease, border-color 120ms ease;
 }
-.dealer-link:hover { color: #f5e2a4; border-bottom-color: var(--accent); }
+@media (hover: hover) and (pointer: fine) {
+  .dealer-link:hover { color: #f5e2a4; border-bottom-color: var(--accent); }
+}
 .visit-arrow {
   display: inline-block;
   margin-left: 0.25rem;
@@ -358,7 +379,10 @@ dialog {
 dialog form { position: relative; }
 .dialog-close {
   position: absolute;
-  top: -0.5rem; right: -0.5rem;
+  /* Inside the dialog frame, not outside. The previous -0.5rem placement
+     could clip against the viewport edge on narrow phones; sitting inside
+     the padding band keeps the X reachable on every breakpoint. */
+  top: 0.5rem; right: 0.5rem;
   width: 32px; height: 32px;
   display: inline-flex; align-items: center; justify-content: center;
   background: transparent; border: none;
@@ -368,7 +392,9 @@ dialog form { position: relative; }
   border-radius: 999px;
   transition: color 120ms ease, background 120ms ease;
 }
-.dialog-close:hover { color: var(--accent); background: var(--surface-2); }
+@media (hover: hover) and (pointer: fine) {
+  .dialog-close:hover { color: var(--accent); background: var(--surface-2); }
+}
 .dialog-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blur(2px); }
 dialog h2 { margin: 0 0 0.75rem 0; font-size: 1rem; }
@@ -457,7 +483,9 @@ dialog menu button {
   font: inherit; cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
-dialog menu button:hover { background: var(--hover-bg); color: var(--fg); }
+@media (hover: hover) and (pointer: fine) {
+  dialog menu button:hover { background: var(--hover-bg); color: var(--fg); }
+}
 dialog menu button:disabled {
   opacity: 0.55;
   cursor: wait;
@@ -470,8 +498,12 @@ dialog menu button[value="save"] {
      button in the app now reads as raised. */
   box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 6px 16px rgba(184,147,42,0.18);
 }
-dialog menu button[value="save"]:hover { filter: brightness(1.05); }
-dialog menu button[value="save"]:disabled:hover { filter: none; }
+@media (hover: hover) and (pointer: fine) {
+  dialog menu button[value="save"]:hover { filter: brightness(1.05); }
+}
+@media (hover: hover) and (pointer: fine) {
+  dialog menu button[value="save"]:disabled:hover { filter: none; }
+}
 
 /* Mobile dialog overrides — placed AFTER all desktop dialog rules so the
    media query actually wins on selectors that get redeclared later in the
@@ -529,7 +561,9 @@ dialog menu button[value="save"]:disabled:hover { filter: none; }
 
 /* Inline history panel ———————————————————————————————————————————————— */
 tr.row-clickable { cursor: pointer; }
-tr.row-clickable:hover { background: var(--row-hover-strong); }
+@media (hover: hover) and (pointer: fine) {
+  tr.row-clickable:hover { background: var(--row-hover-strong); }
+}
 tr.row-expanded { background: rgba(226,192,84,0.05); }
 tr.row-expanded td { border-bottom-color: transparent; }
 
@@ -566,10 +600,16 @@ tr.history-row > td {
   font-size: 0.78rem; font-weight: 500; cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
-.range-toggle button:hover { background: var(--hover-bg); color: var(--fg); }
+@media (hover: hover) and (pointer: fine) {
+  .range-toggle button:hover { background: var(--hover-bg); color: var(--fg); }
+}
 .range-toggle button.active {
   background: linear-gradient(180deg, var(--btn-active-top) 0%, var(--btn-active-bottom) 100%);
   color: #1a1300; border-color: var(--btn-active-bottom);
+  /* Match the lift on `.site-btn-primary`, `dialog menu button[value=save]`,
+     and `.buttons button.active` — every gold/active button in the app now
+     shares the same inset highlight + soft outer glow. */
+  box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 6px 16px rgba(184,147,42,0.18);
 }
 
 .charts-grid {
@@ -656,7 +696,9 @@ tr.history-row > td {
   border-radius: 8px;
   cursor: pointer;
 }
-.archive-item:hover { border-color: var(--accent); }
+@media (hover: hover) and (pointer: fine) {
+  .archive-item:hover { border-color: var(--accent); }
+}
 .archive-label { font-size: 0.95rem; }
 .archive-download { margin: 0; }
 #reports-gen-status { margin-top: 0.4rem; }
@@ -698,7 +740,9 @@ tr.history-row > td {
   background-size: 4px 4px, 4px 4px;
   background-repeat: no-repeat;
 }
-.dd-trigger:hover, .dd.is-open .dd-trigger { border-color: var(--accent); }
+@media (hover: hover) and (pointer: fine) {
+  .dd-trigger:hover, .dd.is-open .dd-trigger { border-color: var(--accent); }
+}
 .dd-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .dd-list {
   position: absolute;
@@ -730,9 +774,13 @@ tr.history-row > td {
    Hover-on-selected intentionally stays flat (no double-highlight): once
    a row is the chosen one, moving the cursor over it doesn't change it.
    Used by every .dd dropdown (reports filters, alerts dialog). */
-.dd-list li:hover { background: rgba(255, 245, 0, 0.22); }
+@media (hover: hover) and (pointer: fine) {
+  .dd-list li:hover { background: rgba(255, 245, 0, 0.22); }
+}
 .dd-list li.selected,
-.dd-list li.selected:hover { background: rgba(255, 245, 0, 0.36); }
+@media (hover: hover) and (pointer: fine) {
+  .dd-list li.selected:hover { background: rgba(255, 245, 0, 0.36); }
+}
 
 /* Full-width variant for inline-in-fieldset usage (alerts dialog). The
    default .dd uses display:inline-block + min-width:7rem; inside a tall
@@ -795,7 +843,9 @@ tr.history-row > td {
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
-.site-btn:hover { background: var(--hover-bg); color: var(--fg); }
+@media (hover: hover) and (pointer: fine) {
+  .site-btn:hover { background: var(--hover-bg); color: var(--fg); }
+}
 .site-btn:disabled { opacity: 0.55; cursor: wait; }
 
 /* Affirmative variant — gold gradient. Use for Save/Add/Submit standalone
@@ -815,7 +865,9 @@ tr.history-row > td {
   box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 6px 16px rgba(184,147,42,0.18);
   transition: filter 120ms ease;
 }
-.site-btn-primary:hover { filter: brightness(1.05); }
+@media (hover: hover) and (pointer: fine) {
+  .site-btn-primary:hover { filter: brightness(1.05); }
+}
 .site-btn-primary:disabled { opacity: 0.55; cursor: wait; }
 @media (max-width: 600px) {
   .site-btn-primary { padding: 0.375rem 0.75rem; font-size: 0.82rem; }
@@ -916,8 +968,10 @@ tr.history-row > td {
   cursor: pointer;
   transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
 }
-.metal-panel[data-metal]:not(.is-empty):hover {
-  transform: translateY(-1px);
+@media (hover: hover) and (pointer: fine) {
+  .metal-panel[data-metal]:not(.is-empty):hover {
+    transform: translateY(-1px);
+  }
 }
 .metal-panel.is-active.is-gold {
   border-color: rgba(226, 192, 84, 0.95);
@@ -1018,7 +1072,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   color: var(--muted);
 }
 .empty-state a { color: var(--accent); text-decoration: none; }
-.empty-state a:hover { text-decoration: underline; }
+@media (hover: hover) and (pointer: fine) {
+  .empty-state a:hover { text-decoration: underline; }
+}
 
 /* Filter indicator chip — appears above the portfolio table when a metal
    filter is active. Compact + low-key so it doesn't compete with the table. */
@@ -1040,7 +1096,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
   transition: border-color 120ms ease, color 120ms ease;
 }
-.filter-chip-clear:hover { border-color: var(--accent); color: var(--accent); }
+@media (hover: hover) and (pointer: fine) {
+  .filter-chip-clear:hover { border-color: var(--accent); color: var(--accent); }
+}
 .filter-chip-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 #portfolio-table thead th:last-child,
@@ -1059,8 +1117,12 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
   line-height: 1;
 }
-.row-edit:hover { color: var(--accent); }
-.row-delete:hover { color: var(--error, #e85a5a); }
+@media (hover: hover) and (pointer: fine) {
+  .row-edit:hover { color: var(--accent); }
+}
+@media (hover: hover) and (pointer: fine) {
+  .row-delete:hover { color: var(--error, #e85a5a); }
+}
 @media (max-width: 480px) {
   /* Phones: bump the visible glyph above desktop for tap-readability while
      keeping the button bounding-box close to the same width — visible
@@ -1123,7 +1185,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   .pd-section-status .pd-section-grid { grid-template-columns: 1fr; }
 }
 #alerts-table tr.alert-row { cursor: pointer; }
-#alerts-table tr.alert-row:hover { background: var(--hover-bg); }
+@media (hover: hover) and (pointer: fine) {
+  #alerts-table tr.alert-row:hover { background: var(--hover-bg); }
+}
 #alerts-table tr.alert-row.is-expanded { background: var(--hover-bg); }
 #alerts-table tr.alert-row td:nth-child(2) { white-space: normal; }
 #alerts-table thead th:last-child,
@@ -1210,7 +1274,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 /* Portfolio row — compact 4-col layout with click-to-expand detail panel. */
 .portfolio-row { cursor: pointer; }
-.portfolio-row:hover { background: var(--hover-bg); }
+@media (hover: hover) and (pointer: fine) {
+  .portfolio-row:hover { background: var(--hover-bg); }
+}
 .portfolio-row.is-expanded { background: var(--hover-bg); }
 .portfolio-detail-row > td {
   background: var(--bg);
