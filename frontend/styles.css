@@ -236,8 +236,15 @@ main { max-width: 720px; margin: 0 auto; }
   /* Burger gets a slightly bigger glyph inside a slightly smaller button
      than the base `.icon-btn @ mobile`. The visual weight of ☰ is what
      reads as "this is the menu" — bumping the glyph while pulling the
-     button frame in makes the icon dominate the chrome. */
-  #menu-btn { width: 36px; height: 36px; font-size: 1.55rem; }
+     button frame in makes the icon dominate the chrome.
+     translateY shifts the button up a few px so its visible glyph aligns
+     with the title baseline instead of bottoming out with the flex-end
+     line (the title h1's line-height adds extra space below its glyphs
+     that the burger doesn't have). */
+  #menu-btn {
+    width: 36px; height: 36px; font-size: 1.55rem;
+    transform: translateY(-2px);
+  }
 }
 .card {
   margin: 1rem; padding: 1.1rem 1.1rem 1.25rem;

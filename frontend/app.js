@@ -787,16 +787,22 @@ document.addEventListener('keydown', (e) => {
 });
 
 // Edge-swipe gesture to open the menu on touch devices. The gesture must
-// START in a 12-32px band from the viewport's left edge so iOS Safari's
-// browser-back swipe (which fires when the touch starts at the very edge,
-// <12px) doesn't fight with us. The motion must be predominantly horizontal
-// — vertical deviation past MAX_DEVIATION_Y cancels the gesture so users
-// scrolling the page don't accidentally trigger it. Passive listeners; we
-// never preventDefault, so native scrolling stays smooth.
+// START in a 0-50px band from the viewport's left edge. iOS Safari's
+// own browser-back gesture fires from the very edge, but only when the
+// page has back-history; the page consistently sits at "/" so back
+// rarely applies, and even when it does iOS's gesture is velocity- and
+// direction-sensitive (slow horizontal pans don't trigger it). Keeping
+// EDGE_START_MIN at 0 maximises the chance of catching a natural thumb
+// swipe — the original 12-32px window was too narrow and most thumbs
+// landed outside it.
+// The motion must be predominantly horizontal: vertical deviation past
+// MAX_DEVIATION_Y cancels the gesture so users scrolling the page don't
+// accidentally trigger it. Passive listeners; we never preventDefault,
+// so native scrolling stays smooth.
 (() => {
-  const EDGE_START_MIN = 12;
-  const EDGE_START_MAX = 32;
-  const MIN_DISTANCE_X = 60;
+  const EDGE_START_MIN = 0;
+  const EDGE_START_MAX = 50;
+  const MIN_DISTANCE_X = 40;
   const MAX_DEVIATION_Y = 50;
   let startX = 0, startY = 0, tracking = false;
 
