@@ -802,13 +802,23 @@ document.addEventListener('keydown', (e) => {
 //
 // Both paths: motion must be predominantly horizontal — vertical deviation
 // past MAX_DEVIATION_Y cancels so vertical scrolling never accidentally
-// triggers. Passive listeners; we never preventDefault, so native
-// scrolling stays smooth.
+// triggers. The touchmove listener is non-passive so we can preventDefault
+// once the gesture reads as horizontal-dominant — that stops the page
+// from scrolling vertically along with the swipe, which was the dragging-
+// shimmy visual the user noticed. Below the lock threshold we still let
+// native scroll proceed, so a touch that starts in our trigger zone but
+// is actually a vertical scroll falls through cleanly.
 (() => {
   const EDGE_START_MIN = 0;
   const EDGE_START_MAX = 50;
   const MIN_DISTANCE_X = 40;
   const MAX_DEVIATION_Y = 50;
+  // Once horizontal motion exceeds LOCK_THRESHOLD_X AND dominates vertical
+  // motion, we commit to the gesture and stop the viewport from scrolling.
+  // Small enough that the lock kicks in well before the user notices any
+  // vertical drift; big enough that a true vertical scroll starting in
+  // our trigger zone gets a chance to escape.
+  const LOCK_THRESHOLD_X = 5;
   let startX = 0, startY = 0, mode = null;  // 'open' | 'close' | null
 
   document.addEventListener('touchstart', (e) => {
@@ -830,14 +840,21 @@ document.addEventListener('keydown', (e) => {
   document.addEventListener('touchmove', (e) => {
     if (!mode) return;
     const t = e.touches[0];
+    const dxRaw = t.clientX - startX;
     const dy = Math.abs(t.clientY - startY);
     if (dy > MAX_DEVIATION_Y) { mode = null; return; }
-    const dx = mode === 'open' ? t.clientX - startX : startX - t.clientX;
+    // Horizontal-dominant lock: stop the viewport from scrolling
+    // vertically along with the swipe. preventDefault requires the
+    // listener to be non-passive (see options below).
+    if (Math.abs(dxRaw) > LOCK_THRESHOLD_X && Math.abs(dxRaw) > dy) {
+      e.preventDefault();
+    }
+    const dx = mode === 'open' ? dxRaw : -dxRaw;
     if (dx >= MIN_DISTANCE_X) {
       setMenuOpen(mode === 'open');
       mode = null;
     }
-  }, { passive: true });
+  }, { passive: false });
 
   const cancel = () => { mode = null; };
   document.addEventListener('touchend', cancel, { passive: true });
