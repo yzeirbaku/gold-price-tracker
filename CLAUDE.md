@@ -1,4 +1,4 @@
-# Gold Bar Tracker — Claude guide
+# Gold Price Tracker — Claude guide
 
 Personal PWA that compares gold-bar prices (2.5 / 5 / 10 / 20 g) and gold-coin prices (≤ 20 g of fine gold) across Danish online dealers, plus a live spot ticker for gold and silver. Online-only by design — every load of the bars view is a fresh scrape; the coins view + per-row history charts read from a Postgres snapshot table populated by a 20-min cron.
 
