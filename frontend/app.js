@@ -786,51 +786,60 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && isMenuOpen()) setMenuOpen(false);
 });
 
-// Edge-swipe gesture to open the menu on touch devices. The gesture must
-// START in a 0-50px band from the viewport's left edge. iOS Safari's
-// own browser-back gesture fires from the very edge, but only when the
-// page has back-history; the page consistently sits at "/" so back
-// rarely applies, and even when it does iOS's gesture is velocity- and
-// direction-sensitive (slow horizontal pans don't trigger it). Keeping
-// EDGE_START_MIN at 0 maximises the chance of catching a natural thumb
-// swipe — the original 12-32px window was too narrow and most thumbs
-// landed outside it.
-// The motion must be predominantly horizontal: vertical deviation past
-// MAX_DEVIATION_Y cancels the gesture so users scrolling the page don't
-// accidentally trigger it. Passive listeners; we never preventDefault,
-// so native scrolling stays smooth.
+// Drawer swipe — opens the menu when closed (left-edge → right) and
+// closes it when open (any → left). One handler covers both directions
+// via a `mode` flag captured at touchstart.
+//
+// Open path: touch must START in a 0-50px band from the viewport's left
+// edge. iOS Safari's own browser-back gesture fires from the very edge,
+// but only when the page has back-history; this PWA sits at "/" so back
+// rarely applies, and iOS's gesture is velocity- and direction-sensitive
+// anyway (slow horizontal pans don't trigger it). Keeping EDGE_START_MIN
+// at 0 maximises the chance of catching a natural thumb swipe.
+//
+// Close path: any touch start works (no edge requirement) — the drawer
+// is already visible and the user expects "swipe it away" to close.
+//
+// Both paths: motion must be predominantly horizontal — vertical deviation
+// past MAX_DEVIATION_Y cancels so vertical scrolling never accidentally
+// triggers. Passive listeners; we never preventDefault, so native
+// scrolling stays smooth.
 (() => {
   const EDGE_START_MIN = 0;
   const EDGE_START_MAX = 50;
   const MIN_DISTANCE_X = 40;
   const MAX_DEVIATION_Y = 50;
-  let startX = 0, startY = 0, tracking = false;
-
-  const gestureBlocked = () =>
-    isMenuOpen() || document.querySelector('dialog[open]') !== null;
+  let startX = 0, startY = 0, mode = null;  // 'open' | 'close' | null
 
   document.addEventListener('touchstart', (e) => {
-    if (e.touches.length !== 1 || gestureBlocked()) return;
+    if (e.touches.length !== 1) return;
+    if (document.querySelector('dialog[open]') !== null) return;
     const t = e.touches[0];
-    if (t.clientX < EDGE_START_MIN || t.clientX > EDGE_START_MAX) return;
-    startX = t.clientX;
-    startY = t.clientY;
-    tracking = true;
-  }, { passive: true });
-
-  document.addEventListener('touchmove', (e) => {
-    if (!tracking) return;
-    const t = e.touches[0];
-    const dx = t.clientX - startX;
-    const dy = Math.abs(t.clientY - startY);
-    if (dy > MAX_DEVIATION_Y) { tracking = false; return; }
-    if (dx >= MIN_DISTANCE_X) {
-      tracking = false;
-      setMenuOpen(true);
+    if (isMenuOpen()) {
+      startX = t.clientX;
+      startY = t.clientY;
+      mode = 'close';
+    } else {
+      if (t.clientX < EDGE_START_MIN || t.clientX > EDGE_START_MAX) return;
+      startX = t.clientX;
+      startY = t.clientY;
+      mode = 'open';
     }
   }, { passive: true });
 
-  const cancel = () => { tracking = false; };
+  document.addEventListener('touchmove', (e) => {
+    if (!mode) return;
+    const t = e.touches[0];
+    const dy = Math.abs(t.clientY - startY);
+    if (dy > MAX_DEVIATION_Y) { mode = null; return; }
+    const dx = mode === 'open' ? t.clientX - startX : startX - t.clientX;
+    if (dx >= MIN_DISTANCE_X) {
+      setMenuOpen(mode === 'open');
+      mode = null;
+    }
+  }, { passive: true });
+
+  const cancel = () => { mode = null; };
   document.addEventListener('touchend', cancel, { passive: true });
   document.addEventListener('touchcancel', cancel, { passive: true });
 })();

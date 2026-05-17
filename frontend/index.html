@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=116" />
+  <link rel="stylesheet" href="styles.css?v=117" />
   <title>Danish Market Gold Prices</title>
 </head>
 <body>
@@ -27,15 +27,31 @@
 
   <div id="menu-backdrop" class="menu-backdrop"></div>
   <aside id="menu-dropdown" class="menu-dropdown" role="menu" aria-label="Navigation">
-    <button class="menu-item" data-action="prices" role="menuitem" type="button">Prices</button>
-    <button class="menu-item" data-action="reports" role="menuitem" type="button">Reports</button>
-    <button class="menu-item" data-action="portfolio" role="menuitem" type="button" hidden>Portfolio</button>
-    <button class="menu-item" data-action="alerts" role="menuitem" type="button" hidden>Alerts</button>
-    <button class="menu-item" data-action="settings" role="menuitem" type="button">Settings</button>
+    <div class="menu-brand">Gold Price Tracker</div>
+    <button class="menu-item" data-action="prices" role="menuitem" type="button">
+      <span class="menu-icon" aria-hidden="true">$</span><span>Prices</span>
+    </button>
+    <button class="menu-item" data-action="reports" role="menuitem" type="button">
+      <span class="menu-icon" aria-hidden="true">▦</span><span>Reports</span>
+    </button>
+    <button class="menu-item" data-action="portfolio" role="menuitem" type="button" hidden>
+      <span class="menu-icon" aria-hidden="true">◆</span><span>Portfolio</span>
+    </button>
+    <button class="menu-item" data-action="alerts" role="menuitem" type="button" hidden>
+      <span class="menu-icon" aria-hidden="true">◉</span><span>Alerts</span>
+    </button>
+    <button class="menu-item" data-action="settings" role="menuitem" type="button">
+      <span class="menu-icon" aria-hidden="true">⚙︎</span><span>Settings</span>
+    </button>
     <hr class="menu-divider" />
     <div class="menu-account-info" hidden></div>
-    <button class="menu-item" data-action="signin" role="menuitem" type="button">Sign in</button>
-    <button class="menu-item" data-action="signout" role="menuitem" type="button" hidden>Sign out</button>
+    <button class="menu-item" data-action="signin" role="menuitem" type="button">
+      <span class="menu-icon" aria-hidden="true">→</span><span>Sign in</span>
+    </button>
+    <button class="menu-item" data-action="signout" role="menuitem" type="button" hidden>
+      <span class="menu-icon" aria-hidden="true">←</span><span>Sign out</span>
+    </button>
+    <div class="menu-footer-credit">© Developed by Yzeir Baku &amp; Claude™, 2026</div>
   </aside>
 
   <section id="spot" class="card">
@@ -399,6 +415,6 @@
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="config.js?v=111"></script>
-  <script src="app.js?v=114"></script>
+  <script src="app.js?v=115"></script>
 </body>
 </html>
