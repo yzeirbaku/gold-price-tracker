@@ -16,7 +16,7 @@ backend/         FastAPI on Render free tier (Python 3.12)
     main.py            FastAPI app + CORS + endpoints
     auth.py            X-API-Key header check (constant-time compare)
     auth_session.py    magic-link auth: issue/verify, sessions, rate limit, require_session
-    portfolio.py       per-user purchase CRUD + P&L assembly (cookie-auth)
+    portfolio.py       per-user purchase CRUD + P&L assembly + worth-over-time (bearer-auth)
     alerts.py          per-user premium-threshold alerts: CRUD + evaluate_alerts hook
     email.py           Resend wrapper for magic-link + alert emails (with MAGIC_LINK_DEV_PRINT bypass)
     fx.py              USD→EUR/DKK via frankfurter.dev (+ stamped fallback + historical)
@@ -38,21 +38,27 @@ backend/         FastAPI on Render free tier (Python 3.12)
       janjorgensen.py / janjorgensen_coins.py
     reports/           HTML report generation (windows, loader, analytics, tables, notable, renderer, builder, storage)
   scripts/
-    seed.py            local-only: 30 days of fake bar+spot data into local Postgres
+    seed.py            local-only: 30 days of fake bar+coin+spot data + one weekly + one monthly report into local Postgres
   tests/
     unit/              fixtures-driven, no network — runs in CI on every push
     integration/       hits real dealer sites — weekly cron + manual dispatch
     fixtures/          frozen HTML snapshots per dealer (one for bars, one for coins)
 
 frontend/        Static PWA on Cloudflare Pages (vanilla JS, no build)
-  index.html           ☰ slide-in nav (Prices / Reports / Settings), Bars/Coins
-                       tab strip, Prices and Reports views, settings dialog
-  app.js               menu drawer + tabs + size picker (bars) + ranked list
-                       (coins) + inline history + Reports archive UI
+  index.html           ☰ side-drawer nav (Prices / Portfolio / Reports / Alerts / Settings)
+                       with brand wordmark + dev credit, Bars/Coins tab strip,
+                       five views, dialogs (purchase, alert, settings, login,
+                       confirm), verify-view for magic-link landing
+  app.js               menu drawer + edge-swipe gesture (open/close) + tabs +
+                       size picker (bars) + ranked list (coins) + inline
+                       history & buy-now-or-wait context + portfolio table
+                       + worth-over-time chart (gradient fill) + CSV export
+                       + alerts CRUD + magic-link verify
   config.js            window.BACKEND_URL — overwritten by CF Pages build script
   styles.css
   service-worker.js    minimal — required for iOS install, no caching
   manifest.webmanifest
+  _headers             CSP + cache directives (Cloudflare Pages picks this up)
 ```
 
 URL bar stays at `/` for every view — Prices ↔ Reports switch via the menu,
@@ -65,9 +71,9 @@ Postgres tables (Neon in prod, local Docker in dev):
 - `report_archive` — rendered HTML reports, keyed by (`report_type`, `period_start`), upsert on conflict
 - `users` — email-keyed user records (magic-link signup)
 - `magic_links` — one-time SHA-256-hashed tokens, 15-min TTL, single-use, `created_ip` for rate-limit
-- `sessions` — opaque UUID cookie tokens, 90-day sliding TTL via `last_seen_at`
+- `sessions` — opaque UUID bearer tokens, 90-day sliding TTL via `last_seen_at` (refresh debounced to 1h to avoid write amplification)
 - `purchases` — per-user purchase rows; `spot_at_purchase_dkk_per_g` frozen at write
-- `alerts` — per-user premium-threshold alerts; `kind` ∈ {bar, coin}; `muted_until_recovery` + `last_fired_at` carry the fire/recover state machine
+- `alerts` — per-user premium-threshold alerts; `kind` ∈ {bar, coin}; `muted_until_recovery` + `last_fired_at` + `fire_count` carry the fire/recover state machine
 
 ## Endpoints
 
@@ -79,6 +85,9 @@ Postgres tables (Neon in prod, local Docker in dev):
 | GET  | `/coins` | `X-API-Key` | live fan-out to all coin scrapers + spot, sorted by premium % asc |
 | GET  | `/history/bar/{dealer}/{size}` | `X-API-Key` | bar price/premium time series (`?range=24h\|7d\|30d`) |
 | GET  | `/history/coin/{dealer}/{coin_type}/{fine_gold_g}` | `X-API-Key` | coin price/premium time series |
+| GET  | `/context/bar/{dealer}/{size}` | `X-API-Key` | "buy now or wait?" — today's premium vs 30-day IQR + lowest; powers the buy-context panel |
+| GET  | `/context/coin/{dealer}/{coin_type}/{fine_gold_g}` | `X-API-Key` | same, for a coin variant |
+| GET  | `/snapshot/age` | `X-API-Key` | seconds since the most recent `spot_snapshots` row; powers the "Snapshots: N min ago" indicator |
 | POST | `/snapshot` | `X-API-Key` | runs all scrapers + spot + coins, writes to Postgres (cron-only) |
 | GET  | `/reports` | `X-API-Key` | list archived weekly + monthly reports (no html column) |
 | GET  | `/reports/{id}` | `X-API-Key` | download a stored report as .html attachment |
@@ -86,19 +95,20 @@ Postgres tables (Neon in prod, local Docker in dev):
 | POST | `/reports/cron/{type}` (`weekly`\|`monthly`) | `X-API-Key` | cron-only — generate + upsert into `report_archive` |
 | GET  | `/health` | `X-API-Key` | runs every bar scraper at 5 g, returns per-dealer pass/fail |
 | POST | `/auth/request-link` | none | issue a magic-link email; always 204, rate-limited |
-| POST | `/auth/verify` | none | exchange a magic-link token for a session cookie |
-| POST | `/auth/logout` | session cookie | delete the session row + clear cookie |
-| GET  | `/auth/me` | session cookie | returns `{user_id, email}` or 401 |
-| GET  | `/portfolio` | session cookie | the user's purchases + summary (live spot-driven P&L) |
-| POST | `/portfolio` | session cookie | create a purchase; freezes historical spot at write |
-| PATCH | `/portfolio/{id}` | session cookie | edit; re-freezes spot if `purchased_at` or `metal` change |
-| DELETE | `/portfolio/{id}` | session cookie | hard delete; 404 if not the caller's row |
-| GET    | `/alerts` | session cookie | list user's alerts + current_min_premium_pct enrichment |
-| GET    | `/alerts/options` | session cookie | bar sizes + coin registry for the dialog dropdowns |
-| GET    | `/alerts/preview` | session cookie | preview current min premium for a prospective target — powers the dialog's "Current: X%" hint |
-| POST   | `/alerts` | session cookie | create; bar requires size_g, coin requires (coin_type, fine_gold_g) |
-| PATCH  | `/alerts/{id}` | session cookie | edit threshold/enabled; threshold change resets muted state |
-| DELETE | `/alerts/{id}` | session cookie | hard delete; 404 if not the caller's row |
+| POST | `/auth/verify` | none | exchange a magic-link token for a session bearer token |
+| POST | `/auth/logout` | Bearer | delete the session row |
+| GET  | `/auth/me` | Bearer | returns `{user_id, email}` or 401 |
+| GET  | `/portfolio` | Bearer | the user's purchases + summary (live spot-driven P&L) |
+| GET  | `/portfolio/history?range=…&metal=…` | Bearer | portfolio value over time + deposit-adjusted period change |
+| POST | `/portfolio` | Bearer | create a purchase; freezes historical spot at write |
+| PATCH | `/portfolio/{id}` | Bearer | edit; re-freezes spot if `purchased_at` or `metal` change |
+| DELETE | `/portfolio/{id}` | Bearer | hard delete; 404 if not the caller's row |
+| GET    | `/alerts` | Bearer | list user's alerts + current_min_premium_pct enrichment (batched: one query per kind across all targets) |
+| GET    | `/alerts/options` | Bearer | bar sizes + coin registry for the dialog dropdowns |
+| GET    | `/alerts/preview` | Bearer | preview current min premium for a prospective target — powers the dialog's "Current: X%" hint |
+| POST   | `/alerts` | Bearer | create; bar requires size_g, coin requires (coin_type, fine_gold_g) |
+| PATCH  | `/alerts/{id}` | Bearer | edit threshold/enabled; threshold change resets muted state |
+| DELETE | `/alerts/{id}` | Bearer | hard delete; 404 if not the caller's row |
 
 ## Dealers
 
@@ -159,9 +169,10 @@ and upserts both so the local archive is non-empty on first PWA load.
 
 Two parallel auth schemes coexist. The shared `X-API-Key` (`auth.require_api_key`)
 gates everything from the original site — prices, history, spot, reports.
-The session cookie (`auth_session.require_session`) gates only the personal
-features added on top: the four `/auth/*` endpoints and `/portfolio*`. The
-site works fully without logging in; sign-in only unlocks the portfolio.
+The session bearer token (`auth_session.require_session`) gates only the
+personal features added on top: the four `/auth/*` endpoints, `/portfolio*`,
+and `/alerts*`. The site works fully without logging in; sign-in only
+unlocks the portfolio and alerts.
 
 **Sign-in flow:**
 1. User submits email → `POST /auth/request-link` rate-limits (3/10min per
@@ -180,8 +191,11 @@ site works fully without logging in; sign-in only unlocks the portfolio.
    re-reads `/auth/me` with the new token, and transitions to logged-in.
 4. Subsequent authed calls send `Authorization: Bearer <token>` —
    `require_session` parses the header, validates against `sessions`, and
-   slides `last_seen_at` forward. Logout = `DELETE FROM sessions` +
-   `localStorage.removeItem`.
+   slides `last_seen_at` forward only if it's older than
+   `SESSION_LAST_SEEN_DEBOUNCE` (1h). A chatty UI hitting authed endpoints
+   multiple times per minute fires at most one UPDATE per hour; the 90-day
+   sliding TTL still slides forward on every active hour. Logout =
+   `DELETE FROM sessions` + `localStorage.removeItem`.
 
 **Portfolio P&L math:**
 - `fine_weight_g = gross_weight_g × purity` (always derived; row stores gross + purity).
@@ -358,6 +372,9 @@ CI (`.github/workflows/tests.yml`) runs all three on push/PR to `main`. The live
 - **`/snapshot` also has an outlier guard.** After the FX check, it reads the most recent `spot_snapshots` row within the last 60 minutes and rejects the new tick if `gold_dkk_per_g` deviates by more than `SNAPSHOT_OUTLIER_THRESHOLD = 10%` from it (`main.py`). Same `snapshot_skipped` log line with `reason: "outlier"`. 10% is deliberately wide — real gold rarely moves more than 2–3% in 20 minutes even during Fed/CPI prints, but a 31x unit flip from `api.gold-api.com`, a near-zero glitch, or a Frankfurter-returned-wrong-but-not-errored value would all be caught. Threshold lives at the top of `main.py`; if normal market vol ever starts brushing it, widen rather than disable.
 - **Historical FX and historical spot raise instead of falling back silently.** `fx.fetch_usd_to_dkk_on` raises `HistoricalFxUnavailable` and `spot.fetch_historical_usd_per_gram` raises `HistoricalSpotUnavailable` (the same exception also fires when the yfinance value lands outside generous sanity bounds — gold `[$30/g, $500/g]`, silver `[$0.20/g, $50/g]`). `portfolio._fetch_historical_spot_dkk_per_g` catches both and surfaces a 502 to the frontend, which renders a retry-able error in the purchase dialog. We do this here (not in the live `/spot` path) because the historical value gets frozen onto a `purchases` row forever — a brief retry beats a bad value baked into cost-basis premium math.
 - **Scraper outliers are filtered before persistence.** After premium is computed, `orchestrator.flag_bar_premium_outliers` (called from `run()`) flips any bar listing with premium outside `BAR_PREMIUM_BOUNDS_PCT = (0.0, 80.0)` to `status="error"`, clears `price_dkk` and `premium_pct`, and emits a `scraper_outlier` structured log line. `flag_coin_premium_outliers` does the same for coins with `COIN_PREMIUM_BOUNDS_PCT = (0.0, 120.0)` and is called from both the `/coins` live endpoint and the `/snapshot` coin row builder. Bounds are a "did the scraper grab the wrong HTML field" fence, not a market-vol fence: no legitimate online retail bullion sits at or below spot (would be arbitrage; the floor is tight against buy-back rates that sit at spot-1% to spot-3% on the same dealer pages), and the high end leaves headroom for small fractional coins (1/20oz routinely 50%+). Same `snapshot_skipped`-style grep target: `scraper_outlier`.
+- **`_current_spot_dkk_per_g` self-protects with `LIVE_SPOT_TIMEOUT_S = 3.0`.** The two upstream HTTP calls (`api.gold-api.com` + `frankfurter.dev`) carry httpx's default timeouts and compound serially — worst case ~20s without a cap. The wrapper raises `HTTPException(502)` on either upstream failure or timeout, so every portfolio endpoint (`list/create/update/history`) inherits one error mode. `/portfolio/history` catches the 502 and degrades to "snapshot tail only" (chart can lag ≤ 20 min, fine); list/create/update propagate the 502 since they can't produce a useful response without live spot.
+- **`GET /alerts` uses a batched current-min lookup.** `_fetch_current_bars_batch` and `_fetch_current_coins_batch` (`alerts.py`) each issue one UNNEST + ROW_NUMBER window query across every target the user has, so the list endpoint scales O(1) in query count rather than O(N) per alert. The shape returned matches what `_attach_current` reads from the in-memory map, so consumers can't tell the difference from the single-row `_decorate_with_current` path that `create/update/preview` still use.
+- **`GET /portfolio/history` reconstructs value-over-time on demand** — no new table. Joins `purchases` against `spot_snapshots` rows in the range and walks a two-pointer aggregator over them. Appends a synthetic "now" point using live spot so the chart tail matches the summary card's live current-value (otherwise the line could lag by up to 20 min). Decimates to ≤ 500 points so a 1y range stays snappy. Period change is Modified-Dietz-style (deposit-adjusted) so a pure cash injection shows 0%, not infinite. The frontend uses a scriptable Chart.js `backgroundColor` to render the modern top-opaque → bottom-transparent gradient fill under the line.
 
 ## Adding a new bar scraper
 
