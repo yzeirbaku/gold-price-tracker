@@ -786,6 +786,49 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && isMenuOpen()) setMenuOpen(false);
 });
 
+// Edge-swipe gesture to open the menu on touch devices. The gesture must
+// START in a 12-32px band from the viewport's left edge so iOS Safari's
+// browser-back swipe (which fires when the touch starts at the very edge,
+// <12px) doesn't fight with us. The motion must be predominantly horizontal
+// — vertical deviation past MAX_DEVIATION_Y cancels the gesture so users
+// scrolling the page don't accidentally trigger it. Passive listeners; we
+// never preventDefault, so native scrolling stays smooth.
+(() => {
+  const EDGE_START_MIN = 12;
+  const EDGE_START_MAX = 32;
+  const MIN_DISTANCE_X = 60;
+  const MAX_DEVIATION_Y = 50;
+  let startX = 0, startY = 0, tracking = false;
+
+  const gestureBlocked = () =>
+    isMenuOpen() || document.querySelector('dialog[open]') !== null;
+
+  document.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || gestureBlocked()) return;
+    const t = e.touches[0];
+    if (t.clientX < EDGE_START_MIN || t.clientX > EDGE_START_MAX) return;
+    startX = t.clientX;
+    startY = t.clientY;
+    tracking = true;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!tracking) return;
+    const t = e.touches[0];
+    const dx = t.clientX - startX;
+    const dy = Math.abs(t.clientY - startY);
+    if (dy > MAX_DEVIATION_Y) { tracking = false; return; }
+    if (dx >= MIN_DISTANCE_X) {
+      tracking = false;
+      setMenuOpen(true);
+    }
+  }, { passive: true });
+
+  const cancel = () => { tracking = false; };
+  document.addEventListener('touchend', cancel, { passive: true });
+  document.addEventListener('touchcancel', cancel, { passive: true });
+})();
+
 // Click the page title to go back to Prices with bars tab + 10g size.
 function goToPricesHome() {
   setTab('bars');

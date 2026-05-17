@@ -207,7 +207,10 @@ main { max-width: 720px; margin: 0 auto; }
      1rem horizontal padding matches the card margin so the hamburger's
      left edge lines up exactly with the cards. Title and tabs spread
      to opposite ends so tabs hug the right edge. */
-  header { padding: 0.7rem 1rem; gap: 0.35rem; }
+  /* Tighter gap pulls the title closer to the (now-smaller) burger.
+     Combined with the burger's 4px width shrink, the title's left edge
+     shifts ~7px left toward the page edge. */
+  header { padding: 0.7rem 1rem; gap: 0.15rem; }
   header h1 { font-size: 1.05rem; }
   .header-title {
     gap: 0.5rem;
@@ -230,7 +233,11 @@ main { max-width: 720px; margin: 0 auto; }
      guideline — the icon should read as tappable without dominating the
      header. */
   .icon-btn { width: 40px; height: 40px; font-size: 1.2rem; }
-  #menu-btn { font-size: 1.45rem; }
+  /* Burger gets a slightly bigger glyph inside a slightly smaller button
+     than the base `.icon-btn @ mobile`. The visual weight of ☰ is what
+     reads as "this is the menu" — bumping the glyph while pulling the
+     button frame in makes the icon dominate the chrome. */
+  #menu-btn { width: 36px; height: 36px; font-size: 1.55rem; }
 }
 .card {
   margin: 1rem; padding: 1.1rem 1.1rem 1.25rem;
@@ -393,10 +400,11 @@ dialog {
 dialog form { position: relative; }
 .dialog-close {
   position: absolute;
-  /* Hugging the top-right corner from inside. 0.5rem sat under the corner,
-     0.25rem still read as drooping — 0.1rem snaps the button into the
-     corner without overlapping the dialog's 14px rounded radius. */
-  top: 0.1rem; right: 0.1rem;
+  /* Half-step between the original `-0.5rem` (too far past the corner)
+     and the inside-the-frame `0.1rem` (drooping). At -0.25rem the X
+     button overhangs the dialog edge by 4px and the glyph sits ~0.75rem
+     in from each edge — tucked into the corner without straddling it. */
+  top: -0.25rem; right: -0.25rem;
   width: 32px; height: 32px;
   display: inline-flex; align-items: center; justify-content: center;
   background: transparent; border: none;
