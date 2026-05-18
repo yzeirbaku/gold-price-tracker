@@ -159,7 +159,7 @@ header h1 {
   transition: color 100ms ease;
 }
 .menu-icon svg {
-  width: 13px; height: 13px;
+  width: 14px; height: 14px;
   display: block;
 }
 /* Brand wordmark at the top of the drawer — uses the same gold gradient
