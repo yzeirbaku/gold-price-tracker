@@ -146,23 +146,21 @@ header h1 {
 }
 .menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .menu-item[hidden], .menu-account-info[hidden], .menu-divider[hidden] { display: none; }
-/* Icon column: fixed-width slot so labels align regardless of glyph width. */
+/* Icon slot is a FIXED-size flex box with an SVG inside. The SVG renders
+   at exact pixel sizes, no font-metric drift like unicode glyphs had. */
 .menu-icon {
-  display: inline-block;
-  width: 1.5rem; flex: 0 0 1.5rem;
-  margin-right: 0.55rem;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem; height: 1.5rem;
+  flex: 0 0 1.5rem;
+  margin-right: 0.6rem;
   color: var(--muted);
-  font-size: 0.95rem; line-height: 1;
   transition: color 100ms ease;
 }
-/* The ⚙︎ gear glyph (with the U+FE0E text-style selector) renders smaller
-   than the other icons in the set because the gear shape doesn't fill
-   its em-box like $ / ▦ / ◆ / ◉ do. Bump it specifically on mobile
-   where the discrepancy is most visible. Desktop renders the same
-   glyphs at proportions where the gear holds its own; leave it alone. */
-@media (max-width: 480px) {
-  .menu-item[data-action="settings"] .menu-icon { font-size: 1.25rem; }
+.menu-icon svg {
+  width: 16px; height: 16px;
+  display: block;
 }
 /* Brand wordmark at the top of the drawer — uses the same gold gradient
    as the page header h1 so the drawer reads as part of the app, not a
