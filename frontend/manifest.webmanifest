@@ -1,7 +1,7 @@
 {
-  "name": "Gold Bar Tracker",
-  "short_name": "GoldBars",
-  "description": "Compare DK gold bar prices",
+  "name": "Gold Price Tracker",
+  "short_name": "GoldTracker",
+  "description": "Track Danish gold prices and your portfolio",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1a1a1a",
