@@ -47,6 +47,100 @@ function safeHref(url) {
   return '#';
 }
 
+// ── UI helpers ─────────────────────────────────────────────────────────────
+// Three site-wide helpers + matching CLAUDE.md rules. Touch with care — every
+// async submit / delete / error toast / showModal call routes through these.
+
+// Disable a button (and optionally swap its label) while an async op runs.
+// Always restores in `finally` so a thrown error can't leave it stuck. Reason:
+// double-tapping Save fired two POSTs and the second surfaced as a "duplicate"
+// error to the user. Any button that triggers a network call MUST go through
+// withBusy. Omit busyLabel for icon-only buttons — they just get disabled.
+async function withBusy(btn, fn, busyLabel) {
+  if (!btn) return fn();
+  const originalLabel = btn.textContent;
+  const originalDisabled = btn.disabled;
+  btn.disabled = true;
+  if (busyLabel != null) btn.textContent = busyLabel;
+  try {
+    return await fn();
+  } finally {
+    btn.disabled = originalDisabled;
+    if (busyLabel != null) btn.textContent = originalLabel;
+  }
+}
+
+// Turn a fetch failure into user-facing copy. Never leak status codes, raw
+// response bodies, or exception messages — they look unpolished and tell the
+// user nothing actionable. Pass `fallback` to override the generic line per
+// call site. `body` lets the caller pre-consume res.text() and still get the
+// FastAPI-detail polishing (purchase/alert forms do this so they can render
+// validation messages inline).
+async function userFacingError({ res, body, err, fallback = 'Something went wrong. Try again.' } = {}) {
+  if (err) return 'Network error. Check your connection and try again.';
+  if (!res) return fallback;
+  if (res.status === 401) return 'You need to sign in again.';
+  if (res.status === 403) return "You don't have access to this.";
+  if (res.status === 404) return 'Not found.';
+  if (res.status === 429) return 'Too many attempts. Wait a moment and try again.';
+  if (res.status >= 500) return 'The server is having trouble. Try again in a moment.';
+  let parsed = null;
+  try {
+    parsed = body != null ? JSON.parse(body) : await res.clone().json();
+  } catch { /* not JSON — fall through to fallback */ }
+  return polishApiDetail(parsed?.detail) || fallback;
+}
+
+// FastAPI validation errors arrive as either { detail: [{msg, loc}] } or
+// { detail: "..." }. Polish field names + scrub anything that looks like a
+// Python exception class. Returns null when there's nothing safe to surface.
+const _API_FIELD_LABELS = {
+  purchased_at: 'Purchase date',
+  price_paid_dkk: 'Price paid',
+  gross_weight_g: 'Gross weight',
+  purity: 'Purity',
+  metal: 'Metal',
+  label: 'Label',
+  threshold_pct: 'Threshold',
+  size_g: 'Bar size',
+  coin_type: 'Coin type',
+  fine_gold_g: 'Coin size',
+};
+function polishApiDetail(detail) {
+  if (!detail) return null;
+  const polish = (raw) => {
+    let msg = String(raw || '').replace(/^Value error,\s*/i, '').trim();
+    for (const [k, v] of Object.entries(_API_FIELD_LABELS)) {
+      msg = msg.replace(new RegExp(`\\b${k}\\b`, 'g'), v);
+    }
+    if (!msg) return null;
+    if (/\b(Error|Exception|Traceback)\b/.test(msg)) return null;
+    return msg.charAt(0).toUpperCase() + msg.slice(1);
+  };
+  if (Array.isArray(detail) && detail.length) return polish(detail[0].msg);
+  if (typeof detail === 'string') return polish(detail);
+  return null;
+}
+
+// Open a <dialog> without leaving the auto-focused first button highlighted
+// on iOS Safari. dialog.showModal() focuses the first focusable element
+// synchronously; with no prior pointer activity, iOS treats that as a
+// keyboard focus and paints a :focus-visible ring. Net result: Cancel looks
+// pre-selected the moment the dialog appears, which reads as a UX glitch.
+// Blur on the next frame so the ring never paints; keyboard nav still works
+// because Tab re-establishes focus normally. Pass `focusEl` to redirect
+// focus to a specific input (login email, etc.) after the blur.
+function openDialog(dlg, focusEl = null) {
+  dlg.showModal();
+  requestAnimationFrame(() => {
+    if (document.activeElement instanceof HTMLElement
+        && dlg.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
+    if (focusEl) focusEl.focus();
+  });
+}
+
 let lastSize = null;
 let hasRenderedSpot = false;
 let lastListings = [];           // cached so we can re-sort without re-fetching
@@ -166,11 +260,11 @@ async function fetchPrices(size) {
       headers: { 'X-API-Key': apiKey },
     });
   } catch (e) {
-    showMessage(`Network error: ${e.message}`);
+    showMessage(await userFacingError({ err: e, fallback: 'Could not load prices.' }));
     return;
   }
   if (resp.status === 401) { showMessage('Bad API key — open Settings.'); return; }
-  if (!resp.ok) { showMessage(`Server error: ${resp.status}`); return; }
+  if (!resp.ok) { showMessage(await userFacingError({ res: resp, fallback: 'Could not load prices.' })); return; }
   const data = await resp.json();
   renderPrices(data);
   // Reuse the spot block from the prices response — it's fresher than the cached one.
@@ -422,11 +516,11 @@ async function fetchHistory() {
       headers: { 'X-API-Key': apiKey },
     });
   } catch (e) {
-    setHistoryStatus(`Network error: ${e.message}`);
+    setHistoryStatus(await userFacingError({ err: e, fallback: 'Could not load history.' }));
     return;
   }
   if (resp.status === 503) { setHistoryStatus('History not configured on the server yet.'); return; }
-  if (!resp.ok) { setHistoryStatus(`Server error: ${resp.status}`); return; }
+  if (!resp.ok) { setHistoryStatus(await userFacingError({ res: resp, fallback: 'Could not load history.' })); return; }
   renderHistory(await resp.json());
 }
 
@@ -579,12 +673,12 @@ async function fetchCoins() {
   try {
     resp = await fetch(`${BACKEND_URL}/coins`, { headers: { 'X-API-Key': apiKey } });
   } catch (e) {
-    showCoinsMessage(`Network error: ${e.message}`);
+    showCoinsMessage(await userFacingError({ err: e, fallback: 'Could not load coin prices.' }));
     return;
   }
   if (resp.status === 401) { showCoinsMessage('Bad API key — open Settings.'); return; }
   if (resp.status === 503) { showCoinsMessage('History not configured on the server yet.'); return; }
-  if (!resp.ok) { showCoinsMessage(`Server error: ${resp.status}`); return; }
+  if (!resp.ok) { showCoinsMessage(await userFacingError({ res: resp, fallback: 'Could not load coin prices.' })); return; }
   renderCoins(await resp.json());
 }
 
@@ -900,7 +994,7 @@ function openSettings() {
   const theme = loadTheme();
   const themeRadio = document.querySelector(`input[name="theme"][value="${theme}"]`);
   if (themeRadio) themeRadio.checked = true;
-  $('#settings-dialog').showModal();
+  openDialog($('#settings-dialog'));
 }
 $('#settings-dialog').addEventListener('close', () => {
   if ($('#settings-dialog').returnValue === 'save') {
@@ -1027,10 +1121,16 @@ async function loadReportsArchive() {
     const res = await fetch(`${BACKEND_URL}/reports`, {
       headers: { 'X-API-Key': loadApiKey() },
     });
-    if (!res.ok) throw new Error(`status ${res.status}`);
+    if (!res.ok) {
+      const msg = await userFacingError({ res, fallback: 'Could not load reports.' });
+      weeklyList.innerHTML = `<div class="muted-tiny">${escapeHtml(msg)}</div>`;
+      monthlyList.innerHTML = '';
+      return;
+    }
     rows = await res.json();
-  } catch (e) {
-    weeklyList.innerHTML = `<div class="muted-tiny">Error: ${e.message}</div>`;
+  } catch (err) {
+    const msg = await userFacingError({ err, fallback: 'Could not load reports.' });
+    weeklyList.innerHTML = `<div class="muted-tiny">${escapeHtml(msg)}</div>`;
     monthlyList.innerHTML = '';
     return;
   }
@@ -1192,7 +1292,10 @@ async function downloadReport(id) {
     headers: { 'X-API-Key': loadApiKey() },
   });
   if (!res.ok) {
-    alert(`Download failed: status ${res.status}`);
+    await infoDialog({
+      title: 'Download failed',
+      message: await userFacingError({ res, fallback: 'Could not download this report.' }),
+    });
     return;
   }
   await streamToFileFromResponse(res);
@@ -1205,20 +1308,22 @@ async function generateOnDemand(range, button) {
       <div class="spinner"><span></span><span></span><span></span></div>
       <div class="loading-text">Generating report…</div>
     </div>`;
-  button.disabled = true;
-  try {
-    const res = await fetch(
-      `${BACKEND_URL}/reports/generate?range=${range}`,
-      { method: 'POST', headers: { 'X-API-Key': loadApiKey() } },
-    );
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    await streamToFileFromResponse(res);
-    status.innerHTML = '';
-  } catch (e) {
-    status.textContent = `Error: ${e.message}`;
-  } finally {
-    button.disabled = false;
-  }
+  await withBusy(button, async () => {
+    try {
+      const res = await fetch(
+        `${BACKEND_URL}/reports/generate?range=${range}`,
+        { method: 'POST', headers: { 'X-API-Key': loadApiKey() } },
+      );
+      if (!res.ok) {
+        status.textContent = await userFacingError({ res, fallback: 'Could not generate report.' });
+        return;
+      }
+      await streamToFileFromResponse(res);
+      status.innerHTML = '';
+    } catch (err) {
+      status.textContent = await userFacingError({ err, fallback: 'Could not generate report.' });
+    }
+  });
 }
 
 async function streamToFileFromResponse(res) {
@@ -1310,8 +1415,7 @@ function openLoginDialog() {
   $('#login-email').value = '';
   $('#login-error').hidden = true;
   $('#login-error').textContent = '';
-  $('#login-dialog').showModal();
-  setTimeout(() => $('#login-email').focus(), 30);
+  openDialog($('#login-dialog'), $('#login-email'));
 }
 
 $('#login-form').addEventListener('submit', async (e) => {
@@ -1325,36 +1429,26 @@ $('#login-form').addEventListener('submit', async (e) => {
   if (!email) return;
   const errEl = $('#login-error');
   errEl.hidden = true;
-  const submitBtn = $('#login-submit');
-  const originalLabel = submitBtn.textContent;
-  submitBtn.disabled = true;
-  submitBtn.textContent = 'Sending…';
-  try {
-    const res = await fetch(`${BACKEND_URL}/auth/request-link`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    });
-    if (res.status === 429) {
-      errEl.textContent = 'Too many attempts. Wait a few minutes and try again.';
+  await withBusy($('#login-submit'), async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/auth/request-link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      if (!res.ok) {
+        errEl.textContent = await userFacingError({ res, fallback: "Couldn't send link. Try again." });
+        errEl.hidden = false;
+        return;
+      }
+      $('#login-stage-2-email').textContent = email;
+      $('#login-stage-1').hidden = true;
+      $('#login-stage-2').hidden = false;
+    } catch (err) {
+      errEl.textContent = await userFacingError({ err });
       errEl.hidden = false;
-      return;
     }
-    if (!res.ok) {
-      errEl.textContent = `Couldn't send link (status ${res.status}). Try again.`;
-      errEl.hidden = false;
-      return;
-    }
-    $('#login-stage-2-email').textContent = email;
-    $('#login-stage-1').hidden = true;
-    $('#login-stage-2').hidden = false;
-  } catch (err) {
-    errEl.textContent = `Network error: ${err.message}`;
-    errEl.hidden = false;
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.textContent = originalLabel;
-  }
+  }, 'Sending…');
 });
 
 // Cross-tab broadcast: when verify completes in another tab, this tab notices.
@@ -1389,10 +1483,10 @@ async function handleVerifyFragment() {
     if (!res.ok) {
       const msg = res.status === 400
         ? 'This link is invalid or expired.'
-        : `Sign-in failed (status ${res.status}).`;
+        : await userFacingError({ res, fallback: 'Sign-in failed. Send a fresh link.' });
       contentEl.innerHTML = `
         <h2>Sign-in failed</h2>
-        <p>${msg}</p>
+        <p>${escapeHtml(msg)}</p>
         <p><button class="site-btn" id="verify-retry" type="button">Send a new link</button></p>
       `;
       $('#verify-retry').addEventListener('click', () => {
@@ -1423,7 +1517,7 @@ async function handleVerifyFragment() {
   } catch (err) {
     contentEl.innerHTML = `
       <h2>Sign-in failed</h2>
-      <p>Network error: ${escapeHtml(err.message)}</p>
+      <p>${escapeHtml(await userFacingError({ err }))}</p>
     `;
   }
   return true;
@@ -1473,7 +1567,7 @@ async function loadPortfolio() {
       showPricesView(); openLoginDialog(); return;
     }
     if (!res.ok) {
-      loadingEl.innerHTML = `Failed to load portfolio (status ${res.status}).`;
+      loadingEl.textContent = await userFacingError({ res, fallback: 'Could not load portfolio.' });
       return;
     }
     const data = await res.json();
@@ -1481,8 +1575,8 @@ async function loadPortfolio() {
     renderPortfolioSummary(data.summary);
     renderPortfolioTable(data.purchases);
     loadPortfolioHistory();
-  } catch (e) {
-    loadingEl.innerHTML = `Network error: ${escapeHtml(e.message)}`;
+  } catch (err) {
+    loadingEl.textContent = await userFacingError({ err, fallback: 'Could not load portfolio.' });
   } finally {
     loadingEl.hidden = true;
   }
@@ -1513,7 +1607,7 @@ async function loadPortfolioHistory() {
     }
     if (!res.ok) {
       // Error paths skip the min-wait — surface the failure immediately.
-      statusEl.textContent = `Chart unavailable (status ${res.status}).`;
+      statusEl.textContent = await userFacingError({ res, fallback: 'Chart unavailable.' });
       card.hidden = false; return;
     }
     const data = await res.json();
@@ -1541,9 +1635,9 @@ async function loadPortfolioHistory() {
     card.hidden = false;
     statusEl.hidden = true;
     renderPortfolioChart(data);
-  } catch (e) {
+  } catch (err) {
     statusEl.hidden = false;
-    statusEl.textContent = `Network error: ${escapeHtml(e.message)}`;
+    statusEl.textContent = await userFacingError({ err, fallback: 'Chart unavailable.' });
   }
 }
 
@@ -1838,7 +1932,7 @@ function confirmDialog({ title = 'Confirm', message, okLabel = 'Confirm', okOnly
       resolve(dlg.returnValue === 'save');
     };
     dlg.addEventListener('close', onClose);
-    dlg.showModal();
+    openDialog(dlg);
   });
 }
 
@@ -2032,19 +2126,27 @@ $('#portfolio-table tbody').addEventListener('click', async (e) => {
       okLabel: 'Delete',
     });
     if (!ok) return;
-    try {
-      const res = await fetch(`${BACKEND_URL}/portfolio/${del.dataset.id}`, {
-        method: 'DELETE',
-        headers: authHeaders(),
-      });
-      if (!res.ok && res.status !== 204) {
-        alert(`Delete failed (status ${res.status})`);
-        return;
+    await withBusy(del, async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/portfolio/${del.dataset.id}`, {
+          method: 'DELETE',
+          headers: authHeaders(),
+        });
+        if (!res.ok && res.status !== 204) {
+          await infoDialog({
+            title: 'Delete failed',
+            message: await userFacingError({ res, fallback: 'Could not delete this purchase.' }),
+          });
+          return;
+        }
+        await loadPortfolio();
+      } catch (err) {
+        await infoDialog({
+          title: 'Delete failed',
+          message: await userFacingError({ err }),
+        });
       }
-      await loadPortfolio();
-    } catch (err) {
-      alert(`Delete failed: ${err.message}`);
-    }
+    });
     return;
   }
 
@@ -2096,7 +2198,7 @@ function openPurchaseDialog(mode, purchase = null) {
     $('#purchase-date').value = `${yyyy}-${mm}-${dd}`;
   }
   $('#purchase-error').hidden = true;
-  $('#purchase-dialog').showModal();
+  openDialog($('#purchase-dialog'));
 }
 
 $('#portfolio-add-btn').addEventListener('click', () => {
@@ -2177,31 +2279,6 @@ function exportPortfolioCsv() {
 
 $('#portfolio-export-btn').addEventListener('click', exportPortfolioCsv);
 
-const FIELD_LABELS = {
-  purchased_at: 'Purchase date',
-  price_paid_dkk: 'Price paid',
-  gross_weight_g: 'Gross weight',
-  purity: 'Purity',
-  metal: 'Metal',
-  label: 'Label',
-};
-function humanizeSaveError(status, body) {
-  try {
-    const parsed = JSON.parse(body);
-    const detail = parsed.detail;
-    if (Array.isArray(detail) && detail.length) {
-      let msg = String(detail[0].msg || '').replace(/^Value error,\s*/i, '').trim();
-      for (const [k, v] of Object.entries(FIELD_LABELS)) {
-        msg = msg.replace(new RegExp(`\\b${k}\\b`, 'g'), v);
-      }
-      if (msg) return msg.charAt(0).toUpperCase() + msg.slice(1);
-    }
-    if (typeof detail === 'string' && detail.trim()) return detail;
-  } catch (_) { /* fall through */ }
-  if (status === 502) return "Couldn't look up the historical spot price. Try again in a moment.";
-  return `Save failed (status ${status}). Try again.`;
-}
-
 $('#purchase-form').addEventListener('submit', async (e) => {
   const submitter = e.submitter;
   if (!submitter || submitter.value === 'cancel') return;
@@ -2265,37 +2342,35 @@ $('#purchase-form').addEventListener('submit', async (e) => {
     };
   }
 
-  const submitBtn = $('#purchase-submit');
-  const originalLabel = submitBtn.textContent;
-  submitBtn.disabled = true;
-  submitBtn.textContent = 'Saving…';
-  try {
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(payload),
-    });
-    if (res.status === 401) {
+  await withBusy($('#purchase-submit'), async () => {
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(payload),
+      });
+      if (res.status === 401) {
+        $('#purchase-dialog').close();
+        clearSessionToken(); currentUser = null; updateAuthUI();
+        showPricesView(); openLoginDialog();
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.text();
+        const fallback = res.status === 502
+          ? "Couldn't look up the historical spot price. Try again in a moment."
+          : 'Save failed. Try again.';
+        errEl.textContent = await userFacingError({ res, body, fallback });
+        errEl.hidden = false;
+        return;
+      }
       $('#purchase-dialog').close();
-      clearSessionToken(); currentUser = null; updateAuthUI();
-      showPricesView(); openLoginDialog();
-      return;
-    }
-    if (!res.ok) {
-      const body = await res.text();
-      errEl.textContent = humanizeSaveError(res.status, body);
+      await loadPortfolio();
+    } catch (err) {
+      errEl.textContent = await userFacingError({ err });
       errEl.hidden = false;
-      return;
     }
-    $('#purchase-dialog').close();
-    await loadPortfolio();
-  } catch (err) {
-    errEl.textContent = `Network error: ${err.message}`;
-    errEl.hidden = false;
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.textContent = originalLabel;
-  }
+  }, 'Saving…');
 });
 
 // Alerts view ——————————————————————————————————————————————————————————————
@@ -2340,14 +2415,14 @@ async function loadAlerts() {
       showPricesView(); openLoginDialog(); return;
     }
     if (!res.ok) {
-      loadingEl.innerHTML = `Failed to load alerts (status ${res.status}).`;
+      loadingEl.textContent = await userFacingError({ res, fallback: 'Could not load alerts.' });
       return;
     }
     const data = await res.json();
     alertsCache = data.alerts || [];
     renderAlerts();
-  } catch (e) {
-    loadingEl.innerHTML = `Network error: ${escapeHtml(e.message)}`;
+  } catch (err) {
+    loadingEl.textContent = await userFacingError({ err, fallback: 'Could not load alerts.' });
   } finally {
     loadingEl.hidden = true;
   }
@@ -2481,24 +2556,26 @@ $('#alerts-table tbody').addEventListener('click', async (e) => {
       okLabel: 'Delete',
     });
     if (!ok) return;
-    try {
-      const res = await fetch(`${BACKEND_URL}/alerts/${del.dataset.id}`, {
-        method: 'DELETE', headers: authHeaders(),
-      });
-      if (!res.ok && res.status !== 204) {
+    await withBusy(del, async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/alerts/${del.dataset.id}`, {
+          method: 'DELETE', headers: authHeaders(),
+        });
+        if (!res.ok && res.status !== 204) {
+          await infoDialog({
+            title: 'Delete failed',
+            message: await userFacingError({ res, fallback: 'Could not delete this alert.' }),
+          });
+          return;
+        }
+        await loadAlerts();
+      } catch (err) {
         await infoDialog({
           title: 'Delete failed',
-          message: `Could not delete alert (status ${res.status}). Try again in a moment.`,
+          message: await userFacingError({ err }),
         });
-        return;
       }
-      await loadAlerts();
-    } catch (err) {
-      await infoDialog({
-        title: 'Delete failed',
-        message: `Network error: ${err.message}`,
-      });
-    }
+    });
     return;
   }
 
@@ -2551,7 +2628,7 @@ function openAlertDialog(mode, existing = null) {
   }
   $('#alert-error').hidden = true;
   refreshAlertPreview();
-  $('#alert-dialog').showModal();
+  openDialog($('#alert-dialog'));
 }
 
 // Render items into a .dd container's <ul>. `items` is [{value, label}] and
@@ -2768,37 +2845,32 @@ $('#alert-form').addEventListener('submit', async (e) => {
     : `${BACKEND_URL}/alerts`;
   const method = alertMode.kind === 'edit' ? 'PATCH' : 'POST';
 
-  const submitBtn = $('#alert-submit');
-  const originalLabel = submitBtn.textContent;
-  submitBtn.disabled = true;
-  submitBtn.textContent = 'Saving…';
-  try {
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(payload),
-    });
-    if (res.status === 401) {
+  await withBusy($('#alert-submit'), async () => {
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(payload),
+      });
+      if (res.status === 401) {
+        $('#alert-dialog').close();
+        clearSessionToken(); currentUser = null; updateAuthUI();
+        showPricesView(); openLoginDialog();
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.text();
+        errEl.textContent = await userFacingError({ res, body, fallback: 'Save failed. Try again.' });
+        errEl.hidden = false;
+        return;
+      }
       $('#alert-dialog').close();
-      clearSessionToken(); currentUser = null; updateAuthUI();
-      showPricesView(); openLoginDialog();
-      return;
-    }
-    if (!res.ok) {
-      const body = await res.text();
-      errEl.textContent = `Save failed (status ${res.status}): ${body.slice(0, 200)}`;
+      await loadAlerts();
+    } catch (err) {
+      errEl.textContent = await userFacingError({ err });
       errEl.hidden = false;
-      return;
     }
-    $('#alert-dialog').close();
-    await loadAlerts();
-  } catch (err) {
-    errEl.textContent = `Network error: ${err.message}`;
-    errEl.hidden = false;
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.textContent = originalLabel;
-  }
+  }, 'Saving…');
 });
 
 // Boot: handle verify fragment first, then resolve auth state.
