@@ -269,6 +269,19 @@
           <button value="cancel" type="submit" formnovalidate>Cancel</button>
           <button id="login-submit" value="save" type="submit">Send link</button>
         </menu>
+        <!-- iOS PWA workaround: tapping the email link opens Safari, not the
+             installed app. The user can long-press the link in the email,
+             copy it, and paste it here to sign into the PWA. -->
+        <details style="margin-top:0.9rem;">
+          <summary class="dialog-helper" style="cursor:pointer;">Already have a sign-in link? Paste it here</summary>
+          <fieldset class="settings-field" style="margin-top:0.5rem;">
+            <legend>Paste the link from the email</legend>
+            <textarea id="login-paste" rows="2" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="width:100%;resize:vertical;"></textarea>
+          </fieldset>
+          <menu>
+            <button id="login-paste-submit" type="button">Sign in with link</button>
+          </menu>
+        </details>
       </div>
       <div id="login-stage-2" hidden>
         <p>Check your inbox. We sent a link to <strong id="login-stage-2-email"></strong>.</p>

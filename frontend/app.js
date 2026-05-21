@@ -1451,6 +1451,53 @@ $('#login-form').addEventListener('submit', async (e) => {
   }, 'Sending…');
 });
 
+// iOS PWA fallback: paste the magic link, extract the token, verify it.
+$('#login-paste-submit').addEventListener('click', async (e) => {
+  e.preventDefault();
+  const errEl = $('#login-error');
+  errEl.hidden = true;
+  const raw = $('#login-paste').value.trim();
+  if (!raw) {
+    errEl.textContent = 'Paste the sign-in link first.';
+    errEl.hidden = false;
+    return;
+  }
+  const match = raw.match(/auth=([^&\s#]+)/);
+  if (!match) {
+    errEl.textContent = "That doesn't look like a sign-in link.";
+    errEl.hidden = false;
+    return;
+  }
+  // Token is secrets.token_urlsafe — already URL-safe but be defensive.
+  const token = decodeURIComponent(match[1]);
+  await withBusy(e.currentTarget, async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      if (!res.ok) {
+        errEl.textContent = res.status === 400
+          ? 'This link is invalid or expired.'
+          : await userFacingError({ res, fallback: 'Sign-in failed. Send a fresh link.' });
+        errEl.hidden = false;
+        return;
+      }
+      const user = await res.json();
+      if (user.token) setSessionToken(user.token);
+      currentUser = { user_id: user.user_id, email: user.email };
+      updateAuthUI();
+      try { localStorage.setItem(SESSION_BROADCAST_KEY, '1'); } catch {}
+      $('#login-paste').value = '';
+      $('#login-dialog').close();
+    } catch (err) {
+      errEl.textContent = await userFacingError({ err });
+      errEl.hidden = false;
+    }
+  }, 'Signing in…');
+});
+
 // Cross-tab broadcast: when verify completes in another tab, this tab notices.
 window.addEventListener('storage', async (e) => {
   if (e.key !== SESSION_BROADCAST_KEY) return;
