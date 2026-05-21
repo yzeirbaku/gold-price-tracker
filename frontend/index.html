@@ -4,7 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <!-- No apple-mobile-web-app-status-bar-style: with "black-translucent" the
+       PWA page renders UNDER the iOS status bar, so the sticky header sits
+       behind the notch. Letting iOS use its default keeps the status bar
+       opaque and pushes the content below it. -->
   <meta name="theme-color" content="#1a1a1a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
