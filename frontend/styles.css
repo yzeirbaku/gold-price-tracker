@@ -607,7 +607,13 @@ dialog menu button[value="save"] {
      don't feel cramped. 92vw matches the pre-existing #alert-dialog override. */
   dialog { padding: 1.1rem 1rem; width: min(92vw, 420px); }
   dialog h2 { font-size: 0.95rem; }
-  dialog input { padding: 0.5rem 0.6rem; font-size: 0.95rem; }
+  /* iOS Safari auto-zooms when an input has font-size < 16px on focus and
+     doesn't always zoom back when the dialog closes — leaving the page
+     stuck at a slightly larger scale. 16px is the threshold that prevents
+     it; accept the marginally bigger glyph as the cost of not having the
+     viewport yank around. */
+  dialog input,
+  dialog textarea { padding: 0.5rem 0.6rem; font-size: 16px; }
   /* Cancel/Save: tiny bump above the previous (0.4rem 0.78rem / 0.84rem)
      sizing. Size-picker pills (`.buttons button`) are then shrunk to this
      same dimension so the dialog footer and the size pills share one
@@ -1353,7 +1359,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   .purchase-grid { grid-template-columns: 1fr; gap: 0.4rem; }
   #purchase-dialog .settings-field { padding: 0.4rem 0.6rem 0.5rem; }
   #purchase-dialog input,
-  #purchase-dialog textarea { padding: 0.45rem 0.55rem; font-size: 0.9rem; }
+  #purchase-dialog textarea { padding: 0.45rem 0.55rem; font-size: 16px; }
 }
 
 /* Date column stays on one line — DD-MM-YYYY otherwise wraps on phone. */
