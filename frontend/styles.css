@@ -297,7 +297,7 @@ main { max-width: 720px; margin: 0 auto; }
      in the base `#menu-btn svg` rule; bump it here for the mobile bump
      the title got. */
   #menu-btn { width: 36px; height: 36px; }
-  #menu-btn svg { width: 24px; height: 24px; }
+  #menu-btn svg { width: 26px; height: 26px; }
 }
 .card {
   margin: 1rem; padding: 1.1rem 1.1rem 1.25rem;
