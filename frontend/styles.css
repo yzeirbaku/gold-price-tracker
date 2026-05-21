@@ -383,7 +383,7 @@ th { color: var(--muted); font-weight: 500; font-size: 0.7rem; text-transform: u
    their <th> get the same ▲/▼ indicator pattern. The active column gets a
    filled triangle in --accent; inactive columns show no indicator. JS
    toggles `sort-active` + `sort-asc` / `sort-desc` on the <th>. */
-th.sortable { cursor: pointer; user-select: none; transition: color 120ms ease; }
+th.sortable { cursor: pointer; user-select: none; transition: color 120ms ease; white-space: nowrap; }
 @media (hover: hover) and (pointer: fine) {
   th.sortable:hover { color: var(--fg-soft); }
 }
@@ -487,13 +487,15 @@ dialog form { position: relative; }
 dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blur(2px); }
 dialog h2 { margin: 0 0 0.75rem 0; font-size: 1rem; }
 dialog label { display: block; margin: 0.75rem 0; font-size: 0.85rem; color: var(--fg-soft); }
-dialog input {
+dialog input,
+dialog textarea {
   width: 100%; padding: 0.6rem 0.7rem; margin-top: 0.35rem;
   background: var(--bg); color: var(--fg);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   font: inherit;
 }
-dialog input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(226,192,84,0.18); }
+dialog input:focus,
+dialog textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(226,192,84,0.18); }
 .settings-field {
   margin: 0.75rem 0 0; padding: 0.65rem 0.8rem;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
