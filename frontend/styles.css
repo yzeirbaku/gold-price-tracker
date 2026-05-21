@@ -201,7 +201,10 @@ header h1 {
 
 /* Title is a click-link to the Prices view. */
 #header-title-link { cursor: pointer; }
-#menu-btn { font-size: 1.25rem; }
+/* SVG-based burger — sized explicitly so the icon renders pixel-identical
+   across iOS Safari and Chrome (the previous ☰ unicode glyph drifted by a
+   few px between platforms because its baseline-within-line-box varies). */
+#menu-btn svg { width: 22px; height: 22px; display: block; }
 .icon-btn {
   background: transparent; border: 1px solid transparent;
   color: var(--fg-soft); width: 46px; height: 46px;
@@ -289,18 +292,12 @@ main { max-width: 720px; margin: 0 auto; }
      guideline — the icon should read as tappable without dominating the
      header. */
   .icon-btn { width: 40px; height: 40px; font-size: 1.2rem; }
-  /* Burger gets a slightly bigger glyph inside a slightly smaller button
-     than the base `.icon-btn @ mobile`. The visual weight of ☰ is what
-     reads as "this is the menu" — bumping the glyph while pulling the
-     button frame in makes the icon dominate the chrome.
-     translateY shifts the button up a few px so its visible glyph aligns
-     with the title baseline instead of bottoming out with the flex-end
-     line (the title h1's line-height adds extra space below its glyphs
-     that the burger doesn't have). */
-  #menu-btn {
-    width: 36px; height: 36px; font-size: 1.71rem;
-    transform: translateY(-2px);
-  }
+  /* Burger gets a slightly smaller button frame than the base mobile
+     `.icon-btn` so the SVG dominates the chrome. The SVG itself is sized
+     in the base `#menu-btn svg` rule; bump it here for the mobile bump
+     the title got. */
+  #menu-btn { width: 36px; height: 36px; }
+  #menu-btn svg { width: 24px; height: 24px; }
 }
 .card {
   margin: 1rem; padding: 1.1rem 1.1rem 1.25rem;
