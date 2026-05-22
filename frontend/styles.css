@@ -110,15 +110,13 @@ header h1 {
   box-shadow: 4px 0 20px rgba(0, 0, 0, 0.35);
   /* Extra bottom padding reserves space for the absolute-positioned
      developer credit at the drawer's bottom edge — without it the flex
-     content would scroll behind the credit. */
-  padding: 1.25rem 0.85rem 2.5rem;
-  /* Body has padding-top: env(safe-area-inset-top), which pushes the
-     header below the notch/island. The drawer is position: fixed and
-     doesn't inherit that — without matching safe-area-top here, the
-     drawer's top sits above the notch while the header sits below it,
-     so the menu's brand border-bottom can't line up with the page
-     header's border-bottom. Mirror the inset on the drawer. */
-  padding-top: calc(1.25rem + env(safe-area-inset-top, 0px));
+     content would scroll behind the credit. padding-top is 0 + the
+     safe-area inset: the brand below uses min-height to match the
+     page header's actual height, and the env() value matches the
+     body's padding-top so the drawer and header start at the same Y
+     on notched iPhones. */
+  padding: 0 0.85rem 2.5rem;
+  padding-top: env(safe-area-inset-top, 0px);
   z-index: 200;
   display: flex; flex-direction: column;
   gap: 0.35rem;
@@ -178,7 +176,15 @@ header h1 {
    as the page header h1 so the drawer reads as part of the app, not a
    detached panel. */
 .menu-brand {
-  padding: 0.25rem 0.85rem 0.7rem;
+  /* Match the page <header>'s ACTUAL height, not the h1's line-box.
+     Header is a flex row with a 46×46 burger button + h1, so the
+     burger dominates: header height = 2 × 1rem padding + 46px burger
+     = 78px. Setting min-height + flex centering here gives the brand
+     the same box height as the header, so the border-bottom lines
+     up across the drawer/page boundary. */
+  min-height: 78px;
+  display: flex; align-items: center;
+  padding: 0 0.85rem;
   margin-bottom: 0.3rem;
   font-size: 1.3rem; font-weight: 700;
   letter-spacing: -0.01em;
@@ -188,16 +194,8 @@ header h1 {
   border-bottom: 1px solid var(--border);
 }
 @media (max-width: 480px) {
-  /* Brand metrics mirror the main header on mobile so the menu's
-     border-bottom lines up with the page header's border-bottom when
-     the drawer is open. Math: drawer-pad-top (0.55) + brand-pad-top
-     (0.25) + 1.33rem × 1.2 line-height + brand-pad-bottom (0.8)
-     ≈ 3.196rem, matching header (0.8 + 1.596 + 0.8 = 3.196rem). The
-     env(safe-area-inset-top) addition matches body's same offset so
-     both the header and the drawer get pushed below the notch by the
-     same amount on iPhones with a dynamic island / notch. */
-  .menu-dropdown { padding-top: calc(0.55rem + env(safe-area-inset-top, 0px)); }
-  .menu-brand { font-size: 1.33rem; padding-bottom: 0.8rem; }
+  /* Mobile header: 2 × 0.8rem padding + 41px burger = 66.6px. */
+  .menu-brand { min-height: 66.6px; font-size: 1.33rem; }
 }
 /* Push the divider + account section + footer to the bottom of the
    drawer. The flex column above stays at the top; `margin-top: auto` on
