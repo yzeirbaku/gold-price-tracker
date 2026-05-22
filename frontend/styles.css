@@ -112,6 +112,13 @@ header h1 {
      developer credit at the drawer's bottom edge — without it the flex
      content would scroll behind the credit. */
   padding: 1.25rem 0.85rem 2.5rem;
+  /* Body has padding-top: env(safe-area-inset-top), which pushes the
+     header below the notch/island. The drawer is position: fixed and
+     doesn't inherit that — without matching safe-area-top here, the
+     drawer's top sits above the notch while the header sits below it,
+     so the menu's brand border-bottom can't line up with the page
+     header's border-bottom. Mirror the inset on the drawer. */
+  padding-top: calc(1.25rem + env(safe-area-inset-top, 0px));
   z-index: 200;
   display: flex; flex-direction: column;
   gap: 0.35rem;
@@ -185,8 +192,11 @@ header h1 {
      border-bottom lines up with the page header's border-bottom when
      the drawer is open. Math: drawer-pad-top (0.55) + brand-pad-top
      (0.25) + 1.33rem × 1.2 line-height + brand-pad-bottom (0.8)
-     ≈ 3.196rem, matching header (0.8 + 1.596 + 0.8 = 3.196rem). */
-  .menu-dropdown { padding-top: 0.55rem; }
+     ≈ 3.196rem, matching header (0.8 + 1.596 + 0.8 = 3.196rem). The
+     env(safe-area-inset-top) addition matches body's same offset so
+     both the header and the drawer get pushed below the notch by the
+     same amount on iPhones with a dynamic island / notch. */
+  .menu-dropdown { padding-top: calc(0.55rem + env(safe-area-inset-top, 0px)); }
   .menu-brand { font-size: 1.33rem; padding-bottom: 0.8rem; }
 }
 /* Push the divider + account section + footer to the bottom of the
