@@ -108,12 +108,19 @@ async def _fetch_historical_spot_dkk_per_g(metal: Metal, purchased_at: datetime)
     try:
         usd_per_g = await fetch_historical_usd_per_gram(metal, on_date)
     except HistoricalSpotUnavailable as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        # Log the technical detail (sanity bounds, date, value) server-side;
+        # surface a stable snake_case code so the frontend's 502 branch shows
+        # the canned "server is having trouble" copy without ever exposing the
+        # raw exception text — even if userFacingError's 5xx short-circuit is
+        # ever changed to parse the body.
+        logger.warning("historical_spot_unavailable: %s", e)
+        raise HTTPException(status_code=502, detail="historical_spot_unavailable") from e
     try:
         async with httpx.AsyncClient() as client:
             dkk_rate = await fetch_usd_to_dkk_on(client, on_date)
     except HistoricalFxUnavailable as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        logger.warning("historical_fx_unavailable: %s", e)
+        raise HTTPException(status_code=502, detail="historical_fx_unavailable") from e
     return Decimal(str(usd_per_g * dkk_rate)).quantize(Decimal("0.0001"))
 
 
