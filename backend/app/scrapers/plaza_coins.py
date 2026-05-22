@@ -9,10 +9,16 @@ import httpx
 
 from app.coins import resolve
 from app.models import CoinListing
-from app.scrapers.base import make_html_parser, now_utc
+from app.scrapers.base import (
+    FINE_GOLD_CAP_G,
+    absolute_url,
+    fetch_listing_html,
+    http_error_coin_listing,
+    make_html_parser,
+    now_utc,
+)
 
 logger = logging.getLogger(__name__)
-FINE_GOLD_CAP_G = 20.0
 
 
 class PlazaCoinsScraper:
@@ -21,16 +27,11 @@ class PlazaCoinsScraper:
     listing_url = "https://plaza.dk/collections/investeringsguld"
 
     async def fetch(self, client: httpx.AsyncClient) -> list[CoinListing]:
-        try:
-            resp = await client.get(self.listing_url, timeout=8.0, follow_redirects=True)
-            resp.raise_for_status()
-        except httpx.HTTPError as e:
-            logger.warning("Plaza coins fetch failed: %s", e)
-            return [CoinListing(
-                dealer=self.name, status="error",
-                error=f"http: {e.__class__.__name__}", fetched_at=now_utc(),
-            )]
-        return self.parse(resp.text)
+        html, err = await fetch_listing_html(client, self.listing_url)
+        if err:
+            logger.warning("Plaza coins fetch failed: %s", err)
+            return [http_error_coin_listing(self.name, err)]
+        return self.parse(html or "")
 
     def parse(self, html: str) -> list[CoinListing]:
         tree = make_html_parser(html)
@@ -56,7 +57,7 @@ class PlazaCoinsScraper:
                     pass
             in_stock = card.css_first(".price ins") is not None
             href = title_node.attributes.get("href") or ""
-            url = href if href.startswith("http") else f"{self.base_url}{href}"
+            url = absolute_url(href, self.base_url)
             out.append(CoinListing(
                 dealer=self.name,
                 status="ok" if (in_stock and price) else "out_of_stock",
