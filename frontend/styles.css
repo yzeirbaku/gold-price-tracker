@@ -55,6 +55,11 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 html { overflow-x: hidden; }
+/* Kill the elastic rubber-band overscroll on iOS Safari PWAs so pulling
+ * down at the top of the page doesn't shove the sticky header along
+ * with the document. Makes the PWA feel native instead of web-y.
+ * Supported on iOS 16+, ignored gracefully on older. */
+html, body { overscroll-behavior: none; }
 body {
   margin: 0; padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
@@ -176,7 +181,13 @@ header h1 {
   border-bottom: 1px solid var(--border);
 }
 @media (max-width: 480px) {
-  .menu-brand { font-size: 1.16rem; }
+  /* Brand metrics mirror the main header on mobile so the menu's
+     border-bottom lines up with the page header's border-bottom when
+     the drawer is open. Math: drawer-pad-top (0.55) + brand-pad-top
+     (0.25) + 1.33rem × 1.2 line-height + brand-pad-bottom (0.8)
+     ≈ 3.196rem, matching header (0.8 + 1.596 + 0.8 = 3.196rem). */
+  .menu-dropdown { padding-top: 0.55rem; }
+  .menu-brand { font-size: 1.33rem; padding-bottom: 0.8rem; }
 }
 /* Push the divider + account section + footer to the bottom of the
    drawer. The flex column above stays at the top; `margin-top: auto` on
@@ -275,8 +286,8 @@ main { max-width: 720px; margin: 0 auto; }
   /* Tighter gap pulls the title closer to the (now-smaller) burger.
      Combined with the burger's 4px width shrink, the title's left edge
      shifts ~7px left toward the page edge. */
-  header { padding: 0.7rem 1rem; gap: 0.15rem; }
-  header h1 { font-size: 1.16rem; }
+  header { padding: 0.8rem 1rem; gap: 0.15rem; }
+  header h1 { font-size: 1.33rem; }
   .header-title {
     gap: 0.5rem;
     justify-content: space-between;
@@ -302,8 +313,8 @@ main { max-width: 720px; margin: 0 auto; }
      `.icon-btn` so the SVG dominates the chrome. The SVG itself is sized
      in the base `#menu-btn svg` rule; bump it here for the mobile bump
      the title got. */
-  #menu-btn { width: 36px; height: 36px; }
-  #menu-btn svg { width: 26px; height: 26px; }
+  #menu-btn { width: 41px; height: 41px; }
+  #menu-btn svg { width: 30px; height: 30px; }
 }
 .card {
   margin: 1rem; padding: 1.1rem 1.1rem 1.25rem;
