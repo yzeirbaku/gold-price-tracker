@@ -34,11 +34,12 @@ class VitusGuldScraper:
         listing_html, err = await fetch_listing_html(
             client, self.listing_url, timeout=6.0,
         )
-        if err:
+        if err is not None:
             logger.warning("Vitus Guld listing fetch failed: %s", err)
-            return http_error_listing(self.name, err)
+            return http_error_listing(self.name, err.__class__.__name__)
+        assert listing_html is not None
 
-        picked = self.parse_listing(listing_html or "", size_g)
+        picked = self.parse_listing(listing_html, size_g)
         if picked is None:
             return None
         product_url, brand = picked
@@ -46,11 +47,12 @@ class VitusGuldScraper:
         product_html, err = await fetch_listing_html(
             client, product_url, timeout=6.0,
         )
-        if err:
+        if err is not None:
             logger.warning("Vitus Guld product fetch failed: %s", err)
-            return http_error_listing(self.name, err)
+            return http_error_listing(self.name, err.__class__.__name__)
+        assert product_html is not None
 
-        return self.parse_product(product_html or "", product_url, brand)
+        return self.parse_product(product_html, product_url, brand)
 
     def parse_listing(self, html: str, size_g: float) -> tuple[str, str | None] | None:
         """Pick the cheapest valid in-stock variant; return (product_url, brand)."""

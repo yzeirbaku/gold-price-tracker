@@ -27,10 +27,11 @@ class PlazaScraper:
         html, err = await fetch_listing_html(
             client, f"{self.base_url}/collections/guldbarre",
         )
-        if err:
+        if err is not None:
             logger.warning("Plaza fetch failed: %s", err)
-            return http_error_listing(self.name, err)
-        return self.parse(html or "", size_g)
+            return http_error_listing(self.name, err.__class__.__name__)
+        assert html is not None
+        return self.parse(html, size_g)
 
     def parse(self, html: str, size_g: float) -> Listing | None:
         tree = make_html_parser(html)

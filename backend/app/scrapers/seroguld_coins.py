@@ -24,10 +24,11 @@ class SeroGuldCoinsScraper:
 
     async def fetch(self, client: httpx.AsyncClient) -> list[CoinListing]:
         html, err = await fetch_listing_html(client, self.listing_url)
-        if err:
+        if err is not None:
             logger.warning("Sero Guld coins fetch failed: %s", err)
-            return [http_error_coin_listing(self.name, err)]
-        return self.parse(html or "")
+            return [http_error_coin_listing(self.name, err.__class__.__name__)]
+        assert html is not None
+        return self.parse(html)
 
     def parse(self, html: str) -> list[CoinListing]:
         tree = make_html_parser(html)

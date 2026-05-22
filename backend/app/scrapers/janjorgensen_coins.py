@@ -34,10 +34,11 @@ class JanJorgensenCoinsScraper:
             self.listing_url,
             headers={**DEFAULT_HEADERS, "Accept-Language": "da-DK,da;q=0.9,en;q=0.8"},
         )
-        if err:
+        if err is not None:
             logger.warning("Jan Jorgensen coins fetch failed: %s", err)
-            return [http_error_coin_listing(self.name, err)]
-        return self.parse(html or "")
+            return [http_error_coin_listing(self.name, err.__class__.__name__)]
+        assert html is not None
+        return self.parse(html)
 
     def parse(self, html: str) -> list[CoinListing]:
         tree = make_html_parser(html)

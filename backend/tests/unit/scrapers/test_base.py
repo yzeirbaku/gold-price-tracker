@@ -111,6 +111,75 @@ def test_pick_cheapest_handles_none_brand() -> None:
     assert picked[3] is None
 
 
+def test_pick_cheapest_does_not_mutate_input() -> None:
+    """Helper must not mutate the caller's list — uses sorted(), not
+    list.sort(). Locks the contract so a future "swap to .sort() for one
+    less allocation" refactor surprises a caller that reuses the list."""
+    candidates = [
+        (6000.0, False, "Argor",    "card_a"),
+        (5500.0, True,  "Valcambi", "card_b"),
+        (5800.0, True,  "PAMP",     "card_c"),
+    ]
+    snapshot = list(candidates)
+    pick_cheapest_in_stock(candidates)
+    assert candidates == snapshot
+
+
+def test_pick_cheapest_breaks_price_ties_by_input_order() -> None:
+    """Two in-stock rows at identical prices: Python's stable sort
+    preserves input order — first appended wins. Pre-refactor scrapers
+    had this exact tie-break behaviour. Pin it so a future "let's add
+    a secondary sort key" tweak doesn't silently change which dealer's
+    variant wins on a flat day."""
+    candidates = [
+        (5500.0, True, "FirstAppended",  "card_first"),
+        (5500.0, True, "SecondAppended", "card_second"),
+    ]
+    picked = pick_cheapest_in_stock(candidates)
+    assert picked is not None
+    card, _price, _in_stock, brand = picked
+    assert card == "card_first"
+    assert brand == "FirstAppended"
+
+
+@pytest.mark.asyncio
+async def test_fetch_listing_html_default_timeout_is_eight_seconds() -> None:
+    """13 of 14 scrapers pre-refactor used timeout=8.0; only Vitus uses
+    6.0 (passed explicitly). Pin the default so a future helper edit
+    doesn't silently shift everyone's deadline."""
+    resp = AsyncMock()
+    resp.text = "<html/>"
+    resp.raise_for_status = lambda: None
+    client = AsyncMock(spec=httpx.AsyncClient)
+    client.get.return_value = resp
+
+    await fetch_listing_html(client, "https://x.dk")
+
+    client.get.assert_called_once()
+    _args, kwargs = client.get.call_args
+    assert kwargs["timeout"] == 8.0
+
+
+@pytest.mark.asyncio
+async def test_fetch_listing_html_default_headers_are_none() -> None:
+    """Non-Jan-Jorgensen scrapers don't pass any headers — the dealer
+    headers come from the orchestrator-level AsyncClient(headers=
+    DEFAULT_HEADERS). Pin the default so a helper edit doesn't
+    accidentally start passing `{}` (which would override the
+    client-level defaults to nothing)."""
+    resp = AsyncMock()
+    resp.text = "<html/>"
+    resp.raise_for_status = lambda: None
+    client = AsyncMock(spec=httpx.AsyncClient)
+    client.get.return_value = resp
+
+    await fetch_listing_html(client, "https://x.dk")
+
+    client.get.assert_called_once()
+    _args, kwargs = client.get.call_args
+    assert kwargs["headers"] is None
+
+
 # ── absolute_url ─────────────────────────────────────────────────────────
 
 
@@ -198,15 +267,19 @@ async def test_fetch_listing_html_returns_html_on_success() -> None:
 @pytest.mark.asyncio
 async def test_fetch_listing_html_folds_httpx_failure_into_error_tuple() -> None:
     """The whole point of the helper: turn the try/except boilerplate every
-    scraper used to inline into a single (None, error_class_name) return.
-    The class name is what scrapers feed into http_error_listing — the wire
-    format is `http: <ClassName>`."""
+    scraper used to inline into a single (None, exc) return. The exception
+    object is returned (not just the class name) so callers can log it with
+    full message detail; the wire format `http: <ClassName>` is built from
+    `exc.__class__.__name__` at the call site."""
     client = AsyncMock(spec=httpx.AsyncClient)
     client.get.side_effect = httpx.ConnectError("dns lookup failed")
 
     html, err = await fetch_listing_html(client, "https://example.dk/list")
     assert html is None
-    assert err == "ConnectError"
+    assert isinstance(err, httpx.ConnectError)
+    assert err.__class__.__name__ == "ConnectError"
+    # Message detail must survive — log greppability depends on it.
+    assert "dns lookup failed" in str(err)
 
 
 @pytest.mark.asyncio
@@ -229,7 +302,8 @@ async def test_fetch_listing_html_catches_raise_for_status_failure() -> None:
 
     html, err = await fetch_listing_html(client, "https://example.dk/list")
     assert html is None
-    assert err == "HTTPStatusError"
+    assert isinstance(err, httpx.HTTPStatusError)
+    assert err.__class__.__name__ == "HTTPStatusError"
 
 
 @pytest.mark.asyncio

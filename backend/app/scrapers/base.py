@@ -145,16 +145,20 @@ async def fetch_listing_html(
     *,
     timeout: float = 8.0,
     headers: dict[str, str] | None = None,
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, httpx.HTTPError | None]:
     """Fetch an HTML listing page.
 
-    Returns ``(html, None)`` on success, ``(None, error_class_name)`` on
-    httpx failure. Model-agnostic on purpose — bar scrapers wrap the error
-    into a ``Listing``, coin scrapers into a ``CoinListing``.
+    Returns ``(html, None)`` on success, ``(None, exc)`` on httpx failure
+    where ``exc`` is the raised ``httpx.HTTPError`` (or subclass such as
+    ``ConnectError``, ``TimeoutException``, ``HTTPStatusError``). The
+    raw exception is returned so callers can log it with full message
+    detail; the on-the-wire ``error`` field is built from
+    ``exc.__class__.__name__`` to keep the ``"http: <ClassName>"``
+    contract that downstream consumers (snapshot outlier guards, etc.)
+    rely on.
 
-    The error class name (e.g. ``ConnectError``, ``TimeoutException``) is
-    what the original per-scraper code logged + surfaced via the ``error``
-    field, so this preserves the existing on-the-wire shape.
+    Model-agnostic on purpose — bar scrapers wrap the failure into a
+    ``Listing``, coin scrapers into a ``CoinListing``.
     """
     try:
         resp = await client.get(
@@ -163,7 +167,7 @@ async def fetch_listing_html(
         resp.raise_for_status()
         return resp.text, None
     except httpx.HTTPError as e:
-        return None, e.__class__.__name__
+        return None, e
 
 
 def pick_cheapest_in_stock[B, N](
@@ -175,11 +179,15 @@ def pick_cheapest_in_stock[B, N](
     Input tuple shape: ``(price, in_stock, brand, card)`` — matches what
     every bar scraper already builds. Returns ``None`` if the list is
     empty so callers can early-out cleanly.
+
+    Does **not** mutate the input list (uses ``sorted()`` rather than
+    ``list.sort``). On ties (same in-stock and same price) Python's
+    stable sort preserves input order — first appended wins.
     """
     if not candidates:
         return None
-    candidates.sort(key=lambda c: (not c[1], c[0]))
-    price, in_stock, brand, card = candidates[0]
+    head = sorted(candidates, key=lambda c: (not c[1], c[0]))[0]
+    price, in_stock, brand, card = head
     return card, price, in_stock, brand
 
 
