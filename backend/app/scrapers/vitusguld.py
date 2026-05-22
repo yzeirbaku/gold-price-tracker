@@ -5,10 +5,14 @@ from selectolax.parser import HTMLParser, Node
 
 from app.models import Listing
 from app.scrapers.base import (
+    error_listing,
+    fetch_listing_html,
+    http_error_listing,
     make_html_parser,
     normalize_brand,
     now_utc,
     parse_dkk_price,
+    pick_cheapest_in_stock,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,32 +31,26 @@ class VitusGuldScraper:
         # drift behind the live spot. The product detail pages render fresh,
         # so we use the listing only to pick a candidate URL+brand and read the
         # price from the product page.
-        try:
-            listing_resp = await client.get(self.listing_url, timeout=6.0, follow_redirects=True)
-            listing_resp.raise_for_status()
-        except httpx.HTTPError as e:
-            logger.warning("Vitus Guld listing fetch failed: %s", e)
-            return Listing(
-                dealer=self.name, status="error",
-                error=f"http: {e.__class__.__name__}", fetched_at=now_utc(),
-            )
+        listing_html, err = await fetch_listing_html(
+            client, self.listing_url, timeout=6.0,
+        )
+        if err:
+            logger.warning("Vitus Guld listing fetch failed: %s", err)
+            return http_error_listing(self.name, err)
 
-        picked = self.parse_listing(listing_resp.text, size_g)
+        picked = self.parse_listing(listing_html or "", size_g)
         if picked is None:
             return None
         product_url, brand = picked
 
-        try:
-            product_resp = await client.get(product_url, timeout=6.0, follow_redirects=True)
-            product_resp.raise_for_status()
-        except httpx.HTTPError as e:
-            logger.warning("Vitus Guld product fetch failed: %s", e)
-            return Listing(
-                dealer=self.name, status="error",
-                error=f"http: {e.__class__.__name__}", fetched_at=now_utc(),
-            )
+        product_html, err = await fetch_listing_html(
+            client, product_url, timeout=6.0,
+        )
+        if err:
+            logger.warning("Vitus Guld product fetch failed: %s", err)
+            return http_error_listing(self.name, err)
 
-        return self.parse_product(product_resp.text, product_url, brand)
+        return self.parse_product(product_html or "", product_url, brand)
 
     def parse_listing(self, html: str, size_g: float) -> tuple[str, str | None] | None:
         """Pick the cheapest valid in-stock variant; return (product_url, brand)."""
@@ -79,10 +77,7 @@ class VitusGuldScraper:
             or tree.css_first('meta[property="og:availability"]')
         )
         if price_meta is None:
-            return Listing(
-                dealer=self.name, status="error",
-                error="parse_failed: missing og:price meta", fetched_at=now_utc(),
-            )
+            return error_listing(self.name, "parse_failed: missing og:price meta")
         price = parse_dkk_price(price_meta.attributes.get("content") or "")
         if price is None:
             return Listing(
@@ -137,10 +132,10 @@ class VitusGuldScraper:
             brand = _extract_brand(title)
             candidates.append((price, in_stock, brand, card))
 
-        if not candidates:
+        picked = pick_cheapest_in_stock(candidates)
+        if picked is None:
             return None
-        candidates.sort(key=lambda c: (not c[1], c[0]))
-        price, in_stock, brand, card = candidates[0]
+        card, _price, _in_stock, brand = picked
         return card, brand
 
 
