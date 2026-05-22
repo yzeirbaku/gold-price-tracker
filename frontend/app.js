@@ -70,6 +70,20 @@ async function withBusy(btn, fn, busyLabel) {
   }
 }
 
+// Small bottom-center popup — used for confirmations like "Signed in as X".
+// Auto-hides after 3s. `kind="error"` paints the red variant.
+const TOAST_TIMEOUT_MS = 3000;
+let toastTimer = null;
+function toast(message, kind = 'info') {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = message;
+  el.dataset.kind = kind;
+  el.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), TOAST_TIMEOUT_MS);
+}
+
 // Turn a fetch failure into user-facing copy. Never leak status codes, raw
 // response bodies, or exception messages — they look unpolished and tell the
 // user nothing actionable. Pass `fallback` to override the generic line per
@@ -1390,7 +1404,7 @@ function updateAuthUI() {
   $('.menu-item[data-action="signout"]').hidden = !signedIn;
   const accountInfo = $('.menu-account-info');
   accountInfo.hidden = !signedIn;
-  if (signedIn) accountInfo.textContent = currentUser.email;
+  if (signedIn) accountInfo.textContent = `Signed in as ${currentUser.email}`;
 }
 
 async function loadAuthState() {
@@ -1491,6 +1505,7 @@ $('#login-paste-submit').addEventListener('click', async (e) => {
       try { localStorage.setItem(SESSION_BROADCAST_KEY, '1'); } catch {}
       $('#login-paste').value = '';
       $('#login-dialog').close();
+      toast(`Signed in as ${user.email}`);
     } catch (err) {
       errEl.textContent = await userFacingError({ err });
       errEl.hidden = false;
@@ -1550,6 +1565,7 @@ async function handleVerifyFragment() {
     currentUser = { user_id: user.user_id, email: user.email };
     updateAuthUI();
     try { localStorage.setItem(SESSION_BROADCAST_KEY, '1'); } catch {}
+    toast(`Signed in as ${user.email}`);
     // Strip the token from the URL immediately so a reload doesn't re-fire
     // the now-used token and surface "Sign-in failed" to an already-signed-in user.
     history.replaceState(null, '', window.location.pathname);
