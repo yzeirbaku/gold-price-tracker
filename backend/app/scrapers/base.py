@@ -4,7 +4,13 @@ from typing import Protocol
 import httpx
 from selectolax.parser import HTMLParser
 
-from app.models import Listing
+from app.models import CoinListing, Listing
+
+# Bullion-only coin cap: 1 oz coins (31.1g fine) are excluded from /coins
+# so the size axis stays comparable across the bar + coin views. Lift this
+# only if the comparison story changes. Each coin scraper imports it; do
+# not redefine locally.
+FINE_GOLD_CAP_G = 20.0
 
 # Some dealer sites (Simply.com WAF — Nordisk Guld, Sero Guld) reject anything that
 # doesn't look like a real browser. Sending the full Sec-* fingerprint set bypasses
@@ -123,3 +129,98 @@ def normalize_brand(raw: str | None) -> str | None:
         if pattern in lowered:
             return "Mixed"
     return stripped
+
+
+# ─── Shared scraper helpers ──────────────────────────────────────────────
+# Every dealer scraper performs the same shape of work: fetch a listing
+# page, walk cards, collect (price, in_stock, brand, card) candidates,
+# pick the cheapest in-stock variant, then build a Listing/CoinListing.
+# The helpers below cover the boilerplate so each scraper stays focused on
+# its dealer-specific HTML extraction.
+
+
+async def fetch_listing_html(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    timeout: float = 8.0,
+    headers: dict[str, str] | None = None,
+) -> tuple[str | None, httpx.HTTPError | None]:
+    """Fetch an HTML listing page.
+
+    Returns ``(html, None)`` on success, ``(None, exc)`` on httpx failure
+    where ``exc`` is the raised ``httpx.HTTPError`` (or subclass such as
+    ``ConnectError``, ``TimeoutException``, ``HTTPStatusError``). The
+    raw exception is returned so callers can log it with full message
+    detail; the on-the-wire ``error`` field is built from
+    ``exc.__class__.__name__`` to keep the ``"http: <ClassName>"``
+    contract that downstream consumers (snapshot outlier guards, etc.)
+    rely on.
+
+    Model-agnostic on purpose — bar scrapers wrap the failure into a
+    ``Listing``, coin scrapers into a ``CoinListing``.
+    """
+    try:
+        resp = await client.get(
+            url, timeout=timeout, follow_redirects=True, headers=headers,
+        )
+        resp.raise_for_status()
+        return resp.text, None
+    except httpx.HTTPError as e:
+        return None, e
+
+
+def pick_cheapest_in_stock[B, N](
+    candidates: list[tuple[float, bool, B, N]],
+) -> tuple[N, float, bool, B] | None:
+    """Sort candidates so in-stock rows come first, then ascending price,
+    and return the head reshuffled to ``(card, price, in_stock, brand)``.
+
+    Input tuple shape: ``(price, in_stock, brand, card)`` — matches what
+    every bar scraper already builds. Returns ``None`` if the list is
+    empty so callers can early-out cleanly.
+
+    Does **not** mutate the input list (uses ``sorted()`` rather than
+    ``list.sort``). On ties (same in-stock and same price) Python's
+    stable sort preserves input order — first appended wins.
+    """
+    if not candidates:
+        return None
+    head = sorted(candidates, key=lambda c: (not c[1], c[0]))[0]
+    price, in_stock, brand, card = head
+    return card, price, in_stock, brand
+
+
+def absolute_url(href: str, base_url: str) -> str:
+    """Resolve a possibly-relative href against a dealer's base URL.
+
+    Returns ``href`` unchanged if it already starts with ``http``; otherwise
+    prefixes it with ``base_url``. Caller is responsible for guarding against
+    empty hrefs — this helper preserves that behaviour from the original
+    inline expressions.
+    """
+    return href if href.startswith("http") else f"{base_url}{href}"
+
+
+def error_listing(dealer: str, reason: str) -> Listing:
+    """Construct a status="error" Listing with a fresh ``fetched_at``."""
+    return Listing(
+        dealer=dealer, status="error", error=reason, fetched_at=now_utc(),
+    )
+
+
+def http_error_listing(dealer: str, exc_class_name: str) -> Listing:
+    """Listing for an httpx failure — formatted as ``http: <ExcClassName>``."""
+    return error_listing(dealer, f"http: {exc_class_name}")
+
+
+def error_coin_listing(dealer: str, reason: str) -> CoinListing:
+    """Construct a status="error" CoinListing with a fresh ``fetched_at``."""
+    return CoinListing(
+        dealer=dealer, status="error", error=reason, fetched_at=now_utc(),
+    )
+
+
+def http_error_coin_listing(dealer: str, exc_class_name: str) -> CoinListing:
+    """CoinListing for an httpx failure — formatted as ``http: <ExcClassName>``."""
+    return error_coin_listing(dealer, f"http: {exc_class_name}")

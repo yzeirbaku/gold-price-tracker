@@ -4,7 +4,17 @@ import httpx
 from selectolax.parser import HTMLParser, Node
 
 from app.models import Listing
-from app.scrapers.base import DEFAULT_HEADERS, make_html_parser, now_utc, parse_dkk_price
+from app.scrapers.base import (
+    DEFAULT_HEADERS,
+    absolute_url,
+    error_listing,
+    fetch_listing_html,
+    http_error_listing,
+    make_html_parser,
+    now_utc,
+    parse_dkk_price,
+    pick_cheapest_in_stock,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -14,27 +24,19 @@ class JanJorgensenScraper:
     base_url = "https://janjorgensensmykker.dk"
 
     async def fetch(self, size_g: float, client: httpx.AsyncClient) -> Listing | None:
-        url = f"{self.base_url}/smykker/investeringsguldbarrer"
-        try:
-            resp = await client.get(
-                url,
-                timeout=8.0,
-                follow_redirects=True,
-                headers={
-                    **DEFAULT_HEADERS,
-                    "Accept-Language": "da-DK,da;q=0.9,en;q=0.8",
-                },
-            )
-            resp.raise_for_status()
-        except httpx.HTTPError as e:
-            logger.warning("Jan Jørgensen fetch failed: %s", e)
-            return Listing(
-                dealer=self.name,
-                status="error",
-                error=f"http: {e.__class__.__name__}",
-                fetched_at=now_utc(),
-            )
-        return self.parse(resp.text, size_g)
+        html, err = await fetch_listing_html(
+            client,
+            f"{self.base_url}/smykker/investeringsguldbarrer",
+            headers={
+                **DEFAULT_HEADERS,
+                "Accept-Language": "da-DK,da;q=0.9,en;q=0.8",
+            },
+        )
+        if err is not None:
+            logger.warning("Jan Jørgensen fetch failed: %s", err)
+            return http_error_listing(self.name, err.__class__.__name__)
+        assert html is not None
+        return self.parse(html, size_g)
 
     def parse(self, html: str, size_g: float) -> Listing | None:
         tree = make_html_parser(html)
@@ -45,14 +47,9 @@ class JanJorgensenScraper:
 
         link_node = card.css_first("a.card-link")
         if link_node is None:
-            return Listing(
-                dealer=self.name,
-                status="error",
-                error="parse_failed: missing link node",
-                fetched_at=now_utc(),
-            )
+            return error_listing(self.name, "parse_failed: missing link node")
         href = link_node.attributes.get("href") or ""
-        url = href if href.startswith("http") else f"{self.base_url}{href}"
+        url = absolute_url(href, self.base_url)
 
         return Listing(
             dealer=self.name,
@@ -92,8 +89,4 @@ class JanJorgensenScraper:
             in_stock = card.css_first("span.color-green") is not None
             candidates.append((price, in_stock, "Mixed", card))
 
-        if not candidates:
-            return None
-        candidates.sort(key=lambda c: (not c[1], c[0]))
-        price, in_stock, brand, card = candidates[0]
-        return card, price, in_stock, brand
+        return pick_cheapest_in_stock(candidates)
