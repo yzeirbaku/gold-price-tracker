@@ -482,33 +482,6 @@ dialog {
   max-width: 360px;
   position: relative;
 }
-dialog form { position: relative; }
-.dialog-close {
-  position: absolute;
-  /* Half-step between the original `-0.5rem` (too far past the corner)
-     and the inside-the-frame `0.1rem` (drooping). At -0.25rem the X
-     button overhangs the dialog edge by 4px and the glyph sits ~0.75rem
-     in from each edge — tucked into the corner without straddling it. */
-  top: -0.25rem; right: -0.25rem;
-  width: 32px; height: 32px;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: transparent; border: none;
-  color: var(--muted, var(--fg-soft));
-  font-size: 1.55rem; line-height: 1;
-  cursor: pointer; padding: 0; margin: 0;
-  border-radius: 999px;
-  transition: color 120ms ease, background 120ms ease;
-}
-@media (hover: hover) and (pointer: fine) {
-  .dialog-close:hover { color: var(--accent); background: var(--surface-2); }
-}
-/* No focus ring. The button has tabindex="-1" so it can't be reached via
-   keyboard Tab (ESC closes the dialog instead), and iOS Safari was
-   painting `:focus-visible` on autofocus despite the tabindex hint —
-   showing a yellow ring on every dialog open. Cancel both modes
-   explicitly. */
-.dialog-close:focus,
-.dialog-close:focus-visible { outline: none; }
 dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blur(2px); }
 dialog h2 { margin: 0 0 0.75rem 0; font-size: 1rem; }
 dialog label { display: block; margin: 0.75rem 0; font-size: 0.85rem; color: var(--fg-soft); }
@@ -1232,30 +1205,34 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   gap: 0.15rem;
   justify-content: flex-end;
 }
+/* Square bordered icon buttons used in the portfolio + alerts row actions.
+   Modeled on the formicarium / net-tracker pattern: neutral at rest, accent
+   border on hover for edit, full red wash on hover for delete. */
 .row-edit, .row-delete {
-  font-size: 1.1rem;
-  color: var(--muted);
-  background: transparent; border: none;
-  padding: 0.2rem 0.35rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 28px; height: 28px;
+  color: var(--fg);
   cursor: pointer;
-  line-height: 1;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  -webkit-tap-highlight-color: transparent;
 }
+.row-edit > svg, .row-delete > svg { width: 14px; height: 14px; display: block; }
 @media (hover: hover) and (pointer: fine) {
-  .row-edit:hover { color: var(--accent); }
+  .row-edit:hover { border-color: var(--accent); color: var(--accent); background: var(--hover-bg); }
+  .row-delete:hover { border-color: var(--error); color: var(--error); background: var(--hover-bg); }
 }
-@media (hover: hover) and (pointer: fine) {
-  .row-delete:hover { color: var(--error, #e85a5a); }
+.row-edit:active { border-color: var(--accent); color: var(--accent); }
+.row-delete:active { border-color: var(--error); color: var(--error); }
+.row-edit:focus-visible, .row-delete:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
 }
 @media (max-width: 480px) {
-  /* Phones: bump the visible glyph above desktop for tap-readability while
-     keeping the button bounding-box close to the same width — visible
-     weight, not hit-area weight. The actions column shouldn't crowd the
-     left columns on a 380px viewport. */
-  .row-actions { gap: 0.05rem; }
-  .row-edit, .row-delete {
-    font-size: 1.2rem;
-    padding: 0.2rem 0.2rem;
-  }
+  .row-actions { gap: 0.25rem; }
 }
 
 /* Alerts page header — title flush left, button flush right, description

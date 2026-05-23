@@ -37,6 +37,12 @@ function fmtSpotEUR(n) { return `${fmtNum(n, 2)} eur`; }
 function fmtPct(n) { return n == null ? '—' : (n > 0 ? '+' : '') + n.toFixed(1) + '%'; }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 
+// Feather-style stroke icons used for the per-row edit / delete buttons in
+// the portfolio and alerts tables. `stroke="currentColor"` lets the .row-edit
+// neutral / .row-delete hover-danger CSS rules re-tint them.
+const PENCIL_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>`;
+const TRASH_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`;
+
 // URL safety: only allow http(s):// — block anything else (javascript:, data:,
 // etc.) that might come from a compromised/scraped listing.
 function safeHref(url) {
@@ -2086,8 +2092,8 @@ function renderPortfolioTable(purchases) {
         <td>${gross} g</td>
         <td>
           <div class="row-actions">
-            <button class="row-edit icon-btn" aria-label="Edit" data-id="${p.id}" type="button">✎</button>
-            <button class="row-delete icon-btn" aria-label="Delete" data-id="${p.id}" type="button">✕</button>
+            <button class="row-edit" aria-label="Edit" data-id="${p.id}" type="button">${PENCIL_SVG}</button>
+            <button class="row-delete" aria-label="Delete" data-id="${p.id}" type="button">${TRASH_SVG}</button>
           </div>
         </td>
       </tr>
@@ -2518,8 +2524,8 @@ function renderAlerts() {
         <td>≤ ${Number(a.threshold_pct).toFixed(2)}%</td>
         <td>
           <div class="row-actions">
-            <button class="row-edit icon-btn" aria-label="Edit" data-id="${a.id}" type="button">✎</button>
-            <button class="row-delete icon-btn" aria-label="Delete" data-id="${a.id}" type="button">✕</button>
+            <button class="row-edit" aria-label="Edit" data-id="${a.id}" type="button">${PENCIL_SVG}</button>
+            <button class="row-delete" aria-label="Delete" data-id="${a.id}" type="button">${TRASH_SVG}</button>
           </div>
         </td>
       </tr>
