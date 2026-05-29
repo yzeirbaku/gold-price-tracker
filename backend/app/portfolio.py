@@ -56,11 +56,22 @@ LIVE_SPOT_TIMEOUT_S = 3.0
 
 
 def _reject_future_purchased_at(v: datetime) -> datetime:
-    """Frozen historical-spot lookup walks back 7 days from `purchased_at`;
-    a future date walks back from 'future' and bakes an undefined/stale spot
-    into the row forever. Block it at API parse time."""
-    cutoff = datetime.now(UTC) + _FUTURE_PURCHASED_AT_TOLERANCE
-    if v > cutoff:
+    """Reject only when the UTC *calendar date* is strictly after today.
+
+    Same-day timestamps in the future of `now` are allowed: the frontend
+    stamps date-only inputs at T12:00:00Z so the historical lookup lands on
+    the midpoint of the trading day, which is genuinely ahead of the server
+    clock for any user submitting before noon UTC (i.e. before ~13:00 CET /
+    ~14:00 CEST local). `_fetch_historical_spot_dkk_per_g` handles those
+    same-day rows by reading live spot instead of yfinance.
+
+    The 5-min tolerance branch is kept as a midnight-rollover safety net —
+    a "now" submission whose client clock is microseconds ahead can land on
+    tomorrow's UTC date right at 00:00."""
+    now = datetime.now(UTC)
+    if v <= now + _FUTURE_PURCHASED_AT_TOLERANCE:
+        return v
+    if v.astimezone(UTC).date() > now.date():
         raise ValueError("Purchase date cannot be in the future")
     return v
 
@@ -103,8 +114,19 @@ async def _fetch_historical_spot_dkk_per_g(metal: Metal, purchased_at: datetime)
     static rate here — the result lands on a `purchases` row and stays
     frozen forever, defining the cost-basis premium. Better to ask for a
     retry than bake an off-by-7% rate into history.
+
+    Same-day shortcut: if `purchased_at`'s UTC date is today (or later, via
+    the validator's midnight-skew tolerance), use live spot. yfinance's daily
+    series carries only closed sessions, so "historical for today" would
+    silently mean yesterday's close — live spot is closer to the price the
+    user actually paid and avoids 422-ing every same-day purchase added
+    before noon UTC.
     """
     on_date = purchased_at.astimezone(UTC).date()
+    today = datetime.now(UTC).date()
+    if on_date >= today:
+        current = await _current_spot_dkk_per_g()
+        return current[metal]
     try:
         usd_per_g = await fetch_historical_usd_per_gram(metal, on_date)
     except HistoricalSpotUnavailable as e:

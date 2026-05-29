@@ -212,6 +212,20 @@ historical comes from frankfurter.dev's `/v1/{date}` endpoint. Both walk
 back up to 7 days through weekends/holidays. The PATCH endpoint
 re-freezes the spot if `purchased_at` *or* `metal` changes.
 
+**Same-day purchases use live spot, not yfinance.** When `purchased_at`
+lands on today's UTC calendar date, `_fetch_historical_spot_dkk_per_g`
+short-circuits to `_current_spot_dkk_per_g` instead of yfinance. Two
+reasons: (1) yfinance's daily series only carries closed sessions, so
+"historical for today" would silently mean *yesterday's* close — not the
+price the user just paid; (2) the frontend stamps date-only inputs at
+`T12:00:00Z` (noon UTC) so the lookup falls on the trading-day midpoint,
+which is genuinely in the future of the server clock for any user
+submitting before noon UTC (~13:00 CET / ~14:00 CEST). The
+future-purchased-at validator was therefore loosened to reject only
+when the UTC calendar date is strictly tomorrow-or-later; same-day
+stamps pass through. A 5-minute clock-skew tolerance is preserved as a
+midnight-rollover safety net.
+
 **Why bearer tokens, not cookies:** the backend (Render `*.onrender.com`)
 and frontend (Cloudflare Pages `*.pages.dev`) live on different sites.
 Safari ITP, Brave, Firefox ETP, and Chrome (with 3rd-party cookies

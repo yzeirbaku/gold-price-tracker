@@ -204,6 +204,68 @@ async def test_fetch_historical_spot_dkk_per_g_surfaces_unavailable_as_http_502(
     assert exc.value.status_code == 502
 
 
+def _freeze_portfolio_now(monkeypatch, frozen: datetime) -> None:
+    """Pin `app.portfolio.datetime.now(UTC)` to a fixed instant. Used to
+    exercise the same-day branches without depending on wall-clock time."""
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return frozen if tz is None else frozen.astimezone(tz)
+    monkeypatch.setattr("app.portfolio.datetime", _Frozen)
+
+
+@pytest.mark.asyncio
+async def test_fetch_historical_spot_uses_live_spot_when_purchased_today(
+    monkeypatch,
+) -> None:
+    """A purchase stamped at today T12:00:00Z must use live spot. yfinance's
+    daily series has no intraday data and would silently walk back to
+    yesterday's close, which is *not* what the user just paid. Regression
+    against the same-day-purchase 422 bug."""
+    # 09:00 UTC on the "current" day — before the frontend's noon stamp.
+    today_at_morning = datetime(2026, 5, 29, 9, 0, tzinfo=UTC)
+    _freeze_portfolio_now(monkeypatch, today_at_morning)
+
+    live = AsyncMock(return_value={"gold": Decimal("700.0000"), "silver": Decimal("9.0000")})
+    yfinance_called = AsyncMock(return_value=999.0)  # would yield wildly wrong number
+    with (
+        patch("app.portfolio._current_spot_dkk_per_g", live),
+        patch("app.portfolio.fetch_historical_usd_per_gram", yfinance_called),
+    ):
+        # The frontend stamps `today T12:00:00Z` — 3 hours in the future of our
+        # frozen "now". This is exactly the payload that used to 422.
+        purchased_at = datetime(2026, 5, 29, 12, 0, tzinfo=UTC)
+        result = await _fetch_historical_spot_dkk_per_g("gold", purchased_at)
+
+    assert result == Decimal("700.0000")
+    live.assert_awaited_once()
+    yfinance_called.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fetch_historical_spot_still_uses_yfinance_for_prior_days(
+    monkeypatch,
+) -> None:
+    """Yesterday and earlier must continue to hit yfinance + Frankfurter —
+    only the same-day branch is rerouted. Guards against accidentally
+    short-circuiting all historical lookups."""
+    today_at_morning = datetime(2026, 5, 29, 9, 0, tzinfo=UTC)
+    _freeze_portfolio_now(monkeypatch, today_at_morning)
+
+    live = AsyncMock()  # must NOT be called
+    with (
+        patch("app.portfolio._current_spot_dkk_per_g", live),
+        patch("app.portfolio.fetch_historical_usd_per_gram", AsyncMock(return_value=100.0)),
+        patch("app.portfolio.fetch_usd_to_dkk_on", AsyncMock(return_value=6.85)),
+    ):
+        # 24h earlier — clearly a different UTC date.
+        purchased_at = datetime(2026, 5, 28, 12, 0, tzinfo=UTC)
+        result = await _fetch_historical_spot_dkk_per_g("gold", purchased_at)
+
+    assert result == Decimal("685.0000")
+    live.assert_not_called()
+
+
 # ── /portfolio/history helpers ──────────────────────────────────────────────
 
 
@@ -431,6 +493,47 @@ def test_purchase_create_allows_now_within_tolerance() -> None:
     future. A 5-minute tolerance window must accept it."""
     near_future = datetime.now(UTC) + timedelta(seconds=30)
     PurchaseCreate(**_valid_create_payload(purchased_at=near_future))
+
+
+def test_purchase_create_allows_today_noon_stamp_before_noon_utc(monkeypatch) -> None:
+    """Regression for the 'same-day purchase 422 before noon' bug. The
+    frontend stamps date-only inputs at T12:00:00Z; a user submitting at
+    09:00 UTC (= 10:00 CET / 11:00 CEST local) used to fail validation
+    because the noon stamp was ~3h in the future of the server clock.
+
+    Same UTC calendar date must now pass through regardless of time-of-day
+    skew — `_fetch_historical_spot_dkk_per_g` routes those rows to live
+    spot."""
+    today_at_morning = datetime(2026, 5, 29, 9, 0, tzinfo=UTC)
+    _freeze_portfolio_now(monkeypatch, today_at_morning)
+    payload = _valid_create_payload(
+        purchased_at=datetime(2026, 5, 29, 12, 0, tzinfo=UTC),
+    )
+    # Must not raise.
+    PurchaseCreate(**payload)
+
+
+def test_purchase_create_still_rejects_tomorrow_utc(monkeypatch) -> None:
+    """The validator must continue to refuse a UTC calendar date in the
+    future — that's an actual user-intent error (typo in the date picker),
+    not the noon-stamp edge case."""
+    today_at_morning = datetime(2026, 5, 29, 9, 0, tzinfo=UTC)
+    _freeze_portfolio_now(monkeypatch, today_at_morning)
+    payload = _valid_create_payload(
+        purchased_at=datetime(2026, 5, 30, 12, 0, tzinfo=UTC),
+    )
+    with pytest.raises(ValidationError) as exc:
+        PurchaseCreate(**payload)
+    assert "future" in str(exc.value).lower()
+
+
+def test_purchase_update_allows_today_noon_stamp_before_noon_utc(monkeypatch) -> None:
+    """PATCH goes through the same validator. The PATCH dialog reuses the
+    same date-picker as create, so the same fix must apply on edit."""
+    today_at_morning = datetime(2026, 5, 29, 9, 0, tzinfo=UTC)
+    _freeze_portfolio_now(monkeypatch, today_at_morning)
+    body = PurchaseUpdate(purchased_at=datetime(2026, 5, 29, 12, 0, tzinfo=UTC))
+    assert body.purchased_at == datetime(2026, 5, 29, 12, 0, tzinfo=UTC)
 
 
 def test_purchase_update_rejects_future_purchased_at() -> None:
