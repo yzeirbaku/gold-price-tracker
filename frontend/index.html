@@ -315,7 +315,7 @@
         </fieldset>
         <fieldset class="settings-field">
           <legend>Price paid (DKK)</legend>
-          <input id="purchase-price" type="number" step="0.01" min="0" required />
+          <input id="purchase-price" type="text" inputmode="decimal" autocomplete="off" required />
         </fieldset>
         <fieldset class="settings-field">
           <legend>Purchase date</legend>
@@ -429,6 +429,6 @@
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="config.js?v=111"></script>
-  <script src="app.js?v=120"></script>
+  <script src="app.js?v=121"></script>
 </body>
 </html>

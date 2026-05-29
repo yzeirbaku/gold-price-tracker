@@ -37,6 +37,54 @@ function fmtSpotEUR(n) { return `${fmtNum(n, 2)} eur`; }
 function fmtPct(n) { return n == null ? '—' : (n > 0 ? '+' : '') + n.toFixed(1) + '%'; }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 
+// Danish-style amount inputs (mirrors the helper in net-tracker's
+// budget-common.js): dot thousands, comma decimal, max 2 decimals. Used on
+// price-like fields where 4–6-digit DKK values are common — formatPriceForInput
+// renders the initial value on edit, liveFormatPriceInput rewrites the field
+// as the user types (caret-preserving), parsePriceFromInput converts the
+// formatted string back to a plain Number for the JSON payload.
+function formatPriceForInput(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return '';
+  const [intRaw, decRaw] = num.toFixed(2).split('.');
+  const decPart = decRaw.replace(/0+$/, '');
+  const grouped = intRaw.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return decPart ? `${grouped},${decPart}` : grouped;
+}
+function parsePriceFromInput(s) {
+  if (s == null || s === '') return NaN;
+  return parseFloat(String(s).replace(/\./g, '').replace(/,/g, '.'));
+}
+function liveFormatPriceInput(input) {
+  const raw = input.value;
+  const caret = input.selectionStart ?? raw.length;
+  const digitsBeforeCaret = raw.slice(0, caret).replace(/[^\d]/g, '').length;
+  const stripped = raw.replace(/[^\d,]/g, '');
+  const firstComma = stripped.indexOf(',');
+  let intPart = firstComma === -1 ? stripped : stripped.slice(0, firstComma);
+  const decPart = firstComma === -1
+    ? ''
+    : stripped.slice(firstComma + 1).replace(/,/g, '').slice(0, 2);
+  intPart = intPart.replace(/^0+(?=\d)/, '');
+  const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  const formatted = firstComma === -1 ? formattedInt : `${formattedInt},${decPart}`;
+  if (formatted === raw) return;
+  input.value = formatted;
+  let digitsSeen = 0;
+  let newCaret = 0;
+  for (let i = 0; i < formatted.length; i++) {
+    if (digitsSeen >= digitsBeforeCaret) break;
+    newCaret = i + 1;
+    if (/\d/.test(formatted[i])) digitsSeen++;
+  }
+  input.setSelectionRange(newCaret, newCaret);
+}
+function installPriceFormatter(input) {
+  if (!input || input.dataset.amountFmt === '1') return;
+  input.dataset.amountFmt = '1';
+  input.addEventListener('input', () => liveFormatPriceInput(input));
+}
+
 // Feather-style stroke icons used for the per-row edit / delete buttons in
 // the portfolio and alerts tables. `stroke="currentColor"` lets the .row-edit
 // neutral / .row-delete hover-danger CSS rules re-tint them.
@@ -2251,7 +2299,7 @@ function openPurchaseDialog(mode, purchase = null) {
     $('#purchase-label').value = purchase.label || '';
     $('#purchase-gross').value = purchase.gross_weight_g;
     $('#purchase-purity').value = purchase.purity;
-    $('#purchase-price').value = purchase.price_paid_dkk;
+    $('#purchase-price').value = formatPriceForInput(purchase.price_paid_dkk);
     $('#purchase-date').value = (purchase.purchased_at || '').slice(0, 10);
     $('#purchase-dealer').value = purchase.dealer || '';
     $('#purchase-notes').value = purchase.notes || '';
@@ -2273,6 +2321,13 @@ function openPurchaseDialog(mode, purchase = null) {
 $('#portfolio-add-btn').addEventListener('click', () => {
   openPurchaseDialog({ kind: 'add' });
 });
+
+// Live thousand-separator on the DKK price field (8000 → 8.000 as you type).
+// Idempotent; safe to call once at script init since the dialog is in the
+// static DOM. Other number fields (gross weight, purity, alert threshold)
+// stay as type=number — they're always 1–3-digit values where grouping
+// would be visual noise.
+installPriceFormatter($('#purchase-price'));
 
 // ── Portfolio CSV export ────────────────────────────────────────────────────
 // Client-side build from the already-loaded lastPortfolio.purchases. Exports
@@ -2361,7 +2416,7 @@ $('#purchase-form').addEventListener('submit', async (e) => {
   const label = $('#purchase-label').value.trim();
   const gross = parseFloat($('#purchase-gross').value);
   const purity = parseFloat($('#purchase-purity').value);
-  const price = parseFloat($('#purchase-price').value);
+  const price = parsePriceFromInput($('#purchase-price').value);
   const dateOnly = $('#purchase-date').value;
   const dealer = $('#purchase-dealer').value.trim() || null;
   const notes = $('#purchase-notes').value.trim() || null;
