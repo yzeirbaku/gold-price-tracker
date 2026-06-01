@@ -138,7 +138,7 @@ async def rate_limit_coins(request: Request) -> None:
 
 @app.get("/")
 async def root() -> dict[str, str]:
-    return {"status": "ok", "service": "gold-bar-tracker"}
+    return {"status": "ok", "service": "gold-price-tracker"}
 
 
 @app.get("/prices/{size}", response_model=PriceResponse)

@@ -4,7 +4,7 @@ Compare gold-bar (2.5–20 g) and gold-coin (≤ 20 g fine) prices across Danish
 
 ## Architecture
 
-- **Backend** — Python + FastAPI on Render (`backend/`)
+- **Backend** — Python + FastAPI in Docker on an Oracle Cloud Always-Free VM, behind Caddy with auto-renewing Let's Encrypt TLS at `https://yzeir-gold.duckdns.org` (`backend/`)
 - **Frontend** — Static PWA on Cloudflare Pages (`frontend/`)
 - **Storage** — Neon Postgres (snapshots, sessions, purchases, alerts, reports)
 - **Spot (live)** — api.gold-api.com
@@ -129,7 +129,7 @@ pytest tests/api -v           # FastAPI routes against real Postgres (skipped if
 
 CI runs all four on every push to `main` (Postgres comes from a sidecar service container). The live integration suite (`tests/integration/test_live.py`) hits real dealer sites and runs Mondays 09:00 UTC + on workflow_dispatch.
 
-## Environment variables (Render)
+## Environment variables
 
 | Var | Required | Notes |
 |---|---|---|
@@ -143,7 +143,7 @@ CI runs all four on every push to `main` (Postgres comes from a sidecar service 
 
 ## Cron
 
-Three Upstash QStash schedules drive the cron-only endpoints. Free tier covers ~75 messages/day; the 2-minute delivery timeout absorbs Render free-tier cold starts. QStash forwards `X-Api-Key` via the schedule's `Upstash-Forward-X-Api-Key` header setting.
+Three Upstash QStash schedules drive the cron-only endpoints. Free tier covers ~75 messages/day. QStash forwards `X-Api-Key` via the schedule's `Upstash-Forward-X-Api-Key` header setting. Destinations must point at `https://yzeir-gold.duckdns.org/...` — update the schedule URLs if the backend host ever changes.
 
 | Schedule | Cron (UTC) | Target |
 |---|---|---|
@@ -157,3 +157,12 @@ Three Upstash QStash schedules drive the cron-only endpoints. Free tier covers ~
 - **XSS mitigation.** Strict CSP in `frontend/_headers` allowlists script + connect origins; `escapeHtml` is applied at every `innerHTML` insertion of scraper / user-sourced content; the report renderer escapes `</` inside its JSON sidecar so dealer-controlled strings can't break out of the `<script>` block.
 - **Snapshot persistence is defended in depth.** A stale-FX guard refuses to write when the upstream FX call fell back to the static stamped rate. An outlier guard rejects spot deviations >10 % from the most recent value within an hour. Scraper outliers (bar premium outside [0, 80 %] or coin premium outside [0, 120 %]) flip to `status='error'` before they land in history. Each guard logs a structured `snapshot_skipped` / `scraper_outlier` event for grep.
 - **Alerts.** Per-user rate cap of 8 fire-events per rolling hour. Resend HTTP calls happen *after* the snapshot transaction commits, so a hung upstream cannot roll back the snapshot. A Resend failure for one user leaves their alerts un-muted (next tick retries) and does not poison the loop for other users.
+
+## Production deploy
+
+- **Backend:** FastAPI in Docker on an Oracle Cloud Always-Free VM (Frankfurt), behind Caddy with auto-renewing Let's Encrypt TLS. Public URL: `https://yzeir-gold.duckdns.org`. On the VM the deployment is named `gold-price-tracker` (dir `~/apps/gold-price-tracker/`, container `gold-price-backend`); the GitHub repo name `gold-bar-tracker` is legacy. Shares the VM with `net-tracker` on a single Caddy + shared `apps_web` Docker network. Python pinned via `backend/runtime.txt` (3.12.7). `SCHEMA_SQL` runs idempotently on every backend boot.
+- **Frontend:** Cloudflare Pages. `BACKEND_URL` env var injected at build time into `frontend/config.js`. CSP `connect-src` in `frontend/_headers` must include the backend host.
+- **DB:** Neon Postgres (separate DB from net-tracker).
+- **Email:** Resend.
+- **Deploying:** use the `deploy` skill — say "deploy" / "ship it" in a Claude Code conversation in this repo. The skill SSHes into the VM, pulls `origin/main`, rebuilds the Docker image, restarts the container, and verifies the public health endpoint. See `.claude/skills/deploy/SKILL.md`. One-time per machine: create `.claude/skills/deploy/deploy.env.local` (gitignored) with the VM connection details — format in the SKILL.md "Setup" section.
+- **Cron:** Upstash QStash schedules must point at the new `https://yzeir-gold.duckdns.org/...` URLs. Update them in the QStash dashboard if the backend host ever changes.

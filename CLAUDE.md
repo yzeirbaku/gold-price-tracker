@@ -11,7 +11,7 @@ Co-author trailers from Claude Code's default workflow are fine; the *author* mu
 ## Architecture
 
 ```
-backend/         FastAPI on Render free tier (Python 3.12)
+backend/         FastAPI in Docker on an Oracle Cloud Always-Free VM, fronted by Caddy (Python 3.12)
   app/
     main.py            FastAPI app + CORS + endpoints
     auth.py            X-API-Key header check (constant-time compare)
@@ -226,23 +226,20 @@ when the UTC calendar date is strictly tomorrow-or-later; same-day
 stamps pass through. A 5-minute clock-skew tolerance is preserved as a
 midnight-rollover safety net.
 
-**Why bearer tokens, not cookies:** the backend (Render `*.onrender.com`)
+**Why bearer tokens, not cookies:** the backend (`yzeir-gold.duckdns.org`)
 and frontend (Cloudflare Pages `*.pages.dev`) live on different sites.
 Safari ITP, Brave, Firefox ETP, and Chrome (with 3rd-party cookies
 disabled) all refuse to save a cross-site `SameSite=None; Secure` cookie
-regardless of how correctly the headers are set — which broke sign-in in
-production. Bearer tokens in `localStorage` sidestep that entirely (and
-remove CSRF risk for free, since browsers don't auto-attach Authorization
-headers). The trade-off is XSS resistance: an attacker who lands a script
-on the frontend origin can read the token. We mitigate that with a strict
-CSP in `frontend/_headers` and consistent use of `escapeHtml` everywhere
-user input touches `innerHTML`.
+regardless of how correctly the headers are set. Bearer tokens in
+`localStorage` sidestep that entirely and remove CSRF risk for free
+(browsers don't auto-attach Authorization headers). Trade-off is XSS
+resistance — mitigated with a strict CSP in `frontend/_headers` and
+consistent `escapeHtml` on `innerHTML` insertion.
 
 **Content-Security-Policy:** lives in `frontend/_headers` and ships with
-Cloudflare Pages. Scripts are `'self'` + `https://cdn.jsdelivr.net` (for
-Chart.js); `connect-src` allowlists the Render backend; `frame-ancestors
-'none'` blocks clickjacking; `object-src 'none'` blocks Flash/etc. Update
-the `connect-src` URL if the backend host ever changes.
+Cloudflare Pages. Scripts: `'self'` + `https://cdn.jsdelivr.net` (Chart.js);
+`connect-src` allowlists the backend host; `frame-ancestors 'none'` blocks
+clickjacking. Update `connect-src` if the backend host ever changes.
 
 ## Alerts
 
@@ -283,7 +280,7 @@ the same tick get bundled into **one email** with each alert as a
 section. Per-user hard cap of `MAX_FIRES_PER_HOUR_PER_USER = 8`
 alert-fires per rolling hour (a bundle of N alerts counts as N) —
 prevents a flapping watch from carpet-bombing the inbox. Throttled
-events log `alert_email_throttled` (structured JSON for Render grep).
+events log `alert_email_throttled` (structured JSON for log grep).
 
 **Failure isolation.** If Resend fails for one user, their alerts stay
 **un-muted** so the next tick retries; other users still get their
@@ -311,9 +308,10 @@ Three schedules in **Upstash QStash** drive the cron-only endpoints:
 | Monthly report | `30 0 1 * *` (1st of month at 00:30 UTC) | `POST /reports/cron/monthly` |
 
 QStash forwards the `X-Api-Key` header via `Upstash-Forward-X-Api-Key` set
-on the schedule. Free tier covers our ~75 messages/day; 2-min delivery
-timeout absorbs Render free-tier cold starts. Managed via the QStash REST
-API (the dashboard UI didn't expose custom headers when we set this up).
+on the schedule. Free tier covers our ~75 messages/day. Schedule destinations
+point at `https://yzeir-gold.duckdns.org/...` — update them in the QStash
+dashboard if the backend host ever changes. Managed via the QStash REST API
+(the dashboard UI didn't expose custom headers when we set this up).
 
 The previous GitHub Actions–based scheduler (`.github/workflows/snapshot.yml`)
 was removed on 2026-05-11 because GH Actions cron is best-effort on free
@@ -386,7 +384,7 @@ CI (`.github/workflows/tests.yml`) runs all three on push/PR to `main`. The live
 - **Busy buttons.** Any button whose click triggers an async network call MUST be wrapped in `withBusy(btn, async () => {...}, 'Saving…')` from `app.js`. Disables the button + (optionally) swaps its label for the duration, always restores in `finally`. Reason: a double-tap on Save fires two POSTs and the second surfaces as a confusing "duplicate" error. Applies to dialog submits (login/purchase/alert), row-action deletes (icon buttons — omit the label), and any other one-shot async trigger like report-generate. Omit `busyLabel` for icon-only buttons; pass a verb-ing form ("Saving…", "Sending…") for text buttons.
 - **No backend leakage in user-facing errors.** Never inject HTTP status codes, raw response bodies, or exception messages into anything the user reads — they look unpolished and tell the user nothing actionable. Route every fetch failure through `userFacingError({ res?, body?, err?, fallback })` from `app.js`. Pass `body` only when the call site has already consumed `res.text()` (purchase/alert submits need the body for the FastAPI-detail polish). The helper maps known statuses to friendly copy, parses FastAPI `{detail: [...]}` shapes, scrubs anything containing `Error`/`Exception`/`Traceback`, and falls back to the per-call-site `fallback` string. Replace native `alert()` calls with `infoDialog({title, message})` so failures use the same dialog chrome as the rest of the app.
 - **Dialog focus ring on iOS.** Always open `<dialog>` elements via `openDialog(dlg, focusEl?)` from `app.js`, not `dlg.showModal()` directly. Reason: `showModal()` synchronously focuses the first focusable element; on iOS Safari with no prior pointer activity, that focus is treated as keyboard input and paints a `:focus-visible` ring on the first button — usually Cancel, which reads as "pre-selected" the moment the dialog appears. The helper calls `showModal()` then blurs the auto-focused element on the next frame; keyboard nav still works via Tab. Pass `focusEl` to explicitly focus a specific input (login email input, etc.) after the blur.
-- **`/snapshot` refuses to persist when FX is stale.** `fx.py` falls back to a stamped static USD→DKK rate when frankfurter.dev errors out; that rate goes wrong fast (a 7% gap once corrupted every premium chart for a tick — incident 2026-05-14). The `/spot` live endpoint can still serve the stale fallback (refreshes 30s later), but the cron-only `/snapshot` checks `any(r.fx_stale for r in results)` and returns `{"skipped": true, "reason": "fx_stale"}` without writing to any of the three snapshot tables. Grep Render logs for `snapshot_skipped` to see how often it triggers. Cron retries 20 min later — missed ticks are invisible in analytics.
+- **`/snapshot` refuses to persist when FX is stale.** `fx.py` falls back to a stamped static USD→DKK rate when frankfurter.dev errors out; that rate goes wrong fast (a 7% gap once corrupted every premium chart for a tick — incident 2026-05-14). The `/spot` live endpoint can still serve the stale fallback (refreshes 30s later), but the cron-only `/snapshot` checks `any(r.fx_stale for r in results)` and returns `{"skipped": true, "reason": "fx_stale"}` without writing to any of the three snapshot tables. Grep container logs (`sudo docker logs gold-bar-backend`) for `snapshot_skipped` to see how often it triggers. Cron retries 20 min later — missed ticks are invisible in analytics.
 - **`/snapshot` also has an outlier guard.** After the FX check, it reads the most recent `spot_snapshots` row within the last 60 minutes and rejects the new tick if `gold_dkk_per_g` deviates by more than `SNAPSHOT_OUTLIER_THRESHOLD = 10%` from it (`main.py`). Same `snapshot_skipped` log line with `reason: "outlier"`. 10% is deliberately wide — real gold rarely moves more than 2–3% in 20 minutes even during Fed/CPI prints, but a 31x unit flip from `api.gold-api.com`, a near-zero glitch, or a Frankfurter-returned-wrong-but-not-errored value would all be caught. Threshold lives at the top of `main.py`; if normal market vol ever starts brushing it, widen rather than disable.
 - **Historical FX and historical spot raise instead of falling back silently.** `fx.fetch_usd_to_dkk_on` raises `HistoricalFxUnavailable` and `spot.fetch_historical_usd_per_gram` raises `HistoricalSpotUnavailable` (the same exception also fires when the yfinance value lands outside generous sanity bounds — gold `[$30/g, $500/g]`, silver `[$0.20/g, $50/g]`). `portfolio._fetch_historical_spot_dkk_per_g` catches both and surfaces a 502 to the frontend, which renders a retry-able error in the purchase dialog. We do this here (not in the live `/spot` path) because the historical value gets frozen onto a `purchases` row forever — a brief retry beats a bad value baked into cost-basis premium math.
 - **Scraper outliers are filtered before persistence.** After premium is computed, `orchestrator.flag_bar_premium_outliers` (called from `run()`) flips any bar listing with premium outside `BAR_PREMIUM_BOUNDS_PCT = (0.0, 80.0)` to `status="error"`, clears `price_dkk` and `premium_pct`, and emits a `scraper_outlier` structured log line. `flag_coin_premium_outliers` does the same for coins with `COIN_PREMIUM_BOUNDS_PCT = (0.0, 120.0)` and is called from both the `/coins` live endpoint and the `/snapshot` coin row builder. Bounds are a "did the scraper grab the wrong HTML field" fence, not a market-vol fence: no legitimate online retail bullion sits at or below spot (would be arbitrage; the floor is tight against buy-back rates that sit at spot-1% to spot-3% on the same dealer pages), and the high end leaves headroom for small fractional coins (1/20oz routinely 50%+). Same `snapshot_skipped`-style grep target: `scraper_outlier`.
@@ -411,3 +409,14 @@ CI (`.github/workflows/tests.yml`) runs all three on push/PR to `main`. The live
 4. Register in `scrapers/registry.py` → `ALL_COIN_SCRAPERS`.
 5. Add unit test in `backend/tests/unit/scrapers/test_<dealer>_coins.py` — assert at least one recognized coin type is found and that all results are ≤ 20 g fine.
 6. Update README + this file's "Dealers" / "Coins" sections.
+
+## Production deploy
+
+- **Backend:** FastAPI in Docker on an **Oracle Cloud Always-Free VM** (Ubuntu 24.04, AMD E2.1.Micro, Frankfurt), fronted by **Caddy** with auto-renewing Let's Encrypt TLS. Public URL: `https://yzeir-gold.duckdns.org` (DuckDNS). On the VM the deployment is named **`gold-price-tracker`** (dir `~/apps/gold-price-tracker/`, container `gold-price-backend`, image `gold-price-tracker-backend`); the GitHub repo name (`gold-bar-tracker`) is legacy and only used to clone. Shares the VM with `net-tracker` on a single Caddy and a shared external Docker network `apps_web`.
+- **Frontend:** Cloudflare Pages. `BACKEND_URL` env var injected at build time. The CSP `connect-src` allowlist in `frontend/_headers` MUST include the backend host — update both env var and CSP if the host ever changes.
+- **DB:** Neon Postgres (separate DB from net-tracker).
+- **Email:** Resend.
+- **Cron:** Upstash QStash. Schedule destinations point at `https://yzeir-gold.duckdns.org/...`. If the backend host changes, update the destinations in the QStash dashboard.
+- **Deploy = `git pull` on the VM + `docker compose up -d --build`.** Use the **`deploy` skill** (`.claude/skills/deploy/SKILL.md`) — natural-language triggers: "deploy", "ship it", "deploy gold-price". The skill reads VM connection details from the gitignored `.claude/skills/deploy/deploy.env.local` (template inside the SKILL.md "Setup" section). Pre-flight: code must be pushed to `origin/main` first.
+- **VM-local files (not in this repo):** `Dockerfile` (in `repo/backend/`), `docker-compose.yml`, `.env`. Caddy's `Caddyfile` lives in `~/apps/net-tracker/` (shared between both backends) and proxies `yzeir-gold.duckdns.org` to `gold-price-backend:8000`. Reconstruct from the SKILL.md if the VM is ever recreated.
+- **Secret rotation:** SSH in, edit `~/apps/gold-price-tracker/.env`, then `sudo docker compose -f ~/apps/gold-price-tracker/docker-compose.yml up -d --force-recreate backend`. The deploy skill does NOT touch `.env`.
