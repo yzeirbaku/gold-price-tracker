@@ -1,6 +1,6 @@
 # Gold Price Tracker
 
-Compare gold-bar (2.5–20 g) and gold-coin (≤ 20 g fine) prices across Danish online dealers in real time, with live gold + silver spot, per-row history charts, "buy now or wait?" context, weekly/monthly reports, and an optional sign-in that unlocks a personal portfolio with P&L and email alerts when a cross-dealer premium drops below your threshold.
+Real-time comparison of gold-bar (2.5–20 g) and gold-coin (≤ 20 g fine) prices across Danish online dealers, with live spot, per-row history charts, "buy now or wait?" context, weekly/monthly reports, and optional sign-in for portfolio P&L + email alerts on cross-dealer premium drops.
 
 ## Architecture
 
@@ -12,27 +12,25 @@ Compare gold-bar (2.5–20 g) and gold-coin (≤ 20 g fine) prices across Danish
 - **FX (live + historical)** — frankfurter.dev
 - **Email** — Resend (magic-link sign-in + alert emails)
 - **Cron** — Upstash QStash (snapshot + weekly/monthly report generation)
-- **Auth** — passwordless magic links; opaque session bearer tokens in `localStorage` (chosen over cookies because the frontend and backend live on different sites and modern browsers drop cross-site cookies)
+- **Auth** — passwordless magic links; opaque session bearer tokens in `localStorage`
 
 ## Dealers
 
-Live: **Tavex, Vitus Guld, Plaza, Nordisk Guld, Sero Guld, Nyfortuna, Jan Jørgensen**. Nordisk and Sero need the full Sec-Ch-Ua / Sec-Fetch-* header set to bypass the Simply.com WAF.
+Live: **Tavex, Vitus Guld, Plaza, Nordisk Guld, Sero Guld, Nyfortuna, Jan Jørgensen**. Nordisk + Sero need the full Sec-* header set to bypass the Simply.com WAF. Plaza + Jan Jørgensen don't currently stock bullion coins (their coin scrapers run anyway and pick up new listings if that changes). Skipped: **Silver Gold Bull DK** (JS-rendered SPA). Dropped: **Mønthuset** (empty live category).
 
-Dropped: **Mønthuset** (live category empty since early 2025). Skipped: **Silver Gold Bull DK** (JS-rendered React SPA with dynamic pricing).
-
-Coin coverage is bullion-only, drawn from a static registry in `backend/app/coins.py`: Krugerrand, Maple Leaf, Vienna Philharmonic, American Eagle, Britannia, Sovereign, Ducat, Panda, plus the Danish Scandinavian-Monetary-Union 20 kr and 10 kr (Christian IX, Christian X, Frederik VIII). Listings whose title doesn't match the registry are silently skipped. Plaza and Jan Jørgensen don't currently stock bullion coins; their scrapers run anyway and pick up new listings if those dealers ever expand.
+Coin coverage is bullion-only via the registry in `backend/app/coins.py`: Krugerrand, Maple Leaf, Vienna Philharmonic, American Eagle, Britannia, Sovereign, Ducat, Panda, plus the Danish 20 kr / 10 kr (Christian IX, Christian X, Frederik VIII). Listings whose title doesn't match the registry are silently skipped.
 
 ## Frontend
 
-Installable PWA. On mobile, swiping right from the left edge opens the side menu; swiping the menu right-to-left closes it (in addition to tap-outside).
+Installable PWA. Mobile: swipe right from the left edge to open the side menu; right-to-left to close (plus tap-outside).
 
-- **Prices** — bar prices for the selected size (2.5/5/10/20 g) ranked by total price + premium %. Click any row to expand an inline 24h/7d/30d price + premium chart and a "Buy now or wait?" panel comparing today's premium against the dealer's 30-day IQR + lowest observation.
-- **Coins** — every recognized in-stock bullion coin from every dealer, ranked by premium. Same inline charts + context on row click.
-- **Portfolio** (signed in) — table of purchases with per-row P&L, summary card with total paid / value / PnL split by metal, and a value-over-time chart with range pills (1W / 1M / 6M / 1Y / all) and deposit-adjusted change. CSV export.
-- **Alerts** (signed in) — list of premium-threshold alerts with current-min enrichment. Add/edit dialog previews the live cross-dealer min for the target so you can pick a sensible threshold without alt-tabbing.
-- **Reports** — archive of weekly + monthly HTML reports (filterable by year and month) plus on-demand "Last week" / "Last month" generation that doesn't archive.
-- **Settings** — paste in the X-API-Key on first run; pick light/dark theme.
-- **Spot card** — auto-refreshes every 30 s and surfaces a "Snapshots: N min ago" indicator so a stalled cron is visible.
+- **Prices** — bars ranked by total price + premium %. Click a row for inline 24h/7d/30d charts + "Buy now or wait?" (today's premium vs dealer's 30-day IQR + lowest).
+- **Coins** — every recognized in-stock bullion coin, ranked by premium. Same inline charts on row click.
+- **Portfolio** (signed in) — per-row P&L, total/value/PnL split by metal, value-over-time chart with 1W/1M/6M/1Y/all range pills and deposit-adjusted change. CSV export.
+- **Alerts** (signed in) — premium-threshold alerts with current-min enrichment; add/edit dialog previews the live min so you can pick a sensible threshold.
+- **Reports** — archive of weekly + monthly HTML reports plus on-demand "Last week" / "Last month" generation (not archived).
+- **Settings** — paste the X-API-Key on first run; pick light/dark theme.
+- **Spot card** — auto-refreshes every 30 s and surfaces "Snapshots: N min ago" so a stalled cron is visible.
 
 ## Endpoints
 
@@ -86,48 +84,42 @@ Both auth schemes coexist — the site works fully without signing in.
 ## Local dev
 
 ```bash
-# Backend
+# Backend (no DB needed for /prices, /coins, /spot)
 cd backend
-python -m venv .venv && source .venv/Scripts/activate   # Windows bash; Linux/Mac: .venv/bin/activate
+python -m venv .venv && source .venv/Scripts/activate   # Linux/Mac: .venv/bin/activate
 pip install -r requirements.txt
-pip install pytest pytest-asyncio ruff mypy
 API_KEY=test uvicorn app.main:app --reload
-```
 
-```bash
 # Frontend (separate shell)
-cd frontend
-python -m http.server 5500
+cd frontend && python -m http.server 5500
 ```
 
-Open `http://127.0.0.1:5500/`, click ☰ → **Settings**, paste the API key. Backend URL lives in `frontend/config.js` (defaults to `http://127.0.0.1:8000` for local dev; Cloudflare Pages overwrites it at build time via the `BACKEND_URL` env var).
+Open `http://127.0.0.1:5500/`, ☰ → Settings, paste the API key. Backend URL lives in `frontend/config.js` (defaults to `http://127.0.0.1:8000`; Cloudflare Pages overwrites at build time via `BACKEND_URL`).
 
-### Local Postgres (portfolio / history / reports / alerts)
+For portfolio/history/reports/alerts, also bring up local Postgres + seed:
 
 ```bash
-docker compose up -d  # Postgres on localhost:5433
-
+docker compose up -d   # Postgres on localhost:5433
 cd backend
-DATABASE_URL='postgresql://gold:gold@localhost:5433/goldtracker' \
-  .venv/Scripts/python.exe -m scripts.seed     # 30 days fake snapshots + one weekly + one monthly report
+DATABASE_URL='postgresql://gold:gold@localhost:5433/goldtracker' .venv/Scripts/python.exe -m scripts.seed
 
 API_KEY=test DATABASE_URL='postgresql://gold:gold@localhost:5433/goldtracker' \
   MAGIC_LINK_BASE_URL=http://127.0.0.1:5500 MAGIC_LINK_DEV_PRINT=1 \
   uvicorn app.main:app --reload
 ```
 
-`MAGIC_LINK_DEV_PRINT=1` makes both sign-in AND alert emails log to stdout instead of going through Resend — useful for testing without burning quota.
+`MAGIC_LINK_DEV_PRINT=1` logs sign-in + alert emails to stdout instead of sending via Resend.
 
 ### Verification
 
 ```bash
 ruff check app tests
 mypy app
-pytest tests/unit -v          # pure logic, no network
-pytest tests/api -v           # FastAPI routes against real Postgres (skipped if DATABASE_URL unset)
+pytest tests/unit -v          # pure logic
+pytest tests/api -v           # FastAPI against real Postgres (skipped if DATABASE_URL unset)
 ```
 
-CI runs all four on every push to `main` (Postgres comes from a sidecar service container). The live integration suite (`tests/integration/test_live.py`) hits real dealer sites and runs Mondays 09:00 UTC + on workflow_dispatch.
+CI runs all four on every push to `main`. Live integration suite (`tests/integration/test_live.py`) hits real dealer sites Mondays 09:00 UTC + on workflow_dispatch.
 
 ## Environment variables
 
@@ -153,10 +145,10 @@ Three Upstash QStash schedules drive the cron-only endpoints. Free tier covers ~
 
 ## Security notes
 
-- **Auth tokens.** Magic links are SHA-256 hashed on disk (15-min TTL, single-use, rate-limited). Session tokens are opaque UUIDs with a 90-day sliding TTL (the `last_seen_at` refresh is debounced to 1 h to avoid write amplification). Tokens live in `localStorage` and ship as `Authorization: Bearer <token>` — no CSRF risk since browsers don't auto-attach the Authorization header. Logout revokes the session immediately.
-- **XSS mitigation.** Strict CSP in `frontend/_headers` allowlists script + connect origins; `escapeHtml` is applied at every `innerHTML` insertion of scraper / user-sourced content; the report renderer escapes `</` inside its JSON sidecar so dealer-controlled strings can't break out of the `<script>` block.
-- **Snapshot persistence is defended in depth.** A stale-FX guard refuses to write when the upstream FX call fell back to the static stamped rate. An outlier guard rejects spot deviations >10 % from the most recent value within an hour. Scraper outliers (bar premium outside [0, 80 %] or coin premium outside [0, 120 %]) flip to `status='error'` before they land in history. Each guard logs a structured `snapshot_skipped` / `scraper_outlier` event for grep.
-- **Alerts.** Per-user rate cap of 8 fire-events per rolling hour. Resend HTTP calls happen *after* the snapshot transaction commits, so a hung upstream cannot roll back the snapshot. A Resend failure for one user leaves their alerts un-muted (next tick retries) and does not poison the loop for other users.
+- **Auth.** Magic links SHA-256 hashed at rest (15-min TTL, single-use, rate-limited). Sessions are opaque UUIDs in `localStorage` with a 90-day sliding TTL — bearer-token only, so no CSRF risk. Logout revokes immediately.
+- **XSS.** Strict CSP in `frontend/_headers`; `escapeHtml` at every `innerHTML` insertion of scraper / user content; report renderer `</`-escapes its JSON sidecar.
+- **Snapshot defense.** Stale-FX guard refuses writes if FX fell back to the stamped rate. Outlier guard rejects >10% spot deviations within an hour. Scraper outliers (bar premium outside [0, 80%], coin outside [0, 120%]) flip to `status='error'` before persistence. All log `snapshot_skipped` / `scraper_outlier` for grep.
+- **Alerts.** Per-user cap of 8 fire-events/hour. Resend calls happen *after* the snapshot commits — a hung upstream can't roll back data. A Resend failure for one user leaves their alerts un-muted (retries next tick) and doesn't poison the loop for others.
 
 ## Production deploy
 
