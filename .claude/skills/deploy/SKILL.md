@@ -35,12 +35,14 @@ User says any of: "deploy", "deploy gold-price", "ship it", "push to prod", "red
 
 2. **Confirm with the user** before deploying. Tell them: "Pulling latest from origin/main on the VM, rebuilding the Docker image, restarting the container." Wait for go-ahead unless they were explicit ("deploy now").
 
-3. **Run the deploy** over SSH:
+3. **Run the deploy** over SSH (build + recreate backend, then **restart Caddy** — which lives in `~/apps/net-tracker/` — so its upstream pool re-resolves to the new container):
 
    ```bash
    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" \
-     "cd $REMOTE_PATH/repo && git pull && cd .. && sudo docker compose up -d --build 2>&1 | tail -30"
+     "cd $REMOTE_PATH/repo && git pull && cd .. && sudo docker compose up -d --build 2>&1 | tail -30 && sudo docker compose -f ~/apps/net-tracker/docker-compose.yml restart caddy"
    ```
+
+   The Caddy restart is required: when `docker compose up -d` recreates the backend container, Caddy's `reverse_proxy` connection pool can hold stale upstream entries (a `caddy reload` is NOT enough — a full container restart is). Skipping this step results in symptoms like both DuckDNS hosts routing to the wrong backend until Caddy is bounced manually.
 
 4. **Verify** the public health endpoint:
 
