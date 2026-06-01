@@ -25,7 +25,12 @@ build/
 
 # Local-only superpowers specs/plans — kept on disk, never committed
 docs/superpowers/
-.claude/
+
+# Claude Code local state — but DO track project skills.
+# Use `.claude/*` (not `.claude/`) so the negation below actually works;
+# excluding the whole dir would mean git never scans inside it.
+.claude/*
+!.claude/skills/
 
 # Local-only one-command dev spin-up — gitignored on purpose so other
 # contributors aren't pointed at a script with hardcoded local creds.
