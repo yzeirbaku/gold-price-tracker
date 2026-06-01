@@ -7,8 +7,6 @@ description: Deploy the gold-price-tracker backend to the live Oracle Cloud VM. 
 
 Production runs on a shared Oracle Cloud Always-Free VM alongside `net-tracker`. A deploy is two commands run over SSH, plus a health check.
 
-> The GitHub repo is named `gold-bar-tracker` (legacy name). The deployed service is named `gold-price-tracker` everywhere on the VM (directory, container, Docker image). Don't conflate the two.
-
 ## How to invoke
 
 User says any of: "deploy", "deploy gold-price", "ship it", "push to prod", "redeploy", "deploy to oracle".
@@ -19,7 +17,7 @@ User says any of: "deploy", "deploy gold-price", "ship it", "push to prod", "red
 
 ```
 ~/apps/gold-price-tracker/
-├── repo/                       # the gold-bar-tracker GitHub repo, cloned via deploy key + github-gold SSH alias
+├── repo/                       # cloned via deploy key + github-price SSH alias
 │   └── backend/Dockerfile      # VM-local, not in this repo's git
 ├── docker-compose.yml          # backend only (VM-local). Joins the shared external `apps_web` Docker network.
 └── .env                        # secrets — API_KEY, DATABASE_URL, RESEND_API_KEY, MAGIC_LINK_BASE_URL (VM-local, 0600)
@@ -84,7 +82,7 @@ The SSH key is the same key used for the `net-tracker` deploy skill (one key, tw
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `Permission denied (publickey)` | Wrong `SSH_KEY` path in `deploy.env.local` | Verify path |
-| `git pull` says `Authentication failed` | GitHub deploy key broken/removed on VM | Re-add VM's `~/.ssh/github_gold_bar.pub` at https://github.com/yzeirbaku/gold-bar-tracker/settings/keys |
+| `git pull` says `Authentication failed` | GitHub deploy key broken/removed on VM | Re-add VM's `~/.ssh/github_gold_price.pub` at https://github.com/yzeirbaku/gold-price-tracker/settings/keys |
 | Health check returns 502 | Backend crashed on startup | Tail container logs (step 5) — usually missing/wrong env var or DB connection |
 | `/snapshot` cron silently stops | QStash schedule still points at the old URL | Update destination in QStash dashboard |
 | `no space left on device` | Docker build cache filled the disk | `ssh ... "sudo docker system prune -af --volumes"` then redeploy |

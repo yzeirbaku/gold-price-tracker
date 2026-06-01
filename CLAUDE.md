@@ -29,13 +29,7 @@ backend/         FastAPI in Docker on an Oracle Cloud Always-Free VM, fronted by
     scrapers/
       base.py          DealerScraper Protocol, DEFAULT_HEADERS, parse_dkk_price
       registry.py      ALL_SCRAPERS (bars) + ALL_COIN_SCRAPERS
-      tavex.py / tavex_coins.py
-      vitusguld.py / vitusguld_coins.py
-      plaza.py / plaza_coins.py
-      nordiskguld.py / nordiskguld_coins.py    (Simply.com WAF — needs Sec-* headers)
-      seroguld.py / seroguld_coins.py          (same WAF)
-      nyfortuna.py / nyfortuna_coins.py
-      janjorgensen.py / janjorgensen_coins.py
+      <dealer>.py / <dealer>_coins.py    one pair per dealer (Nordisk + Sero use Sec-* headers for the Simply.com WAF)
     reports/           HTML report generation (windows, loader, analytics, tables, notable, renderer, builder, storage)
   scripts/
     seed.py            local-only: 30 days of fake bar+coin+spot data + one weekly + one monthly report into local Postgres
@@ -142,28 +136,9 @@ the client, **not persisted**. `GET /reports` lists archived entries and
 `GET /reports/{id}` returns the stored HTML as a `Content-Disposition:
 attachment` download.
 
-Each report has eight sections — Header, Spot context, Dealer behavior
-fingerprints, Bars, Coins, Notable, Time-of-month drift (monthly only;
-gated on `window.is_calendar_aligned` so rolling 30-day on-demand reports
-omit it), and a hidden `<script type="application/json" id="report-data">`
-sidecar holding every numeric value for future programmatic extraction.
-The visual sections render as `<details>` elements (only Spot starts open).
-The header shows "Weekly Report" / "Monthly Report" on the first line with
-"DD-MM-YYYY HH:MM → DD-MM-YYYY HH:MM" below it. The sidecar JSON is
-`</`-escaped before injection so dealer-controlled strings can't break out
-of the `<script>` block.
+Sections (rendered as `<details>`, only Spot starts open): Header, Spot context, Dealer behavior fingerprints, Bars, Coins, Notable, Time-of-month drift (monthly only — gated on `window.is_calendar_aligned` so on-demand 30-day reports omit it). Plus a hidden `<script type="application/json" id="report-data">` sidecar holding every numeric value (`</`-escaped before injection so dealer-controlled strings can't break out).
 
-Backend module layout (`app/reports/`): `windows.py` (period boundary math),
-`loader.py` (typed dataclass loaders from DB), `analytics.py` (cadence,
-weekend activity, time-of-day, day-of-week, premium band IQR, spot tracking
-correlation/lag/sensitivity, fingerprint classifier), `tables.py` (per-size
-bar + per-coin-variant tables), `notable.py` (threshold-driven bullet
-generator + time-of-month drift), `renderer.py` (Jinja2), `builder.py`
-(orchestrator), `storage.py` (CRUD on `report_archive`), `templates/report.html`.
-
-`scripts/seed.py` truncates the four snapshot tables, fills 30 days of
-synthetic data, then calls `build_report` for previous-week + previous-month
-and upserts both so the local archive is non-empty on first PWA load.
+`scripts/seed.py` truncates the four snapshot tables, fills 30 days of synthetic data, then calls `build_report` for previous-week + previous-month so the local archive is non-empty on first PWA load.
 
 ## Portfolio + magic-link auth
 
@@ -212,19 +187,7 @@ historical comes from frankfurter.dev's `/v1/{date}` endpoint. Both walk
 back up to 7 days through weekends/holidays. The PATCH endpoint
 re-freezes the spot if `purchased_at` *or* `metal` changes.
 
-**Same-day purchases use live spot, not yfinance.** When `purchased_at`
-lands on today's UTC calendar date, `_fetch_historical_spot_dkk_per_g`
-short-circuits to `_current_spot_dkk_per_g` instead of yfinance. Two
-reasons: (1) yfinance's daily series only carries closed sessions, so
-"historical for today" would silently mean *yesterday's* close — not the
-price the user just paid; (2) the frontend stamps date-only inputs at
-`T12:00:00Z` (noon UTC) so the lookup falls on the trading-day midpoint,
-which is genuinely in the future of the server clock for any user
-submitting before noon UTC (~13:00 CET / ~14:00 CEST). The
-future-purchased-at validator was therefore loosened to reject only
-when the UTC calendar date is strictly tomorrow-or-later; same-day
-stamps pass through. A 5-minute clock-skew tolerance is preserved as a
-midnight-rollover safety net.
+**Same-day purchases use live spot, not yfinance.** When `purchased_at` lands on today's UTC date, `_fetch_historical_spot_dkk_per_g` short-circuits to `_current_spot_dkk_per_g`. yfinance's daily series only carries closed sessions, so "historical for today" would silently mean *yesterday's* close. The future-purchased-at validator rejects only when the UTC date is strictly tomorrow-or-later (with 5-min skew tolerance for midnight rollover); same-day stamps pass.
 
 **Why bearer tokens, not cookies:** the backend (`yzeir-gold.duckdns.org`)
 and frontend (Cloudflare Pages `*.pages.dev`) live on different sites.
@@ -291,11 +254,7 @@ cannot roll back snapshot data on timeout. The Resend SDK is synchronous;
 `send_alert_email` wraps it in `asyncio.to_thread` so a slow upstream
 blocks only the helper task, not the event loop.
 
-**Why piggyback on `/snapshot`.** Fresh data already in scope (zero
-extra DB read for the per-tick eval) and serial with the persistence
-(snapshot lands first; alerts evaluate against that committed data).
-One scheduler to manage. 20-min cadence is the natural alert latency —
-fine for this use case.
+**Why piggyback on `/snapshot`.** Fresh data already in scope, serial with persistence (snapshot commits first, alerts evaluate the committed rows), one scheduler. 20-min cadence is acceptable alert latency.
 
 ## Cron
 
@@ -307,15 +266,7 @@ Three schedules in **Upstash QStash** drive the cron-only endpoints:
 | Weekly report | `30 22 * * 0` (Sun 22:30 UTC ≈ Mon 00:30 CPH) | `POST /reports/cron/weekly` |
 | Monthly report | `30 0 1 * *` (1st of month at 00:30 UTC) | `POST /reports/cron/monthly` |
 
-QStash forwards the `X-Api-Key` header via `Upstash-Forward-X-Api-Key` set
-on the schedule. Free tier covers our ~75 messages/day. Schedule destinations
-point at `https://yzeir-gold.duckdns.org/...` — update them in the QStash
-dashboard if the backend host ever changes. Managed via the QStash REST API
-(the dashboard UI didn't expose custom headers when we set this up).
-
-The previous GitHub Actions–based scheduler (`.github/workflows/snapshot.yml`)
-was removed on 2026-05-11 because GH Actions cron is best-effort on free
-tier and was dropping runs.
+QStash forwards the `X-Api-Key` header via `Upstash-Forward-X-Api-Key` set on the schedule. Free tier covers our ~75 messages/day. Schedule destinations point at `https://yzeir-gold.duckdns.org/...` — update them in the QStash dashboard if the backend host ever changes. Managed via the QStash REST API (the dashboard UI didn't expose custom headers when we set this up).
 
 ## Local dev
 
@@ -372,7 +323,7 @@ CI (`.github/workflows/tests.yml`) runs all three on push/PR to `main`. The live
 - **Sort**: `ok` rows by ascending price, then everything else (errors/unavailable) at the bottom.
 - **No caching of API responses** — both the service worker and `app.js` are deliberately cache-free since prices are live. Static assets are cache-busted via `?v=N` query strings in `index.html`.
 - **Number formatting (display)**: dots only, never commas. DKK prices use `da-DK` for thousand-grouping (`12.345 dkk`), spot uses `en-US` so the `.` is a decimal separator (`695.42 dkk`). See `fmtDKK` / `fmtSpotDKK` in `app.js`.
-- **Number formatting (inputs)**: large-value DKK fields (currently only `#purchase-price`) use **Danish input format** — dot thousands, comma decimal (e.g. `8.000,50`) — to match what the user sees elsewhere in their tooling (net-tracker uses the same pattern). The field is `type="text" inputmode="decimal"` (not `type="number"`, which would block dots/commas) with a live formatter that rewrites on every keystroke and preserves caret position. Helpers in `app.js`: `formatPriceForInput(n)` renders the initial value on edit, `liveFormatPriceInput(input)` is wired by `installPriceFormatter(input)` on the `input` event, and `parsePriceFromInput(s)` converts the formatted string back to a `Number` for the JSON payload. Small numeric fields (gross weight, purity, alert threshold) stay as `type="number"` — grouping doesn't help when the value is 1–3 digits.
+- **Number formatting (inputs)**: large-value DKK fields (currently only `#purchase-price`) use **Danish input format** — dot thousands, comma decimal (e.g. `8.000,50`). Wired via `installPriceFormatter(input)` in `app.js`; `parsePriceFromInput()` converts back to `Number` on submit. Field is `type="text" inputmode="decimal"` (not `type="number"`, which blocks dots/commas). Small numeric fields (gross weight, purity, threshold) stay `type="number"` — grouping doesn't help on 1–3 digits.
 - **Backend URL on the frontend** comes from `window.BACKEND_URL` in `config.js`. Cloudflare Pages overwrites this file at build time:
   `echo "window.BACKEND_URL = '${BACKEND_URL}';" > frontend/config.js`
 - **Coins use a static registry.** `app/coins.py` is the source of truth for which coins we recognize. The resolver does case-insensitive substring matching; aliases live in `_TYPE_ALIASES` and `_SIZE_ALIASES`. Add to those dicts to widen coverage, not to the scraper code. Real-world Danish/German spelling drift ("Wiener Philharmoniker", "Amerikansk Eagle", "American Gold Eagle") tends to surface during the first run against a new dealer's fixture.
@@ -380,17 +331,17 @@ CI (`.github/workflows/tests.yml`) runs all three on push/PR to `main`. The live
 - **Bars table was renamed `dealer_snapshots` → `bar_snapshots`** on 2026-05-08. The schema bootstrap in `app/db.py` includes an idempotent migration block that runs on every backend startup; safe to re-run.
 - **Bar history endpoint was renamed `/history/dealer/...` → `/history/bar/...`** at the same time, for symmetry with `/history/coin/...`. The PWA is the only client, so no compatibility shim.
 - **Buttons**: two styles, one rule. **Cancel / Close / non-affirmative → neutral**. **Save / Add / Submit / affirmative → gold gradient** (same yellow as the active size pill). Inside a dialog `<menu>`, the neutral is automatic — `dialog menu button` styles it. For the gold variant inside a dialog, give the button `value="save"` (the `dialog menu button[value="save"]` rule paints it). For standalone buttons **outside** any dialog, use `class="site-btn"` (neutral) or `class="site-btn-primary"` (gold). All four classes live in `styles.css`. The active-pill gold gradient is also used as a *state* indicator on the tab strip / size picker — that's the same colour by design.
-- **Date format**: site-wide canonical display format is `DD-MM-YYYY` (date only) or `DD-MM-YYYY HH:MM` (when a timestamp is needed). Use `fmtDate(iso)` from `app.js`. Don't use `toLocaleDateString` directly for user-facing dates; that drifts by locale. Existing report archive list still uses ISO (`YYYY-MM-DD`) inside the report content itself — that's separate, internal to the report renderer.
-- **Busy buttons.** Any button whose click triggers an async network call MUST be wrapped in `withBusy(btn, async () => {...}, 'Saving…')` from `app.js`. Disables the button + (optionally) swaps its label for the duration, always restores in `finally`. Reason: a double-tap on Save fires two POSTs and the second surfaces as a confusing "duplicate" error. Applies to dialog submits (login/purchase/alert), row-action deletes (icon buttons — omit the label), and any other one-shot async trigger like report-generate. Omit `busyLabel` for icon-only buttons; pass a verb-ing form ("Saving…", "Sending…") for text buttons.
-- **No backend leakage in user-facing errors.** Never inject HTTP status codes, raw response bodies, or exception messages into anything the user reads — they look unpolished and tell the user nothing actionable. Route every fetch failure through `userFacingError({ res?, body?, err?, fallback })` from `app.js`. Pass `body` only when the call site has already consumed `res.text()` (purchase/alert submits need the body for the FastAPI-detail polish). The helper maps known statuses to friendly copy, parses FastAPI `{detail: [...]}` shapes, scrubs anything containing `Error`/`Exception`/`Traceback`, and falls back to the per-call-site `fallback` string. Replace native `alert()` calls with `infoDialog({title, message})` so failures use the same dialog chrome as the rest of the app.
-- **Dialog focus ring on iOS.** Always open `<dialog>` elements via `openDialog(dlg, focusEl?)` from `app.js`, not `dlg.showModal()` directly. Reason: `showModal()` synchronously focuses the first focusable element; on iOS Safari with no prior pointer activity, that focus is treated as keyboard input and paints a `:focus-visible` ring on the first button — usually Cancel, which reads as "pre-selected" the moment the dialog appears. The helper calls `showModal()` then blurs the auto-focused element on the next frame; keyboard nav still works via Tab. Pass `focusEl` to explicitly focus a specific input (login email input, etc.) after the blur.
-- **`/snapshot` refuses to persist when FX is stale.** `fx.py` falls back to a stamped static USD→DKK rate when frankfurter.dev errors out; that rate goes wrong fast (a 7% gap once corrupted every premium chart for a tick — incident 2026-05-14). The `/spot` live endpoint can still serve the stale fallback (refreshes 30s later), but the cron-only `/snapshot` checks `any(r.fx_stale for r in results)` and returns `{"skipped": true, "reason": "fx_stale"}` without writing to any of the three snapshot tables. Grep container logs (`sudo docker logs gold-bar-backend`) for `snapshot_skipped` to see how often it triggers. Cron retries 20 min later — missed ticks are invisible in analytics.
-- **`/snapshot` also has an outlier guard.** After the FX check, it reads the most recent `spot_snapshots` row within the last 60 minutes and rejects the new tick if `gold_dkk_per_g` deviates by more than `SNAPSHOT_OUTLIER_THRESHOLD = 10%` from it (`main.py`). Same `snapshot_skipped` log line with `reason: "outlier"`. 10% is deliberately wide — real gold rarely moves more than 2–3% in 20 minutes even during Fed/CPI prints, but a 31x unit flip from `api.gold-api.com`, a near-zero glitch, or a Frankfurter-returned-wrong-but-not-errored value would all be caught. Threshold lives at the top of `main.py`; if normal market vol ever starts brushing it, widen rather than disable.
-- **Historical FX and historical spot raise instead of falling back silently.** `fx.fetch_usd_to_dkk_on` raises `HistoricalFxUnavailable` and `spot.fetch_historical_usd_per_gram` raises `HistoricalSpotUnavailable` (the same exception also fires when the yfinance value lands outside generous sanity bounds — gold `[$30/g, $500/g]`, silver `[$0.20/g, $50/g]`). `portfolio._fetch_historical_spot_dkk_per_g` catches both and surfaces a 502 to the frontend, which renders a retry-able error in the purchase dialog. We do this here (not in the live `/spot` path) because the historical value gets frozen onto a `purchases` row forever — a brief retry beats a bad value baked into cost-basis premium math.
-- **Scraper outliers are filtered before persistence.** After premium is computed, `orchestrator.flag_bar_premium_outliers` (called from `run()`) flips any bar listing with premium outside `BAR_PREMIUM_BOUNDS_PCT = (0.0, 80.0)` to `status="error"`, clears `price_dkk` and `premium_pct`, and emits a `scraper_outlier` structured log line. `flag_coin_premium_outliers` does the same for coins with `COIN_PREMIUM_BOUNDS_PCT = (0.0, 120.0)` and is called from both the `/coins` live endpoint and the `/snapshot` coin row builder. Bounds are a "did the scraper grab the wrong HTML field" fence, not a market-vol fence: no legitimate online retail bullion sits at or below spot (would be arbitrage; the floor is tight against buy-back rates that sit at spot-1% to spot-3% on the same dealer pages), and the high end leaves headroom for small fractional coins (1/20oz routinely 50%+). Same `snapshot_skipped`-style grep target: `scraper_outlier`.
-- **`_current_spot_dkk_per_g` self-protects with `LIVE_SPOT_TIMEOUT_S = 3.0`.** The two upstream HTTP calls (`api.gold-api.com` + `frankfurter.dev`) carry httpx's default timeouts and compound serially — worst case ~20s without a cap. The wrapper raises `HTTPException(502)` on either upstream failure or timeout, so every portfolio endpoint (`list/create/update/history`) inherits one error mode. `/portfolio/history` catches the 502 and degrades to "snapshot tail only" (chart can lag ≤ 20 min, fine); list/create/update propagate the 502 since they can't produce a useful response without live spot.
-- **`GET /alerts` uses a batched current-min lookup.** `_fetch_current_bars_batch` and `_fetch_current_coins_batch` (`alerts.py`) each issue one UNNEST + ROW_NUMBER window query across every target the user has, so the list endpoint scales O(1) in query count rather than O(N) per alert. The shape returned matches what `_attach_current` reads from the in-memory map, so consumers can't tell the difference from the single-row `_decorate_with_current` path that `create/update/preview` still use.
-- **`GET /portfolio/history` reconstructs value-over-time on demand** — no new table. Joins `purchases` against `spot_snapshots` rows in the range and walks a two-pointer aggregator over them. Appends a synthetic "now" point using live spot so the chart tail matches the summary card's live current-value (otherwise the line could lag by up to 20 min). Decimates to ≤ 500 points so a 1y range stays snappy. Period change is Modified-Dietz-style (deposit-adjusted) so a pure cash injection shows 0%, not infinite. The frontend uses a scriptable Chart.js `backgroundColor` to render the modern top-opaque → bottom-transparent gradient fill under the line.
+- **Date format**: `DD-MM-YYYY` (or `DD-MM-YYYY HH:MM` with time). Use `fmtDate(iso)` from `app.js`. Don't use `toLocaleDateString` — it drifts by locale. ISO (`YYYY-MM-DD`) is fine inside the report content (internal to the renderer).
+- **Busy buttons.** Any async-network button MUST be wrapped in `withBusy(btn, async () => {...}, 'Saving…')` from `app.js` — disables + swaps label, always restores in `finally`. Reason: a double-tap on Save fires two POSTs and the second surfaces as a confusing "duplicate" error. Omit `busyLabel` for icon-only buttons; pass a verb-ing form (`'Saving…'`, `'Sending…'`) for text buttons.
+- **No backend leakage in user-facing errors.** Never show HTTP codes, raw bodies, or exception messages. Route every fetch failure through `userFacingError({ res?, body?, err?, fallback })` from `app.js` — maps known statuses, parses FastAPI `{detail: [...]}`, scrubs `Error`/`Exception`/`Traceback`, falls back to the call-site string. Pass `body` only when the caller already consumed `res.text()`. Use `infoDialog({title, message})` instead of native `alert()`.
+- **Dialog focus ring on iOS.** Open dialogs via `openDialog(dlg, focusEl?)` from `app.js`, not `dlg.showModal()` directly. Reason: `showModal()` auto-focuses the first focusable element; on iOS Safari that paints a `:focus-visible` ring on Cancel which reads as "pre-selected." The helper blurs the auto-focused element on the next frame; Tab nav still works. Pass `focusEl` to focus a specific input after the blur.
+- **`/snapshot` FX-stale guard.** `fx.py` falls back to a stamped USD→DKK rate when frankfurter.dev errors out; that rate drifts fast (a 7% gap once corrupted every premium chart for a tick — incident 2026-05-14). The cron-only `/snapshot` checks `any(r.fx_stale for r in results)` and returns `{"skipped": true, "reason": "fx_stale"}` without writing. `/spot` still serves the stale fallback for the live ticker (refreshes 30s later). Grep `sudo docker logs gold-price-backend` for `snapshot_skipped`.
+- **`/snapshot` outlier guard.** Rejects the new tick if `gold_dkk_per_g` deviates by more than `SNAPSHOT_OUTLIER_THRESHOLD = 10%` from the most recent `spot_snapshots` row in the last 60 min (`main.py`). Same `snapshot_skipped` line with `reason: "outlier"`. 10% is deliberately wide — real gold rarely moves more than 2–3% in 20 min; this catches unit flips, near-zero glitches, and silently-wrong FX. Widen rather than disable if normal vol starts brushing it.
+- **Historical FX and historical spot raise instead of falling back.** `fx.fetch_usd_to_dkk_on` raises `HistoricalFxUnavailable` and `spot.fetch_historical_usd_per_gram` raises `HistoricalSpotUnavailable` (also fires when yfinance lands outside sanity bounds — gold `[$30/g, $500/g]`, silver `[$0.20/g, $50/g]`). `portfolio._fetch_historical_spot_dkk_per_g` catches both and surfaces a 502 the frontend renders as retry-able. A brief retry beats baking a bad value into a `purchases` row forever.
+- **Scraper outliers filtered before persistence.** `orchestrator.flag_bar_premium_outliers` flips any bar with premium outside `BAR_PREMIUM_BOUNDS_PCT = (0.0, 80.0)` to `status="error"` and emits a `scraper_outlier` log line. Coin equivalent with `(0.0, 120.0)`. Bounds are a "scraper grabbed the wrong HTML field" fence, not a market-vol fence — leaves headroom for small fractional coins (1/20oz routinely 50%+).
+- **`_current_spot_dkk_per_g` self-protects with `LIVE_SPOT_TIMEOUT_S = 3.0`.** Wraps the two upstream calls (api.gold-api.com + frankfurter.dev) which would otherwise compound to ~20s. Raises `HTTPException(502)` on failure or timeout. `/portfolio/history` catches the 502 and degrades to snapshot-tail-only; list/create/update propagate it.
+- **`GET /alerts` uses a batched current-min lookup.** `_fetch_current_bars_batch` + `_fetch_current_coins_batch` (`alerts.py`) each issue one UNNEST + ROW_NUMBER window query across every target — list endpoint is O(1) queries instead of O(N). Result shape matches the single-row `_decorate_with_current` path used by `create/update/preview`.
+- **`GET /portfolio/history` reconstructs value-over-time on demand** — no new table. Joins `purchases` against `spot_snapshots` and walks a two-pointer aggregator. Appends a synthetic "now" point from live spot so the tail matches the summary card. Decimates to ≤ 500 points. Period change is Modified-Dietz (deposit-adjusted) so a pure cash injection shows 0%.
 
 ## Adding a new bar scraper
 
@@ -412,7 +363,7 @@ CI (`.github/workflows/tests.yml`) runs all three on push/PR to `main`. The live
 
 ## Production deploy
 
-- **Backend:** FastAPI in Docker on an **Oracle Cloud Always-Free VM** (Ubuntu 24.04, AMD E2.1.Micro, Frankfurt), fronted by **Caddy** with auto-renewing Let's Encrypt TLS. Public URL: `https://yzeir-gold.duckdns.org` (DuckDNS). On the VM the deployment is named **`gold-price-tracker`** (dir `~/apps/gold-price-tracker/`, container `gold-price-backend`, image `gold-price-tracker-backend`); the GitHub repo name (`gold-bar-tracker`) is legacy and only used to clone. Shares the VM with `net-tracker` on a single Caddy and a shared external Docker network `apps_web`.
+- **Backend:** FastAPI in Docker on an **Oracle Cloud Always-Free VM** (Ubuntu 24.04, AMD E2.1.Micro, Frankfurt), fronted by **Caddy** with auto-renewing Let's Encrypt TLS. Public URL: `https://yzeir-gold.duckdns.org` (DuckDNS). VM layout: dir `~/apps/gold-price-tracker/`, container `gold-price-backend`, image `gold-price-tracker-backend`. Shares the VM with `net-tracker` on a single Caddy and a shared external Docker network `apps_web`.
 - **Frontend:** Cloudflare Pages. `BACKEND_URL` env var injected at build time. The CSP `connect-src` allowlist in `frontend/_headers` MUST include the backend host — update both env var and CSP if the host ever changes.
 - **DB:** Neon Postgres (separate DB from net-tracker).
 - **Email:** Resend.

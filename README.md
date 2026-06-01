@@ -160,7 +160,7 @@ Three Upstash QStash schedules drive the cron-only endpoints. Free tier covers ~
 
 ## Production deploy
 
-- **Backend:** FastAPI in Docker on an Oracle Cloud Always-Free VM (Frankfurt), behind Caddy with auto-renewing Let's Encrypt TLS. Public URL: `https://yzeir-gold.duckdns.org`. On the VM the deployment is named `gold-price-tracker` (dir `~/apps/gold-price-tracker/`, container `gold-price-backend`); the GitHub repo name `gold-bar-tracker` is legacy. Shares the VM with `net-tracker` on a single Caddy + shared `apps_web` Docker network. Python pinned via `backend/runtime.txt` (3.12.7). `SCHEMA_SQL` runs idempotently on every backend boot.
+- **Backend:** FastAPI in Docker on an Oracle Cloud Always-Free VM (Frankfurt), behind Caddy with auto-renewing Let's Encrypt TLS. Public URL: `https://yzeir-gold.duckdns.org`. VM layout: dir `~/apps/gold-price-tracker/`, container `gold-price-backend`. Shares the VM with `net-tracker` on a single Caddy + shared `apps_web` Docker network. Python pinned via `backend/runtime.txt` (3.12.7). `SCHEMA_SQL` runs idempotently on every backend boot.
 - **Frontend:** Cloudflare Pages. `BACKEND_URL` env var injected at build time into `frontend/config.js`. CSP `connect-src` in `frontend/_headers` must include the backend host.
 - **DB:** Neon Postgres (separate DB from net-tracker).
 - **Email:** Resend.
