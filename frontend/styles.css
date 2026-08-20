@@ -60,6 +60,11 @@ html { overflow-x: hidden; }
  * with the document. Makes the PWA feel native instead of web-y.
  * Supported on iOS 16+, ignored gracefully on older. */
 html, body { overscroll-behavior: none; }
+/* Native-app feel: `manipulation` keeps tap + scroll but removes the
+ * double-tap-to-zoom gesture (and its 300ms tap delay). Pinch-zoom is
+ * blocked by the viewport meta's maximum-scale/user-scalable in index.html.
+ * Together they stop page zoom on mobile. */
+html { touch-action: manipulation; }
 body {
   margin: 0; padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
