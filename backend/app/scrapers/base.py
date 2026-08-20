@@ -5,6 +5,7 @@ import httpx
 from selectolax.parser import HTMLParser
 
 from app.models import CoinListing, Listing
+from app.scrapers import simply_waf
 
 # Bullion-only coin cap: 1 oz coins (31.1g fine) are excluded from /coins
 # so the size axis stays comparable across the bar + coin views. Lift this
@@ -13,8 +14,10 @@ from app.models import CoinListing, Listing
 FINE_GOLD_CAP_G = 20.0
 
 # Some dealer sites (Simply.com WAF — Nordisk Guld, Sero Guld) reject anything that
-# doesn't look like a real browser. Sending the full Sec-* fingerprint set bypasses
-# the WAF without triggering the proof-of-work challenge page.
+# doesn't look like a real browser, so keep the full Sec-* fingerprint set intact.
+# It is no longer sufficient on its own: since 2026-08 that WAF always serves the
+# proof-of-work challenge page, which `simply_waf` clears. Trimming these headers
+# still breaks those two dealers, so don't.
 DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -159,11 +162,25 @@ async def fetch_listing_html(
 
     Model-agnostic on purpose — bar scrapers wrap the failure into a
     ``Listing``, coin scrapers into a ``CoinListing``.
+
+    Transparently clears the Simply.com proof-of-work challenge (HTTP 454)
+    that fronts Nordisk Guld and Sero Guld — see ``simply_waf``. Every other
+    dealer is unaffected: the pre-request hook is a dict lookup and the retry
+    only triggers on a 454, which no other dealer returns.
     """
     try:
+        simply_waf.apply_clearance(client, url)
         resp = await client.get(
             url, timeout=timeout, follow_redirects=True, headers=headers,
         )
+        if resp.status_code == simply_waf.CHALLENGE_STATUS:
+            cleared = await simply_waf.clear_challenge(
+                client, url, resp.text, timeout=timeout,
+            )
+            if cleared:
+                resp = await client.get(
+                    url, timeout=timeout, follow_redirects=True, headers=headers,
+                )
         resp.raise_for_status()
         return resp.text, None
     except httpx.HTTPError as e:

@@ -28,8 +28,9 @@ backend/         FastAPI in Docker on an Oracle Cloud Always-Free VM, fronted by
     db.py              asyncpg pool + idempotent SCHEMA_SQL bootstrap
     scrapers/
       base.py          DealerScraper Protocol, DEFAULT_HEADERS, parse_dkk_price
+      simply_waf.py    Simply.com 454 proof-of-work solver + per-host clearance cache
       registry.py      ALL_SCRAPERS (bars) + ALL_COIN_SCRAPERS
-      <dealer>.py / <dealer>_coins.py    one pair per dealer (Nordisk + Sero use Sec-* headers for the Simply.com WAF)
+      <dealer>.py / <dealer>_coins.py    one pair per dealer (Nordisk + Sero sit behind the Simply.com WAF)
     reports/           HTML report generation (windows, loader, analytics, tables, notable, renderer, builder, storage)
   scripts/
     seed.py            local-only: 30 days of fake bar+coin+spot data + one weekly + one monthly report into local Postgres
@@ -317,7 +318,12 @@ CI (`.github/workflows/tests.yml`) runs all three on push/PR to `main`. The live
 ## Conventions / gotchas
 
 - **`parse_dkk_price` in `scrapers/base.py`** is the canonical price parser — it handles Danish `2.940,00 kr.`, US-style `5345.47`, and the gnarly `6.252` (Danish thousands, not 6 + decimal). New scrapers should use it; if a site needs a different rule, add a comment explaining why.
-- **Headers**: scrapers must use `DEFAULT_HEADERS` from `scrapers/base.py`. The full Sec-* fingerprint is what gets us past the Simply.com WAF on Nordisk + Sero — don't trim it.
+- **Headers**: scrapers must use `DEFAULT_HEADERS` from `scrapers/base.py`. The full Sec-* fingerprint is still required for Nordisk + Sero — don't trim it — but as of 2026-08 it's no longer *sufficient*; see the Simply.com WAF bullet below.
+- **Simply.com WAF (Nordisk + Sero).** Both dealers are hosted on Simply.com, whose WAF gates every path — `robots.txt` included — behind an HTTP **454** "Checking your browser" page carrying a SHA-256 proof-of-work challenge. Until 2026-08 the browser header fingerprint alone avoided it; when that stopped working, all four Nordisk/Sero scrapers (bars + coins) went to `http: HTTPStatusError` simultaneously. `scrapers/simply_waf.py` clears it: parse `var T=…,TS=…,D=…` out of the 454 body, find a nonce where `sha256(f"{token}:{nonce}")` has ≥ D leading zero bits, `POST` it to `/.sc-verify/`, then re-request with the returned `sc_clearance` cookie. Wired into `fetch_listing_html`, so it's transparent to every scraper and inert for the other five dealers (it only fires on a 454). Notes for future-you:
+  - **The clearance is cached process-wide per host, not on the client.** Every httpx client here is built per-endpoint, so a cookie jar would drop the clearance after each request and re-solve on every page load. Cached 23h against the WAF's `max-age=86400`.
+  - **Solving runs in `asyncio.to_thread`** — it's CPU-bound and the VM has one OCPU shared with net-tracker. Observed difficulty 16 ≈ 16–220 ms, far inside the 10 s scraper deadline.
+  - **`MAX_DIFFICULTY = 24` is a CPU fence, not a tuning knob.** If the WAF ratchets difficulty past it we degrade those two dealers rather than pinning the CPU for every endpoint. A `FAILURE_BACKOFF_S` of 5 min stops a burst of page loads from re-attempting a handshake the WAF is already refusing.
+  - If both dealers go to `http: HTTPStatusError` again, grep the logs for `simply_waf:` — `no challenge found` means the challenge markup moved, `verify rejected` means the protocol did.
 - **Listing status**: `ok | out_of_stock | unavailable | error`. The frontend hides `out_of_stock` and surfaces `error`/`unavailable` as a single-cell row. `_safe_fetch` in the orchestrator turns any scraper exception into an `error` Listing — never let a scraper crash the response.
 - **Premium %** = `(price_dkk - spot_dkk_per_g * size_g) / (spot_dkk_per_g * size_g) * 100`, computed in the orchestrator after spot resolves.
 - **Sort**: `ok` rows by ascending price, then everything else (errors/unavailable) at the bottom.

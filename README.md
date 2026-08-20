@@ -16,7 +16,7 @@ Real-time comparison of gold-bar (2.5–20 g) and gold-coin (≤ 20 g fine) pric
 
 ## Dealers
 
-Live: **Tavex, Vitus Guld, Plaza, Nordisk Guld, Sero Guld, Nyfortuna, Jan Jørgensen**. Nordisk + Sero need the full Sec-* header set to bypass the Simply.com WAF. Plaza + Jan Jørgensen don't currently stock bullion coins (their coin scrapers run anyway and pick up new listings if that changes). Skipped: **Silver Gold Bull DK** (JS-rendered SPA). Dropped: **Mønthuset** (empty live category).
+Live: **Tavex, Vitus Guld, Plaza, Nordisk Guld, Sero Guld, Nyfortuna, Jan Jørgensen**. Nordisk + Sero sit behind the Simply.com WAF, which needs the full Sec-* header set plus the proof-of-work handshake in `scrapers/simply_waf.py`. Plaza + Jan Jørgensen don't currently stock bullion coins (their coin scrapers run anyway and pick up new listings if that changes). Skipped: **Silver Gold Bull DK** (JS-rendered SPA). Dropped: **Mønthuset** (empty live category).
 
 Coin coverage is bullion-only via the registry in `backend/app/coins.py`: Krugerrand, Maple Leaf, Vienna Philharmonic, American Eagle, Britannia, Sovereign, Ducat, Panda, plus the Danish 20 kr / 10 kr (Christian IX, Christian X, Frederik VIII). Listings whose title doesn't match the registry are silently skipped.
 
