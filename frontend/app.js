@@ -159,6 +159,51 @@ async function userFacingError({ res, body, err, fallback = 'Something went wron
   return polishApiDetail(parsed?.detail) || fallback;
 }
 
+// Per-row dealer failures are a different animal from `userFacingError`, which
+// maps an HTTP response for the whole request. These strings are attached to a
+// single dealer/coin row by a scraper — `http: HTTPStatusError`,
+// `parse_failed: missing link node`, `timeout after 10s`, `premium 91.2% out of
+// bar bounds [0%, 80%]`, or the `ExcName: message` catch-all — and must never
+// reach the cell verbatim (see the no-leakage rule in CLAUDE.md).
+//
+// The raw value is still handed back as `detail` so the caller can park it on a
+// title tooltip + data-error attribute. This tool has an audience of one who is
+// also its operator: when Nordisk and Sero both broke behind a WAF change, the
+// raw string was the diagnosis, and keeping it a hover away beats reaching for
+// the container logs.
+function dealerRowNote(li) {
+  const raw = (li.error || '').trim();
+  let text;
+  if (li.status === 'unavailable' && /^size not offered/i.test(raw)) {
+    text = 'Not offered in this size';
+  } else if (/^timeout after/i.test(raw) || /^http:.*timeout/i.test(raw)) {
+    text = 'Dealer site timed out';
+  } else if (/^http:/i.test(raw)) {
+    text = "Couldn't reach dealer site";
+  } else if (/^parse_failed/i.test(raw) || /^non-numeric/i.test(raw)) {
+    text = "Couldn't read the price";
+  } else if (/^premium\b/i.test(raw)) {
+    text = 'Price looked wrong — skipped';
+  } else if (li.status === 'unavailable') {
+    text = 'Currently unavailable';
+  } else {
+    text = 'Price unavailable';
+  }
+  return { text, detail: raw || li.status || '' };
+}
+
+// Build the colspan'd note cell shared by the bar + coin error rows. Both the
+// visible text and the diagnostic attributes are escaped: `detail` originates
+// from scraped, dealer-controlled markup on the parse_failed paths.
+function dealerNoteCell(li, colspan) {
+  const { text, detail } = dealerRowNote(li);
+  if (detail) console.debug('[gold] dealer row error:', li.dealer, '—', detail);
+  const attrs = detail
+    ? ` title="${escapeHtml(detail)}" data-error="${escapeHtml(detail)}"`
+    : '';
+  return `<td colspan="${colspan}"${attrs}>${escapeHtml(text)}</td>`;
+}
+
 // FastAPI validation errors arrive as either { detail: [{msg, loc}] } or
 // { detail: "..." }. Polish field names + scrub anything that looks like a
 // Python exception class. Returns null when there's nothing safe to surface.
@@ -403,9 +448,7 @@ function renderListingsBody() {
         <td>${fmtPct(li.premium_pct)}</td>
       `;
     } else {
-      const note = li.status === 'unavailable' ? (li.error || 'unavailable')
-                : `error (${li.error || 'unknown'})`;
-      tr.innerHTML = `<td>${escapeHtml(li.dealer)}</td><td class="brand-cell">${brand}</td><td colspan="2">${note}</td>`;
+      tr.innerHTML = `<td>${escapeHtml(li.dealer)}</td><td class="brand-cell">${brand}</td>${dealerNoteCell(li, 2)}`;
     }
     tbody.appendChild(tr);
   }
@@ -827,8 +870,7 @@ function renderCoinListingsBody() {
         <td>${fmtPct(li.premium_pct)}</td>
       `;
     } else {
-      const note = li.error || li.status;
-      tr.innerHTML = `<td>${escapeHtml(li.dealer)}</td><td class="brand-cell">${escapeHtml(coinLabel)}</td><td colspan="3">${escapeHtml(note)}</td>`;
+      tr.innerHTML = `<td>${escapeHtml(li.dealer)}</td><td class="brand-cell">${escapeHtml(coinLabel)}</td>${dealerNoteCell(li, 3)}`;
     }
     tbody.appendChild(tr);
   }
