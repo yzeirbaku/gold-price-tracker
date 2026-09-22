@@ -107,6 +107,11 @@ header h1 {
 /* Hamburger menu — slide-in drawer from the left, with a backdrop overlay. */
 .menu-wrapper { flex: 0 0 auto; }
 .menu-dropdown {
+  /* Inner horizontal inset shared by the brand, the menu items and the
+     account line, so they all sit on one left rail. Stacks on top of the
+     drawer's own 0.85rem padding below — the sum (1.3rem) is the distance
+     from the screen edge to the icons and labels. */
+  --menu-inset: 0.45rem;
   position: fixed;
   top: 0; left: 0; bottom: 0;
   width: min(260px, 80vw);
@@ -148,7 +153,7 @@ header h1 {
 .menu-item {
   display: flex; align-items: center; width: 100%;
   background: transparent; border: none;
-  padding: 0.65rem 0.85rem;
+  padding: 0.65rem var(--menu-inset);
   color: var(--fg-soft);
   font: inherit; font-size: 0.95rem;
   text-align: left; cursor: pointer;
@@ -189,7 +194,7 @@ header h1 {
      up across the drawer/page boundary. */
   min-height: 78px;
   display: flex; align-items: center;
-  padding: 0 0.85rem;
+  padding: 0 var(--menu-inset);
   margin-bottom: 0.3rem;
   font-size: 1.3rem; font-weight: 700;
   letter-spacing: -0.01em;
@@ -924,7 +929,7 @@ tr.history-row > td {
   margin: 0.4rem 0;
 }
 .menu-account-info {
-  padding: 0.4rem 0.75rem;
+  padding: 0.4rem var(--menu-inset);
   font-size: 0.78rem;
   color: var(--muted);
   word-break: break-all;
