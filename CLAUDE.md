@@ -258,6 +258,8 @@ re-freezes the spot if `purchased_at` *or* `metal` changes.
 
 **Same-day purchases use live spot, not yfinance.** When `purchased_at` lands on today's UTC date, `_fetch_historical_spot_dkk_per_g` short-circuits to `_current_spot_dkk_per_g`. yfinance's daily series only carries closed sessions, so "historical for today" would silently mean *yesterday's* close. The future-purchased-at validator rejects only when the UTC date is strictly tomorrow-or-later (with 5-min skew tolerance for midnight rollover); same-day stamps pass.
 
+**`purchased_at` is clamped to `min(stamp, now)` on write** (`_clamp_purchased_at_to_now`, applied in both create and PATCH). The frontend stamps a date-only input as `T12:00:00Z`, which is *ahead of the server clock* for anyone submitting before noon UTC — most of the Danish working day. Everything that asks "was this held at time t" then said no: `_reconstruct_value_series` advances on `purchased_at <= t` and `/portfolio/history` clamps its window to `first_purchase_at`, so the chart read 0 while the summary card read the real value, and a first-ever purchase fell into the "not enough snapshot history" empty state for hours. Clamping preserves the noon convention where it matters (the UTC *date* drives the spot lookup, and the same-day branch still fires). A bare offset-less timestamp is read as UTC rather than raising — comparing naive to aware raised `TypeError`, which pydantic does not turn into a 422, so an ordinary ISO string used to 500.
+
 **Why bearer tokens, not cookies:** the backend (`yzeir-gold.duckdns.org`)
 and frontend (Cloudflare Pages `*.pages.dev`) live on different sites.
 Safari ITP, Brave, Firefox ETP, and Chrome (with 3rd-party cookies
@@ -306,6 +308,15 @@ On fire: email sent → flag set TRUE + `last_fired_at = NOW()`. On any
 subsequent tick where min premium climbs back above
 `threshold + HYSTERESIS_PCT` (0.5%), flag flips back to FALSE — re-armed.
 Standard fire-once-and-mute pattern; no spam during long flat-bottom dips.
+
+**Two PATCH paths reset the mute flag, and both are load-bearing.** A
+threshold edit resets it (7% → 6% shouldn't stay stuck muted), and so does
+an `enabled` FALSE→TRUE transition. The second is subtler: `evaluate_alerts`
+selects `WHERE enabled = TRUE`, so a *disabled* alert never observes its own
+recovery tick and the re-arm branch simply never runs. Fire it, switch it
+off, let the premium climb back, switch it on — without the reset it stays
+muted through the next dip, while the UI claims it will re-arm. Turning an
+alert *off* deliberately leaves the flag alone.
 
 **Bundling + rate limit.** Multiple alerts firing for the same user on
 the same tick get bundled into **one email** with each alert as a
@@ -379,7 +390,25 @@ Run from `backend/`:
 ruff check app tests
 mypy app
 pytest tests/unit -v
+
+# Endpoint suite — needs Postgres (docker compose up -d from the repo root)
+DATABASE_URL='postgresql://gold:gold@localhost:5433/goldtracker' \
+  API_KEY=test-api-key pytest tests/api -v
 ```
+
+**`tests/api` must never touch the network.** `conftest.mock_external` stubs
+Resend, yfinance and frankfurter *and* `main`'s own `fetch_spot_usd_per_gram`
+/ `fetch_usd_to` / `ALL_COIN_SCRAPERS`. It originally patched only the
+`portfolio` module's spot helpers, so every run fired ~8 live requests at
+api.gold-api.com and all five dealer sites — which is what made the `/coins`
+rate-limit test flaky: the real fan-out took ~5s, exactly the limiter's
+`min_interval_s`, so the second request raced the window boundary.
+`test_coins_does_not_touch_the_network_in_tests` guards the stubbing.
+
+**Never monkeypatch an endpoint function to stub it.** FastAPI captures the
+function object when the `@app.get(...)` decorator runs at import time, so
+`monkeypatch.setattr(main, "get_coins", stub)` leaves the route pointing at
+the original and silently does nothing. Stub what the handler *calls*.
 
 CI (`.github/workflows/tests.yml`) runs all three on push/PR to `main`. The live integration suite (`tests/integration/test_live.py`) runs Mondays 09:00 UTC and on workflow_dispatch — it's `continue-on-error` because dealer sites move.
 
@@ -400,11 +429,12 @@ CI (`.github/workflows/tests.yml`) runs all three on push/PR to `main`. The live
 - **Number formatting (inputs)**: large-value DKK fields (currently only `#purchase-price`) use **Danish input format** — dot thousands, comma decimal (e.g. `8.000,50`). Wired via `installPriceFormatter(input)` in `app.js`; `parsePriceFromInput()` converts back to `Number` on submit. Field is `type="text" inputmode="decimal"` (not `type="number"`, which blocks dots/commas). Small numeric fields (gross weight, purity, threshold) stay `type="number"` — grouping doesn't help on 1–3 digits.
 - **Backend URL on the frontend** comes from `window.BACKEND_URL` in `config.js`. Cloudflare Pages overwrites this file at build time:
   `echo "window.BACKEND_URL = '${BACKEND_URL}';" > frontend/config.js`
-- **Coins use a static registry.** `app/coins.py` is the source of truth for which coins we recognize. The resolver does case-insensitive substring matching; aliases live in `_TYPE_ALIASES` and `_SIZE_ALIASES`. Add to those dicts to widen coverage, not to the scraper code. Real-world Danish/German spelling drift ("Wiener Philharmoniker", "Amerikansk Eagle", "American Gold Eagle") tends to surface during the first run against a new dealer's fixture.
+- **Coins use a static registry.** `app/coins.py` is the source of truth for which coins we recognize. The resolver does case-insensitive substring matching; aliases live in `_TYPE_ALIASES` and `_SIZE_ALIASES`. Add to those dicts to widen coverage, not to the scraper code. **Per-type default sizes must run *after* size matching, never before.** The Sovereign "bare title means Full" fallback used to sit at the top of the loop guarded by `"half" not in tl and "quarter" not in tl` — which only knew the English words, so `1/2 Sovereign` and `1/4 Sovereign` resolved to Full and reported 2x / 4x the real gold content, while the `"1/2 sovereign"` / `"1/4 sovereign"` entries in `_SIZE_ALIASES` sat unreachable. A wrong `fine_gold_g` is doubly damaging: it's the premium denominator (so the listing gets fenced out of `/coins` with a misleading "out of bounds" reason) *and* the alert bucketing key. Real-world Danish/German spelling drift ("Wiener Philharmoniker", "Amerikansk Eagle", "American Gold Eagle") tends to surface during the first run against a new dealer's fixture.
 - **Coin scrapers don't pick a single cheapest variant per dealer.** Unlike bar scrapers, coin scrapers emit every recognized in-stock coin from the listing page; the global ranked `/coins` view sorts them across all dealers.
 - **Bars table was renamed `dealer_snapshots` → `bar_snapshots`** on 2026-05-08. The schema bootstrap in `app/db.py` includes an idempotent migration block that runs on every backend startup; safe to re-run.
 - **Bar history endpoint was renamed `/history/dealer/...` → `/history/bar/...`** at the same time, for symmetry with `/history/coin/...`. The PWA is the only client, so no compatibility shim.
 - **Buttons**: two styles, one rule. **Cancel / Close / non-affirmative → neutral**. **Save / Add / Submit / affirmative → gold gradient** (same yellow as the active size pill). Inside a dialog `<menu>`, the neutral is automatic — `dialog menu button` styles it. For the gold variant inside a dialog, give the button `value="save"` (the `dialog menu button[value="save"]` rule paints it). For standalone buttons **outside** any dialog, use `class="site-btn"` (neutral) or `class="site-btn-primary"` (gold). All four classes live in `styles.css`. The active-pill gold gradient is also used as a *state* indicator on the tab strip / size picker — that's the same colour by design.
+- **Dialog Cancel/Close buttons MUST be `type="button"`, never `type="submit"`.** Inside a `<form method="dialog">` the *first submit button* is the form's default button for implicit submission. Cancel is listed first (the rule above), so while it was a submit button, pressing Enter in any field submitted via Cancel — and its `formnovalidate` meant `required` fields didn't even block. Every submit handler bails on `submitter.value === 'cancel'` without `preventDefault()`, so the dialog just closed and `form.reset()` wiped the entry: filling in all eight Add-purchase fields and hitting Enter lost the lot, silently. A delegated listener next to `openDialog` in `app.js` closes the dialog on `dialog menu button[value="cancel"]` clicks. Keep Cancel visually first and functionally a plain button.
 - **Date format**: `DD-MM-YYYY` (or `DD-MM-YYYY HH:MM` with time). Use `fmtDate(iso)` from `app.js`. Don't use `toLocaleDateString` — it drifts by locale. ISO (`YYYY-MM-DD`) is fine inside the report content (internal to the renderer).
 - **Busy buttons.** Any async-network button MUST be wrapped in `withBusy(btn, async () => {...}, 'Saving…')` from `app.js` — disables + swaps label, always restores in `finally`. Reason: a double-tap on Save fires two POSTs and the second surfaces as a confusing "duplicate" error. Omit `busyLabel` for icon-only buttons; pass a verb-ing form (`'Saving…'`, `'Sending…'`) for text buttons.
 - **No backend leakage in user-facing errors.** Never show HTTP codes, raw bodies, or exception messages. Route every fetch failure through `userFacingError({ res?, body?, err?, fallback })` from `app.js` — maps known statuses, parses FastAPI `{detail: [...]}`, scrubs `Error`/`Exception`/`Traceback`, falls back to the call-site string. Pass `body` only when the caller already consumed `res.text()`. Use `infoDialog({title, message})` instead of native `alert()`.
@@ -413,6 +443,7 @@ CI (`.github/workflows/tests.yml`) runs all three on push/PR to `main`. The live
 - **`/snapshot` outlier guard.** Rejects the new tick if `gold_dkk_per_g` deviates by more than `SNAPSHOT_OUTLIER_THRESHOLD = 10%` from the most recent `spot_snapshots` row in the last 60 min (`main.py`). Same `snapshot_skipped` line with `reason: "outlier"`. 10% is deliberately wide — real gold rarely moves more than 2–3% in 20 min; this catches unit flips, near-zero glitches, and silently-wrong FX. Widen rather than disable if normal vol starts brushing it.
 - **Historical FX and historical spot raise instead of falling back.** `fx.fetch_usd_to_dkk_on` raises `HistoricalFxUnavailable` and `spot.fetch_historical_usd_per_gram` raises `HistoricalSpotUnavailable` (also fires when yfinance lands outside sanity bounds — gold `[$30/g, $500/g]`, silver `[$0.20/g, $50/g]`). `portfolio._fetch_historical_spot_dkk_per_g` catches both and surfaces a 502 the frontend renders as retry-able. A brief retry beats baking a bad value into a `purchases` row forever.
 - **Scraper outliers filtered before persistence.** `orchestrator.flag_bar_premium_outliers` flips any bar with premium outside `BAR_PREMIUM_BOUNDS_PCT = (0.0, 80.0)` to `status="error"` and emits a `scraper_outlier` log line. Coin equivalent with `(0.0, 120.0)`. Bounds are a "scraper grabbed the wrong HTML field" fence, not a market-vol fence — leaves headroom for small fractional coins (1/20oz routinely 50%+).
+- **`/snapshot` re-derives bar premiums against the canonical spot and re-runs the fence before persisting** — mirroring what the coin path already did. `orchestrator.run()` computes premium (and therefore fences) only when *its own* spot lookup succeeded, but all four size runs fetch spot independently. A run that timed out on api.gold-api.com produced listings with `premium_pct=None` that the fence skips entirely, and `/snapshot` persisted them anyway with another run's spot grafted on — a row that looked checked and never was. Pinning every row to the one spot value that passed the outlier guard also closes the gap where three of the four persisted spot values were never validated at all. Covered by `tests/unit/test_snapshot_bar_fence.py`.
 - **`_current_spot_dkk_per_g` self-protects with `LIVE_SPOT_TIMEOUT_S = 3.0`.** Wraps the two upstream calls (api.gold-api.com + frankfurter.dev) which would otherwise compound to ~20s. Raises `HTTPException(502)` on failure or timeout. `/portfolio/history` catches the 502 and degrades to snapshot-tail-only; list/create/update propagate it.
 - **`bar_snapshots` / `coin_snapshots` each carry two indexes, and both are load-bearing.** `idx_*_lookup` leads with `dealer` and serves `/history/...`, which always filters on it. `idx_*_time` is a plain `(fetched_at DESC)` index added for `GET /alerts`, which asks "cheapest dealer in the last 90 minutes" and never mentions `dealer` — without it the planner fell back to a parallel seq scan of the whole table. Measured on prod 2026-09-22 before the fix: 80 ms across 90k bar rows and 709 ms across 247k coin rows, both growing linearly with the 20-min cron. That was the entire "why is the Alerts page slow when everything else is instant" gap. If a new query filters on a time window without a dealer, check it uses `idx_*_time`.
 - **`GET /alerts` uses a batched current-min lookup.** `_fetch_current_bars_batch` + `_fetch_current_coins_batch` (`alerts.py`) each issue one UNNEST + ROW_NUMBER window query across every target — list endpoint is O(1) queries instead of O(N). Result shape matches the single-row `_decorate_with_current` path used by `create/update/preview`.
