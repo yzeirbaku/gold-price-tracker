@@ -4,17 +4,29 @@ We mock the pool to avoid needing a real Postgres for these tests. The
 storage CRUD has its own DB-backed tests; here we only verify routing,
 auth, and content-disposition headers.
 """
-import os
 from datetime import date
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 
 
+@pytest.fixture(autouse=True)
+def _api_key(monkeypatch):
+    """Scope the API_KEY override to each test.
+
+    This used to be a bare `os.environ["API_KEY"] = "test"` inside the helper
+    below, which leaked into the rest of the process: every tests/api case
+    afterwards sent its own key and got a 401. It stayed invisible because CI
+    runs the unit and endpoint suites as separate jobs, so only a combined
+    local run tripped over it.
+    """
+    monkeypatch.setenv("API_KEY", "test")
+
+
 def _client_with_api_key():
-    os.environ["API_KEY"] = "test"
     return TestClient(app), {"X-API-Key": "test"}
 
 

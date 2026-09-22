@@ -64,7 +64,12 @@ def test_real_clock_smoke():
     rl = IPRateLimiter(min_interval_s=0.05)
     assert rl.check("x") == 0.0
     assert rl.check("x") > 0
-    time.sleep(0.06)
+    # Sleep well past the interval rather than just over it. Windows' default
+    # timer granularity is ~15.6 ms, so time.sleep(0.06) can hand control back
+    # after only ~0.047 s of monotonic time and leave the window technically
+    # still open — this test failed that way intermittently. A 4x margin keeps
+    # it a wiring check instead of a timing race.
+    time.sleep(0.2)
     assert rl.check("x") == 0.0
 
 

@@ -118,6 +118,27 @@ def mock_external(monkeypatch):
 
     monkeypatch.setattr(portfolio_module, "_current_spot_dkk_per_g", _fake_current_spot)
 
+    # /coins and /prices resolve spot + FX through `main`'s own module
+    # globals, not portfolio's — patching only the pair above left the whole
+    # API suite hitting api.gold-api.com, frankfurter.dev and all five dealer
+    # sites on every CI run. That is what made the /coins rate-limit test
+    # flaky: the live fan-out took ~5s, which is exactly the limiter's
+    # min_interval_s, so the second request raced the window boundary.
+    from app import main as main_module
+
+    async def _fake_spot_usd_per_gram(*_args, **_kwargs):
+        return {"gold": 94.0, "silver": 1.2}
+
+    async def _fake_usd_to(*_args, **_kwargs):
+        return {"EUR": 0.92, "DKK": 6.90}, False
+
+    monkeypatch.setattr(main_module, "fetch_spot_usd_per_gram", _fake_spot_usd_per_gram)
+    monkeypatch.setattr(main_module, "fetch_usd_to", _fake_usd_to)
+    # No endpoint test asserts on real listings; every one of them is about
+    # routing, auth and serialization. An empty registry keeps /coins honest
+    # (it still builds a real response) without touching the network.
+    monkeypatch.setattr(main_module, "ALL_COIN_SCRAPERS", [])
+
     return captured
 
 
