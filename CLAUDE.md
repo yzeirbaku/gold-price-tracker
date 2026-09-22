@@ -141,6 +141,32 @@ Sections (rendered as `<details>`, only Spot starts open): Header, Spot context,
 
 `scripts/seed.py` truncates the four snapshot tables, fills 30 days of synthetic data, then calls `build_report` for previous-week + previous-month so the local archive is non-empty on first PWA load.
 
+**Retention: the archive keeps the current calendar month plus the previous
+three.** `reports/storage.prune_old_reports` deletes every row whose
+`period_start` is older than `retention_cutoff(today)` — the first of the
+month `RETENTION_MONTHS` (3) back, computed in Europe/Copenhagen to match the
+report windows. On 22-09-2026 that cutoff is 01-06-2026, so June/July/August
+survive next to the in-progress September and everything from May and earlier
+goes, weeklies included (a week is bucketed by the month it *starts* in, so
+the Mon 25-May → Sun 31-May weekly drops with May's monthly). It runs in two
+places: the FastAPI `lifespan` startup hook, and at the end of
+`POST /reports/cron/{type}` — startup alone would let a container that runs
+for months accumulate, and the cron is the only path that adds rows. Both are
+idempotent, and both are best-effort (a prune failure never fails startup or
+the cron; the latter matters because the report is already committed by then
+and a 500 would make QStash re-run `build_report` over a whole month).
+
+**Pruning is destructive and no endpoint rebuilds an arbitrary past period.**
+`/reports/cron/{type}` only ever builds the *previous* calendar week/month and
+`/reports/generate` is rolling last-7/last-30 and isn't persisted. The
+bar/coin/spot snapshot tables are never pruned, so a dropped report is still
+reconstructible by calling `build_report()` with a hand-made `Window` — but
+that's a code change, not an API call. `today` comes from **Postgres's** clock
+(`SELECT (NOW() AT TIME ZONE 'Europe/Copenhagen')::date`), not the
+container's: this is an irreversible DELETE keyed entirely on the current
+date, and a VM whose clock drifts forward would otherwise compute a
+far-future cutoff and wipe the whole archive on the next boot.
+
 ## Portfolio + magic-link auth
 
 Two parallel auth schemes coexist. The shared `X-API-Key` (`auth.require_api_key`)

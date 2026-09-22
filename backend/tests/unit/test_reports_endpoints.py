@@ -82,13 +82,19 @@ def test_generate_on_demand_returns_html_without_persist() -> None:
 def test_cron_persists_to_archive() -> None:
     client, headers = _client_with_api_key()
     upsert_mock = AsyncMock(return_value=42)
+    prune_mock = AsyncMock(return_value=0)
     with patch("app.main.get_pool", new=AsyncMock(return_value=_fake_pool())), \
          patch("app.main.build_report",
                new=AsyncMock(return_value="<html>cron</html>")), \
-         patch("app.main.upsert_report", new=upsert_mock):
+         patch("app.main.upsert_report", new=upsert_mock), \
+         patch("app.main.prune_old_reports", new=prune_mock):
         r = client.post("/reports/cron/weekly", headers=headers)
     assert r.status_code == 200
     upsert_mock.assert_called_once()
+    # The cron is the only path that adds archive rows, so it also enforces
+    # the retention window — a container that never restarts would otherwise
+    # only ever prune at startup.
+    prune_mock.assert_called_once()
     body = r.json()
     assert body["id"] == 42
     assert body["type"] == "weekly"

@@ -28,7 +28,12 @@ from app.orchestrator import flag_coin_premium_outliers, run
 from app.portfolio import router as portfolio_router
 from app.rate_limit import IPRateLimiter
 from app.reports.builder import build_report
-from app.reports.storage import fetch_report_html, list_reports, upsert_report
+from app.reports.storage import (
+    fetch_report_html,
+    list_reports,
+    prune_old_reports,
+    upsert_report,
+)
 from app.reports.windows import (
     previous_calendar_month,
     previous_calendar_week,
@@ -61,9 +66,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # take the whole service down. /snapshot and /history will 503 until the
     # next call retries get_pool().
     try:
-        await get_pool()
+        pool = await get_pool()
     except Exception as e:
         logger.warning("db pool init failed at startup: %s", e)
+    else:
+        # Report retention. A seq scan (report_archive's only index leads with
+        # report_type, so it can't serve `WHERE period_start < $1`) but over a
+        # table that holds tens of rows, so it runs inline rather than as a
+        # background task — a failure here is worth surfacing in the startup
+        # logs, and it must not race the first /reports request. Best-effort
+        # for the same reason the pool init is: a stale archive is not worth
+        # refusing to boot over.
+        if pool is not None:
+            try:
+                async with pool.acquire() as conn:
+                    await prune_old_reports(conn)
+            except Exception as e:
+                logger.warning("report retention prune failed at startup: %s", e)
     # `try/finally` around the yield: matches the unconditional shutdown
     # behavior of the previous @app.on_event("shutdown") decorator. Without
     # the finally, a raise during runtime that propagates into the lifespan
@@ -720,6 +739,19 @@ async def reports_cron(
         rid = await upsert_report(
             conn, type, window.period_start, window.period_end, html,
         )
+        # Startup alone would let the archive grow unbounded on a container
+        # that runs for months. This is the only path that adds rows, so
+        # pruning right after the insert keeps the window honest regardless
+        # of uptime.
+        #
+        # Best-effort on purpose: the report is already committed above, and
+        # a 500 here would have QStash retry the schedule, re-running the
+        # expensive build_report over a month of snapshots to re-persist a
+        # report that already landed. Retention catches up next tick.
+        try:
+            await prune_old_reports(conn)
+        except Exception as e:
+            logger.warning("report retention prune failed after %s cron: %s", type, e)
     return JSONResponse({
         "id": rid, "type": type,
         "period_start": window.period_start.isoformat(),
