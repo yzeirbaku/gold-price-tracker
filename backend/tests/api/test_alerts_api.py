@@ -280,3 +280,76 @@ async def test_delete_unknown_id_returns_404(client, pool):
     _, token = await make_session(pool)
     r = await client.delete(f"/alerts/{uuid4()}", headers=auth_headers(token))
     assert r.status_code == 404
+
+
+async def test_patch_reenabling_rearms_a_muted_alert(client, pool):
+    """Re-enabling must clear muted_until_recovery.
+
+    evaluate_alerts selects `WHERE enabled = TRUE`, so while an alert is off
+    it never observes its own recovery tick and the re-arm branch never runs.
+    Without this reset the alert comes back still muted and stays silent
+    through the next dip — while the UI claims it will re-arm.
+    """
+    _, token = await make_session(pool)
+    created = (await client.post(
+        "/alerts", json={"kind": "bar", "size_g": "10", "threshold_pct": "5"},
+        headers=auth_headers(token),
+    )).json()
+
+    # Fired, muted, then switched off by the user.
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE alerts SET muted_until_recovery = TRUE, enabled = FALSE "
+            "WHERE id = $1::uuid",
+            created["id"],
+        )
+
+    r = await client.patch(
+        f"/alerts/{created['id']}", json={"enabled": True},
+        headers=auth_headers(token),
+    )
+    assert r.status_code == 200
+    assert r.json()["enabled"] is True
+    assert r.json()["muted_until_recovery"] is False
+
+
+async def test_patch_disabling_leaves_muted_state_alone(client, pool):
+    """Turning an alert off must not silently re-arm it — only turning it
+    back on does. Guards against widening the reset to any `enabled` write."""
+    _, token = await make_session(pool)
+    created = (await client.post(
+        "/alerts", json={"kind": "bar", "size_g": "10", "threshold_pct": "5"},
+        headers=auth_headers(token),
+    )).json()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE alerts SET muted_until_recovery = TRUE WHERE id = $1::uuid",
+            created["id"],
+        )
+
+    r = await client.patch(
+        f"/alerts/{created['id']}", json={"enabled": False},
+        headers=auth_headers(token),
+    )
+    assert r.status_code == 200
+    assert r.json()["muted_until_recovery"] is True
+
+
+@pytest.mark.parametrize(
+    "payload", [{"threshold_pct": None}, {"enabled": None}],
+    ids=["null-threshold", "null-enabled"],
+)
+async def test_patch_explicit_null_returns_400(client, pool, payload):
+    """Both columns are NOT NULL. An explicit JSON null used to reach the
+    UPDATE and surface as a 500; it should be a clean 400 like the POST path."""
+    _, token = await make_session(pool)
+    created = (await client.post(
+        "/alerts", json={"kind": "bar", "size_g": "10", "threshold_pct": "5"},
+        headers=auth_headers(token),
+    )).json()
+
+    r = await client.patch(
+        f"/alerts/{created['id']}", json=payload, headers=auth_headers(token),
+    )
+    assert r.status_code == 400
+    assert "null" in r.text.lower()

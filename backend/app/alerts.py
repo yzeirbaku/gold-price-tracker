@@ -426,9 +426,26 @@ async def update_alert(
     updates: dict = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="no fields to update")
+    # `exclude_unset` keeps an explicitly-sent null, and both columns are
+    # NOT NULL — without this the UPDATE raises NotNullViolationError and
+    # the caller gets a 500 where the POST path is careful to give a 400.
+    null_fields = sorted(k for k, v in updates.items() if v is None)
+    if null_fields:
+        raise HTTPException(
+            status_code=400,
+            detail=f"field(s) cannot be null: {', '.join(null_fields)}",
+        )
     # Threshold edits reset muted state — otherwise toggling 7% → 6% leaves
     # the alert stuck muted with stale semantics.
-    if "threshold_pct" in updates:
+    #
+    # Re-enabling resets it for a subtler reason: evaluate_alerts selects
+    # `WHERE enabled = TRUE`, so a disabled alert never observes its own
+    # recovery tick. Fire it, disable it, let the premium climb back, and
+    # the re-arm branch simply never ran — the flag is still TRUE, and on
+    # re-enable the alert stays silent through the next dip. Treat turning
+    # it back on as "watch this again from now", which is also what the UI
+    # promises.
+    if "threshold_pct" in updates or updates.get("enabled") is True:
         updates["muted_until_recovery"] = False
     pool = await get_pool()
     if pool is None:
@@ -454,6 +471,12 @@ async def update_alert(
             f"WHERE id = ${len(values) - 1} AND user_id = ${len(values)} RETURNING *"
         )
         row = await conn.fetchrow(sql, *values)
+        if row is None:
+            # The ownership check above and this UPDATE are separate
+            # statements, so the row can be deleted in between (two tabs, or
+            # a retried DELETE). Return the 404 the check would have given
+            # rather than a TypeError from dict(None).
+            raise HTTPException(status_code=404, detail="alert not found")
         return await _decorate_with_current(conn, dict(row))
 
 
