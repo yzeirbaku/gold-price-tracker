@@ -24,7 +24,11 @@ from app.buy_context import (
 from app.db import close_pool, get_pool
 from app.fx import fetch_usd_to
 from app.models import CoinListing, PriceResponse
-from app.orchestrator import flag_coin_premium_outliers, run
+from app.orchestrator import (
+    flag_bar_premium_outliers,
+    flag_coin_premium_outliers,
+    run,
+)
 from app.portfolio import router as portfolio_router
 from app.rate_limit import IPRateLimiter
 from app.reports.builder import build_report
@@ -339,6 +343,33 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
                         "fetched_at": fetched_at.isoformat(),
                     }
 
+    # Re-derive bar premiums against the canonical spot and re-run the
+    # outlier fence before persisting — the same thing the coin path does
+    # below, for the same reason.
+    #
+    # orchestrator.run() computes premium and fences only when *its own*
+    # spot lookup succeeded. The four size runs each fetch spot
+    # independently, so a run that timed out on api.gold-api.com produced
+    # listings with premium_pct=None that the fence skips entirely — and we
+    # persisted them anyway, filling spot_gold_dkk_per_g from whichever run
+    # did get a spot. The row then looks checkable and never was, and every
+    # downstream reader (/history, buy_context, alerts, reports) recomputes
+    # premium from exactly those two columns.
+    #
+    # Pinning all four sizes to one spot value also closes the gap where the
+    # /snapshot outlier guard validated only the first run's spot while
+    # three other, unvalidated values were written to disk.
+    if spot_gold_dkk is not None and spot_gold_dkk > 0:
+        for r in results:
+            ref_dkk_per_g = float(spot_gold_dkk)
+            for li in r.listings:
+                if li.status == "ok" and li.price_dkk is not None:
+                    ref_total = ref_dkk_per_g * r.size_g
+                    li.premium_pct = round(
+                        (li.price_dkk - ref_total) / ref_total * 100, 2
+                    )
+            flag_bar_premium_outliers(r.listings, r.size_g)
+
     bar_rows = [
         (
             fetched_at,
@@ -348,7 +379,7 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
             li.price_dkk,
             li.brand,
             li.error,
-            spot_gold_dkk if r.spot is None else r.spot.gold.per_gram_dkk,
+            spot_gold_dkk,
         )
         for r in results for li in r.listings
     ]
