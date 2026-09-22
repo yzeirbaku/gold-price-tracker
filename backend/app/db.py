@@ -48,6 +48,15 @@ CREATE TABLE IF NOT EXISTS bar_snapshots (
 CREATE INDEX IF NOT EXISTS idx_bar_snapshots_lookup
     ON bar_snapshots (dealer, size_g, fetched_at DESC);
 
+-- Time-first companion to the lookup index above. The /alerts list asks
+-- "cheapest dealer in the last 90 minutes" per target and never filters on
+-- `dealer`, so it cannot use a dealer-leading index and the planner fell back
+-- to a parallel seq scan. Measured on prod 2026-09-22: 80 ms across 90k bar
+-- rows, and growing linearly with the 20-min cron. Narrowing on fetched_at
+-- first turns that into ~100 rows.
+CREATE INDEX IF NOT EXISTS idx_bar_snapshots_time
+    ON bar_snapshots (fetched_at DESC);
+
 CREATE TABLE IF NOT EXISTS spot_snapshots (
     id BIGSERIAL PRIMARY KEY,
     fetched_at TIMESTAMPTZ NOT NULL,
@@ -79,6 +88,13 @@ CREATE TABLE IF NOT EXISTS coin_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_coin_snapshots_lookup
     ON coin_snapshots (dealer, coin_type, fine_gold_g, fetched_at DESC);
+
+-- Same rationale as idx_bar_snapshots_time, and this was the worse of the
+-- two: the coin table is bigger (247k rows on prod 2026-09-22) and the
+-- ABS(fine_gold_g - $2) < 0.005 tolerance join is not index-usable either,
+-- so /alerts spent ~709 ms here alone.
+CREATE INDEX IF NOT EXISTS idx_coin_snapshots_time
+    ON coin_snapshots (fetched_at DESC);
 
 CREATE TABLE IF NOT EXISTS report_archive (
     id            BIGSERIAL PRIMARY KEY,
@@ -163,6 +179,11 @@ CREATE INDEX IF NOT EXISTS idx_alerts_user ON alerts (user_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_enabled ON alerts (enabled) WHERE enabled = TRUE;
 """
 
+# Budget for the one-shot schema bootstrap. Generous because it is paid once
+# per process start and covers index builds over the snapshot tables, not
+# because any single statement is expected to be slow.
+SCHEMA_BOOTSTRAP_TIMEOUT_S = 120.0
+
 _pool: asyncpg.Pool | None = None
 
 
@@ -176,15 +197,29 @@ async def get_pool() -> asyncpg.Pool | None:
         return None
     # Neon requires SSL; their connection strings already include sslmode=require
     # but asyncpg ignores that param and needs the kwarg explicitly.
-    _pool = await asyncpg.create_pool(
+    pool = await asyncpg.create_pool(
         dsn=dsn,
         min_size=1,
         max_size=4,
         command_timeout=10.0,
         ssl="require" if "sslmode=require" in dsn or "neon.tech" in dsn else None,
     )
-    async with _pool.acquire() as conn:
-        await conn.execute(SCHEMA_SQL)
+    # Publish to the global ONLY after the bootstrap succeeds. Assigning first
+    # would mean a failed SCHEMA_SQL leaves a usable pool behind, so the early
+    # `if _pool is not None` return above skips the bootstrap forever and the
+    # schema silently stays half-applied until the next process restart.
+    try:
+        async with pool.acquire() as conn:
+            # Per-call timeout overrides the pool's command_timeout=10.0, which
+            # is sized for request-path queries, not for DDL. CREATE INDEX over
+            # the snapshot tables (247k coin rows and growing) can outrun 10s on
+            # a cold Neon compute; blowing the budget would roll the whole
+            # script back.
+            await conn.execute(SCHEMA_SQL, timeout=SCHEMA_BOOTSTRAP_TIMEOUT_S)
+    except BaseException:
+        await pool.close()
+        raise
+    _pool = pool
     logger.info("db pool initialized")
     return _pool
 
