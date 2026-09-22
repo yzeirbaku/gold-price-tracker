@@ -33,3 +33,30 @@ async def test_fetch_spot_returns_none_on_http_error() -> None:
     result = await fetch_spot_usd_per_gram(mock_client)
 
     assert result is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"price": None, "symbol": "XAU"},   # 200 with a null price
+        {"symbol": "XAU"},                  # key absent entirely
+        ["unexpected", "shape"],            # list where an object belongs
+    ],
+    ids=["null-price", "missing-key", "list-body"],
+)
+@pytest.mark.asyncio
+async def test_fetch_spot_returns_none_on_malformed_200(payload) -> None:
+    """A 200 carrying junk must degrade to None, not raise.
+
+    float(None) raises TypeError and a list subscript raises TypeError too.
+    Neither is an httpx error, so before this was guarded the exception
+    escaped a function documented as "or None on failure" — which made
+    /spot, /prices, /coins and the /snapshot cron all 500 together.
+    """
+    resp = AsyncMock()
+    resp.json = lambda: payload
+    resp.raise_for_status = lambda: None
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get.side_effect = [resp, resp]
+
+    assert await fetch_spot_usd_per_gram(mock_client) is None

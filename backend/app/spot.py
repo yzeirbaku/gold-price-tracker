@@ -57,7 +57,14 @@ async def fetch_spot_usd_per_gram(client: httpx.AsyncClient) -> dict[str, float]
             "gold": gold_oz / OUNCE_TO_GRAM,
             "silver": silver_oz / OUNCE_TO_GRAM,
         }
-    except (httpx.HTTPError, KeyError, ValueError) as e:
+    except (httpx.HTTPError, KeyError, ValueError, TypeError) as e:
+        # TypeError matters as much as the rest: a 200 carrying
+        # {"price": null} makes float(None) raise, and an upstream that
+        # returns a list instead of an object makes the subscript raise.
+        # Without it the exception escapes a function whose contract is
+        # "or None on failure", and every caller's degradation path
+        # (/spot's None branch, /snapshot's skip, /prices, /coins) is
+        # bypassed at once.
         logger.exception("spot fetch failed: %s", e)
         return None
 

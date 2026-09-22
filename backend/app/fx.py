@@ -46,7 +46,12 @@ async def fetch_usd_to(client: httpx.AsyncClient) -> tuple[dict[str, float], boo
         data = resp.json()
         rates = data["rates"]
         return {"EUR": float(rates["EUR"]), "DKK": float(rates["DKK"])}, False
-    except (httpx.HTTPError, KeyError, ValueError) as e:
+    except (httpx.HTTPError, KeyError, ValueError, TypeError) as e:
+        # TypeError included for the same reason fetch_usd_to_dkk_on lists
+        # it: a 200 carrying {"rates": null} or {"rates": {"DKK": null}}
+        # raises on subscript/float() rather than erroring at the HTTP
+        # layer, and letting that escape defeats the stale-fallback
+        # contract this function documents.
         logger.warning("FX fetch failed; using static fallback: %s", e)
         return STATIC_FALLBACK.copy(), True
 

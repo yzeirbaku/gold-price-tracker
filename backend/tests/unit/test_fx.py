@@ -105,3 +105,32 @@ async def test_historical_fx_cached_after_first_lookup() -> None:
     await fetch_usd_to_dkk_on(mock_client, date(2026, 5, 14))
     await fetch_usd_to_dkk_on(mock_client, date(2026, 5, 14))
     assert mock_client.get.call_count == 1  # second call served from cache
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"rates": None},                        # 200 with null rates
+        {"rates": {"EUR": None, "DKK": None}},  # 200 with null values
+        {"rates": []},                          # list where an object belongs
+    ],
+    ids=["null-rates", "null-values", "list-rates"],
+)
+@pytest.mark.asyncio
+async def test_fetch_usd_to_falls_back_on_malformed_200(payload) -> None:
+    """A 200 carrying junk must hit the stamped fallback, not raise.
+
+    This is the contract the docstring promises. TypeError from a null
+    subscript or float(None) is not an httpx error, so before this was
+    guarded it escaped and took every price endpoint down with it.
+    """
+    mock_response = AsyncMock()
+    mock_response.json = lambda: payload
+    mock_response.raise_for_status = lambda: None
+    mock_client = AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get.return_value = mock_response
+
+    rates, stale = await fetch_usd_to(mock_client)
+
+    assert rates == STATIC_FALLBACK
+    assert stale is True
