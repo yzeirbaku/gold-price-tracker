@@ -254,6 +254,29 @@ function openDialog(dlg, focusEl = null) {
   });
 }
 
+// Cancel/Close buttons are `type="button"`, not submit, and close their
+// dialog from here.
+//
+// Why: inside a `<form method="dialog">` the FIRST submit button is the
+// form's default button for implicit submission. Our `<menu>` lists Cancel
+// before Save (the button-order convention in CLAUDE.md), so pressing Enter
+// in any field submitted via Cancel — and `formnovalidate` meant even
+// `required` fields didn't block it. Every submit handler bails on
+// `submitter.value === 'cancel'` without preventDefault(), so the dialog
+// just closed and `form.reset()` wiped the entry on next open: fill in all
+// eight Add-purchase fields, press Enter in the price box, lose everything.
+// Making Cancel a plain button leaves Save as the default button and keeps
+// the visual order intact.
+document.addEventListener('click', (e) => {
+  // Guard the target: this is a document-level listener, and a throw here
+  // would break every other click handler on the page.
+  if (!(e.target instanceof Element)) return;
+  const btn = e.target.closest('dialog menu button[value="cancel"]');
+  if (!btn) return;
+  const dlg = btn.closest('dialog');
+  if (dlg) dlg.close('cancel');
+});
+
 let lastSize = null;
 let hasRenderedSpot = false;
 let lastListings = [];           // cached so we can re-sort without re-fetching
@@ -1719,6 +1742,12 @@ async function loadPortfolio() {
   tableEl.hidden = true;
   emptyEl.hidden = true;
   summaryEl.innerHTML = '';
+  // `loadingEl` doubles as the error slot. Hiding it unconditionally in a
+  // `finally` also ran on the error `return`, wiping the message that had
+  // just been written — and since the table, empty state and summary were
+  // all cleared above, a 500 rendered a completely blank card that looked
+  // identical to "you have no purchases".
+  let failed = false;
   try {
     const res = await fetch(`${BACKEND_URL}/portfolio`, { headers: authHeaders() });
     if (res.status === 401) {
@@ -1726,6 +1755,7 @@ async function loadPortfolio() {
       showPricesView(); openLoginDialog(); return;
     }
     if (!res.ok) {
+      failed = true;
       loadingEl.textContent = await userFacingError({ res, fallback: 'Could not load portfolio.' });
       return;
     }
@@ -1735,9 +1765,10 @@ async function loadPortfolio() {
     renderPortfolioTable(data.purchases);
     loadPortfolioHistory();
   } catch (err) {
+    failed = true;
     loadingEl.textContent = await userFacingError({ err, fallback: 'Could not load portfolio.' });
   } finally {
-    loadingEl.hidden = true;
+    if (!failed) loadingEl.hidden = true;
   }
 }
 
@@ -2574,6 +2605,9 @@ async function loadAlerts() {
   loadingEl.innerHTML = '<div class="spinner"><span></span><span></span><span></span></div><div class="loading-text">Loading alerts…</div>';
   emptyEl.hidden = true;
   tableEl.hidden = true;
+  // See loadPortfolio — same shape, same reason. The `finally` used to hide
+  // the element carrying the error message.
+  let failed = false;
   try {
     const res = await fetch(`${BACKEND_URL}/alerts`, { headers: authHeaders() });
     if (res.status === 401) {
@@ -2581,6 +2615,7 @@ async function loadAlerts() {
       showPricesView(); openLoginDialog(); return;
     }
     if (!res.ok) {
+      failed = true;
       loadingEl.textContent = await userFacingError({ res, fallback: 'Could not load alerts.' });
       return;
     }
@@ -2588,9 +2623,10 @@ async function loadAlerts() {
     alertsCache = data.alerts || [];
     renderAlerts();
   } catch (err) {
+    failed = true;
     loadingEl.textContent = await userFacingError({ err, fallback: 'Could not load alerts.' });
   } finally {
-    loadingEl.hidden = true;
+    if (!failed) loadingEl.hidden = true;
   }
 }
 

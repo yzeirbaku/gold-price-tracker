@@ -265,7 +265,7 @@
         </fieldset>
         <div id="login-error" class="dialog-error" hidden></div>
         <menu>
-          <button value="cancel" type="submit" formnovalidate>Cancel</button>
+          <button value="cancel" type="button">Cancel</button>
           <button id="login-submit" value="save" type="submit">Send link</button>
         </menu>
         <!-- iOS PWA workaround: tapping the email link opens Safari, not the
@@ -286,7 +286,7 @@
         <p>Check your inbox. We sent a link to <strong id="login-stage-2-email"></strong>.</p>
         <p class="dialog-helper">After you click it, this tab will sign in automatically.</p>
         <menu>
-          <button value="cancel" type="submit" formnovalidate>Close</button>
+          <button value="cancel" type="button">Close</button>
         </menu>
       </div>
     </form>
@@ -332,7 +332,7 @@
       </div>
       <div id="purchase-error" class="dialog-error" hidden></div>
       <menu>
-        <button value="cancel" type="submit" formnovalidate>Cancel</button>
+        <button value="cancel" type="button">Cancel</button>
         <button id="purchase-submit" value="save" type="submit">Save</button>
       </menu>
     </form>
@@ -382,7 +382,7 @@
       </fieldset>
       <div id="alert-error" class="dialog-error" hidden></div>
       <menu>
-        <button value="cancel" type="submit" formnovalidate>Cancel</button>
+        <button value="cancel" type="button">Cancel</button>
         <button id="alert-submit" value="save" type="submit">Save</button>
       </menu>
     </form>
@@ -393,7 +393,7 @@
       <h2 id="confirm-dialog-title">Confirm</h2>
       <p id="confirm-dialog-message"></p>
       <menu>
-        <button value="cancel" formnovalidate>Cancel</button>
+        <button value="cancel" type="button">Cancel</button>
         <button id="confirm-dialog-ok" value="save">Confirm</button>
       </menu>
     </form>
@@ -418,7 +418,7 @@
         </label>
       </fieldset>
       <menu>
-        <button value="cancel" formnovalidate>Cancel</button>
+        <button value="cancel" type="button">Cancel</button>
         <button id="save-settings" value="save">Save</button>
       </menu>
     </form>
@@ -429,6 +429,6 @@
   <!-- Chart.js v4, pinned. UMD min build, ~80KB gzip. No date adapter — we use linear scale + ms timestamps with a custom tick formatter. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="config.js?v=111"></script>
-  <script src="app.js?v=122"></script>
+  <script src="app.js?v=123"></script>
 </body>
 </html>
