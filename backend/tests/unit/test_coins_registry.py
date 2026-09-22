@@ -100,3 +100,41 @@ def test_resolve_returns_helper_quantized_fine_gold_g() -> None:
     assert out is not None
     _, _, gross_g, purity, fine_g = out
     assert fine_g == fine_gold_g(gross_g, purity)
+
+
+@pytest.mark.parametrize(
+    "title,expected_size",
+    [
+        ("1/2 Sovereign 2023", "Half"),
+        ("1/4 Sovereign", "Quarter"),
+        ("Half Sovereign", "Half"),
+        ("Quarter Sovereign", "Quarter"),
+        ("Full Sovereign 1974", "Full"),
+        ("Sovereign 1974", "Full"),          # bare -> full, the documented default
+        ("Britannia Sovereign 2024", "Full"),  # falls through Britannia to Sovereign
+    ],
+)
+def test_sovereign_fraction_titles_resolve_to_the_right_size(title, expected_size):
+    """The Full default must not swallow fractional Sovereigns.
+
+    The guard used to test only the English words "half"/"quarter", so
+    "1/2 Sovereign" resolved to Full — 7.3244 g fine instead of 3.6576 g,
+    double the real gold content. That wrong fine_gold_g became both the
+    premium denominator (driving the listing outside the coin outlier
+    bounds, so it silently vanished from /coins) and the alert bucketing
+    key.
+    """
+    result = resolve(title)
+    assert result is not None, title
+    coin_type, size_label, _gross, _purity, _fine = result
+    assert (coin_type, size_label) == ("Sovereign", expected_size)
+
+
+def test_sovereign_fraction_fine_weights_are_distinct():
+    """Half must be ~half of Full, and Quarter ~a quarter. Guards against a
+    future refactor collapsing them back onto one entry."""
+    full = resolve("Full Sovereign")[4]
+    half = resolve("1/2 Sovereign")[4]
+    quarter = resolve("1/4 Sovereign")[4]
+    assert half == pytest.approx(full / 2, rel=0.02)
+    assert quarter == pytest.approx(full / 4, rel=0.02)

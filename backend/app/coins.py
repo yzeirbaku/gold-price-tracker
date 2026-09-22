@@ -247,10 +247,6 @@ def resolve(title: str) -> tuple[str, str, float, float, float] | None:
     for coin_type, aliases in _TYPE_ALIASES.items():
         if not any(a in tl for a in aliases):
             continue
-        # Sovereign default — bare "sovereign" with no qualifier means Full.
-        if coin_type == "Sovereign" and "half" not in tl and "quarter" not in tl:
-            gross_g, purity = COINS["Sovereign"]["Full"]
-            return ("Sovereign", "Full", gross_g, purity, fine_gold_g(gross_g, purity))
         # Try size labels by specificity descending, so "1/10 oz" beats
         # "1 oz" on titles that contain both substrings.
         candidates = sorted(
@@ -272,5 +268,18 @@ def resolve(title: str) -> tuple[str, str, float, float, float] | None:
                         coin_type, size_label, gross_g, purity,
                         fine_gold_g(gross_g, purity),
                     )
+        # Sovereign default — a bare "sovereign" with no size qualifier means
+        # the full coin.
+        #
+        # This MUST run after size matching, not before it. It used to sit at
+        # the top of the loop guarded by `"half" not in tl and "quarter" not
+        # in tl`, which only knew the English words — so "1/2 Sovereign" and
+        # "1/4 Sovereign" returned Full and reported 2x and 4x the actual
+        # gold content, and the "1/2 sovereign"/"1/4 sovereign" entries in
+        # _SIZE_ALIASES were unreachable dead code. Running last makes the
+        # aliases authoritative and keeps this a genuine fallback.
+        if coin_type == "Sovereign":
+            gross_g, purity = COINS["Sovereign"]["Full"]
+            return ("Sovereign", "Full", gross_g, purity, fine_gold_g(gross_g, purity))
         # Fall through to next coin_type instead of giving up immediately.
     return None
