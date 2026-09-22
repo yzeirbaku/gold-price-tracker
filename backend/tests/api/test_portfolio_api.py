@@ -3,6 +3,7 @@
 Historical spot is stubbed in conftest.mock_external so writes don't depend
 on yfinance / frankfurter.
 """
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -152,3 +153,101 @@ async def test_delete_unknown_id_returns_404(client, pool):
     _, token = await make_session(pool)
     r = await client.delete(f"/portfolio/{uuid4()}", headers=auth_headers(token))
     assert r.status_code == 404
+
+
+async def test_create_clamps_a_future_noon_stamp_into_the_history_window(client, pool):
+    """A purchase added before noon UTC must show up on the value chart.
+
+    The frontend stamps date-only input as T12:00:00Z, which is ahead of the
+    server clock for anyone submitting before noon UTC. _reconstruct_value_series
+    advances on `purchased_at <= t`, so an un-clamped stamp read as "not yet
+    held" and the chart reported 0 while the summary card reported the real
+    value.
+    """
+    _, token = await make_session(pool)
+    today = datetime.now(UTC).date()
+    r = await client.post(
+        "/portfolio",
+        json={
+            "metal": "gold", "gross_weight_g": "10", "purity": "1",
+            "price_paid_dkk": "8000", "purchased_at": f"{today.isoformat()}T12:00:00Z",
+            "label": "Noon stamp",
+        },
+        headers=auth_headers(token),
+    )
+    assert r.status_code == 201, r.text
+    stored = datetime.fromisoformat(r.json()["purchased_at"])
+    assert stored <= datetime.now(UTC), "purchased_at must never be in the future"
+    # The UTC date is preserved — that is what drives the spot lookup.
+    assert stored.astimezone(UTC).date() == today
+
+
+async def test_patch_clamps_a_future_noon_stamp(client, pool):
+    _, token = await make_session(pool)
+    created = (await client.post(
+        "/portfolio",
+        json={
+            "metal": "gold", "gross_weight_g": "10", "purity": "1",
+            "price_paid_dkk": "8000", "purchased_at": "2026-01-15T12:00:00Z",
+            "label": "Bar",
+        },
+        headers=auth_headers(token),
+    )).json()
+    today = datetime.now(UTC).date()
+    r = await client.patch(
+        f"/portfolio/{created['id']}",
+        json={"purchased_at": f"{today.isoformat()}T12:00:00Z"},
+        headers=auth_headers(token),
+    )
+    assert r.status_code == 200, r.text
+    assert datetime.fromisoformat(r.json()["purchased_at"]) <= datetime.now(UTC)
+
+
+async def test_create_accepts_a_naive_iso_timestamp(client, pool):
+    """An offset-less ISO string is ordinary input. It used to escape the
+    validator as a TypeError (naive vs aware compare) and surface as a 500
+    rather than being read as UTC."""
+    _, token = await make_session(pool)
+    r = await client.post(
+        "/portfolio",
+        json={
+            "metal": "gold", "gross_weight_g": "10", "purity": "1",
+            "price_paid_dkk": "8000", "purchased_at": "2026-01-15T12:00:00",
+            "label": "Naive",
+        },
+        headers=auth_headers(token),
+    )
+    assert r.status_code == 201, r.text
+    assert datetime.fromisoformat(r.json()["purchased_at"]).tzinfo is not None
+
+
+@pytest.mark.parametrize(
+    "payload,expect",
+    [
+        ({"purchased_at": None}, 400),
+        ({"metal": None}, 400),
+        ({"label": None}, 400),
+        ({"gross_weight_g": None}, 400),
+        ({"dealer": None}, 200),   # genuinely nullable — clearing is allowed
+        ({"notes": None}, 200),
+    ],
+    ids=["purchased_at", "metal", "label", "gross_weight", "dealer", "notes"],
+)
+async def test_patch_null_handling(client, pool, payload, expect):
+    """Explicit nulls on NOT NULL columns must 400, not 500 — while the two
+    genuinely nullable columns stay clearable."""
+    _, token = await make_session(pool)
+    created = (await client.post(
+        "/portfolio",
+        json={
+            "metal": "gold", "gross_weight_g": "10", "purity": "1",
+            "price_paid_dkk": "8000", "purchased_at": "2026-01-15T12:00:00Z",
+            "label": "Bar", "dealer": "Tavex", "notes": "n",
+        },
+        headers=auth_headers(token),
+    )).json()
+
+    r = await client.patch(
+        f"/portfolio/{created['id']}", json=payload, headers=auth_headers(token),
+    )
+    assert r.status_code == expect, r.text

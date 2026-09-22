@@ -39,6 +39,11 @@ _ALLOWED_UPDATE_COLS: frozenset[str] = frozenset({
     "label", "dealer", "notes", "spot_at_purchase_dkk_per_g",
 })
 
+# The only two columns a PATCH may legitimately set back to NULL. Everything
+# else in _ALLOWED_UPDATE_COLS is NOT NULL in the schema, so an explicit
+# JSON null there is a client error, not a request to clear the field.
+_NULLABLE_UPDATE_COLS: frozenset[str] = frozenset({"dealer", "notes"})
+
 
 # Small tolerance to absorb clock skew between client and server when a user
 # submits a purchase at "now" — without it, a request stamped at the moment
@@ -68,12 +73,41 @@ def _reject_future_purchased_at(v: datetime) -> datetime:
     The 5-min tolerance branch is kept as a midnight-rollover safety net —
     a "now" submission whose client clock is microseconds ahead can land on
     tomorrow's UTC date right at 00:00."""
+    if v.tzinfo is None:
+        # Pydantic parses an offset-less ISO string ("2026-01-15T12:00:00")
+        # into a naive datetime. Comparing that to an aware `now` raises
+        # TypeError, and pydantic v2 only converts ValueError/AssertionError
+        # into a 422 — so an ordinary ISO-8601 body used to 500. Every other
+        # timestamp in this app is UTC; read a bare one the same way.
+        v = v.replace(tzinfo=UTC)
     now = datetime.now(UTC)
     if v <= now + _FUTURE_PURCHASED_AT_TOLERANCE:
         return v
     if v.astimezone(UTC).date() > now.date():
         raise ValueError("Purchase date cannot be in the future")
     return v
+
+
+def _clamp_purchased_at_to_now(v: datetime) -> datetime:
+    """Never persist a `purchased_at` ahead of the server clock.
+
+    The frontend stamps a date-only input as `T12:00:00Z` so the historical
+    spot lookup lands mid-trading-day, and `_reject_future_purchased_at`
+    deliberately allows it. But for anyone submitting before noon UTC — most
+    of the working day in Denmark — that instant is in the *future*, and
+    everything that asks "was this held at time t" answers no:
+    `_reconstruct_value_series` advances on `purchased_at <= t`, and
+    `portfolio_history` clamps its window to `first_purchase_at`.
+
+    The visible symptom was a chart reading 0 while the summary card read
+    the real value, and a first-ever purchase falling into the "not enough
+    snapshot history" empty state for hours after being added.
+
+    Clamping keeps the convention where it actually matters — the UTC *date*
+    is what drives the spot lookup, and the same-day branch still fires —
+    while guaranteeing the stored instant is never ahead of now.
+    """
+    return min(v, datetime.now(UTC))
 
 
 class PurchaseCreate(BaseModel):
@@ -272,7 +306,8 @@ async def create_purchase(
     pool = await get_pool()
     if pool is None:
         raise HTTPException(status_code=503, detail="database not configured")
-    spot_at_purchase = await _fetch_historical_spot_dkk_per_g(body.metal, body.purchased_at)
+    purchased_at = _clamp_purchased_at_to_now(body.purchased_at)
+    spot_at_purchase = await _fetch_historical_spot_dkk_per_g(body.metal, purchased_at)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "INSERT INTO purchases ("
@@ -280,7 +315,7 @@ async def create_purchase(
             "  label, dealer, notes, spot_at_purchase_dkk_per_g"
             ") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *",
             user.id, body.metal, body.gross_weight_g, body.purity, body.price_paid_dkk,
-            body.purchased_at, body.label, body.dealer, body.notes, spot_at_purchase,
+            purchased_at, body.label, body.dealer, body.notes, spot_at_purchase,
         )
     current = await _current_spot_dkk_per_g()
     return _decorate(dict(row), current)
@@ -298,6 +333,22 @@ async def update_purchase(
     updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="no fields to update")
+    # `exclude_unset` keeps an explicitly-sent null, so `updates.get(k,
+    # existing[k])` below would return None rather than the existing value.
+    # For the NOT NULL columns that meant either an AttributeError on
+    # None.astimezone() or a NotNullViolationError from the UPDATE — a 500
+    # either way. `dealer` and `notes` are genuinely nullable, so clearing
+    # those stays allowed.
+    null_fields = sorted(
+        k for k, v in updates.items() if v is None and k not in _NULLABLE_UPDATE_COLS
+    )
+    if null_fields:
+        raise HTTPException(
+            status_code=400,
+            detail=f"field(s) cannot be null: {', '.join(null_fields)}",
+        )
+    if "purchased_at" in updates:
+        updates["purchased_at"] = _clamp_purchased_at_to_now(updates["purchased_at"])
 
     async with pool.acquire() as conn:
         existing = await conn.fetchrow(
@@ -328,6 +379,12 @@ async def update_purchase(
             f"WHERE id = ${len(values) - 1} AND user_id = ${len(values)} RETURNING *"
         )
         row = await conn.fetchrow(sql, *values)
+    if row is None:
+        # The ownership SELECT and this UPDATE are separate statements, so
+        # the row can be deleted in between (two tabs, or a Delete racing a
+        # Save). Return the 404 the SELECT would have given rather than a
+        # TypeError from dict(None).
+        raise HTTPException(status_code=404, detail="purchase not found")
     current = await _current_spot_dkk_per_g()
     return _decorate(dict(row), current)
 
