@@ -171,7 +171,11 @@ header h1 {
 .menu-icon {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  /* Flush-left, not centered. The slot is 1.5rem but the glyph inside is
+     14px, so centering floated every icon ~5px right of --menu-inset and
+     broke the rail the brand and the account line sit on. The slot keeps
+     its width so the labels stay on their own rail. */
+  justify-content: flex-start;
   width: 1.5rem; height: 1.5rem;
   flex: 0 0 1.5rem;
   margin-right: 0.6rem;
