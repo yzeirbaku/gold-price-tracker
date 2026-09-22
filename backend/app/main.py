@@ -39,6 +39,7 @@ from app.reports.windows import (
     previous_calendar_week,
     rolling_last_n_days,
 )
+from app.retention import prune_snapshots
 from app.scrapers.base import DEFAULT_HEADERS, DealerScraper, now_utc
 from app.scrapers.registry import ALL_COIN_SCRAPERS, ALL_SCRAPERS
 from app.spot import fetch_spot_usd_per_gram
@@ -83,6 +84,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     await prune_old_reports(conn)
             except Exception as e:
                 logger.warning("report retention prune failed at startup: %s", e)
+            # Snapshot retention. Batched internally, so the first run on a
+            # never-pruned table (hundreds of thousands of rows) doesn't stall
+            # boot on one huge DELETE. Best-effort for the same reason as
+            # above: a full disk is a problem, but so is refusing to serve.
+            try:
+                async with pool.acquire() as conn:
+                    await prune_snapshots(conn)
+            except Exception as e:
+                logger.warning("snapshot retention prune failed at startup: %s", e)
     # `try/finally` around the yield: matches the unconditional shutdown
     # behavior of the previous @app.on_event("shutdown") decorator. Without
     # the finally, a raise during runtime that propagates into the lifespan
@@ -419,6 +429,18 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
     # guards above already gated us; whatever evaluate_alerts reads from the
     # just-committed bar_rows/coin_rows is data we trust.
     await evaluate_alerts(pool, fetched_at, bar_rows, coin_rows)
+
+    # Retention runs last: after the write has committed and after alerts have
+    # gone out, so a slow or failing prune can never delay an alert email or
+    # roll back a snapshot. Every 20 minutes it clears roughly one tick's
+    # worth of expired rows, which keeps each DELETE tiny and avoids ever
+    # needing a big monthly cleanup. Best-effort — a failed prune costs disk,
+    # a 500 here costs the snapshot (QStash would re-run the whole fan-out).
+    try:
+        async with pool.acquire() as conn:
+            await prune_snapshots(conn)
+    except Exception as e:
+        logger.warning("snapshot retention prune failed after snapshot: %s", e)
 
     return {
         "ok": True,

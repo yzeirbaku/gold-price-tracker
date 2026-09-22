@@ -159,13 +159,55 @@ and a 500 would make QStash re-run `build_report` over a whole month).
 **Pruning is destructive and no endpoint rebuilds an arbitrary past period.**
 `/reports/cron/{type}` only ever builds the *previous* calendar week/month and
 `/reports/generate` is rolling last-7/last-30 and isn't persisted. The
-bar/coin/spot snapshot tables are never pruned, so a dropped report is still
-reconstructible by calling `build_report()` with a hand-made `Window` — but
-that's a code change, not an API call. `today` comes from **Postgres's** clock
+snapshot tables outlive the reports built from them, so a dropped report is
+still reconstructible by calling `build_report()` with a hand-made `Window` —
+but that's a code change, not an API call, and only within the snapshot
+retention window (see below: bar/coin keep 90 days, spot keeps everything). `today` comes from **Postgres's** clock
 (`SELECT (NOW() AT TIME ZONE 'Europe/Copenhagen')::date`), not the
 container's: this is an irreversible DELETE keyed entirely on the current
 date, and a VM whose clock drifts forward would otherwise compute a
 far-future cutoff and wipe the whole archive on the next boot.
+
+## Snapshot retention
+
+`app/retention.py` prunes `bar_snapshots` + `coin_snapshots` past
+`RETENTION_DAYS` (90). Runs at startup and at the end of every `/snapshot`
+tick, both best-effort. Measured 2026-09-22 before it existed: 297 MB total,
+of which `coin_snapshots` was 233 MB (81%) and `bar_snapshots` 54 MB, growing
+~63 MB/month unbounded. Steady state at 90 days is ~190 MB and flat.
+
+**`spot_snapshots` is deliberately NOT prunable, and there is a test asserting
+it stays out of `PRUNABLE_TABLES`.** `/portfolio/history?range=all|1y` reads it
+back to the user's first purchase to draw value-over-time, making it the one
+snapshot table with genuinely unbounded lookback. It is also ~0.3 MB/month —
+pruning it would break the portfolio chart to save nothing.
+
+Every other reader of bar/coin snapshots is bounded, which is what makes 90
+days safe: `/history/{bar,coin}` caps at 30d, `/context/...` uses
+`buy_context` `window_days=30` (never overridden at the call sites),
+`/alerts` looks back 90 minutes, and the reports loader takes an explicit
+`[start_dt, end_dt)`. The binding constraint is the monthly report cron —
+it builds the *previous* calendar month, ~32 days back when it fires on the
+1st and more if re-run late. Archived reports are already-rendered HTML and
+never re-read their source rows.
+
+**Purchases are unaffected by any of this.** `spot_at_purchase_dkk_per_g` is
+frozen onto the row at write time from yfinance, not read from
+`spot_snapshots`, so P&L can't shift when snapshots are pruned.
+
+Deletes are batched (`DELETE_BATCH_SIZE = 10_000` via a `ctid IN (SELECT …
+LIMIT n)` loop). The first prod run had 265k expired coin rows; one unbounded
+DELETE would blow the pool's 10s `command_timeout`, hold a long transaction
+and write one huge WAL burst. `PRUNABLE_TABLES` is a whitelist checked in
+`_prune_table` — table names can't be parameterized, so that check is what
+keeps the f-string safe.
+
+**Pruning stops growth; it does not shrink the database.** Postgres marks
+tuples dead and autovacuum makes the space reusable by that table, but
+returning it to the OS needs `VACUUM FULL` (ACCESS EXCLUSIVE lock, ~2x table
+size free during the rewrite). On Neon, storage also includes PITR history, so
+a big DELETE can raise the number before it falls. Reclaiming is a deliberate
+manual step, not part of the job.
 
 ## Portfolio + magic-link auth
 
