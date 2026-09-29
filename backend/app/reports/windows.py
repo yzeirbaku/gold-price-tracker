@@ -70,6 +70,21 @@ def previous_calendar_month(now: datetime) -> Window:
     )
 
 
+# The weekly cron fires Sunday 22:30 UTC. That is 00:30 Monday in Copenhagen
+# only under summer time; under winter time it is 23:30 Sunday, which made
+# `previous_calendar_week` return the week BEFORE last all winter and skip a
+# week at the spring change. Evaluating the window a couple of hours later
+# lands on Monday in both seasons without touching the QStash schedule.
+_WEEKLY_CRON_GRACE = timedelta(hours=2)
+
+
+def cron_window(kind: WindowKind, now: datetime) -> Window:
+    """The window a scheduled report run at `now` should cover."""
+    if kind == "weekly":
+        return previous_calendar_week(now + _WEEKLY_CRON_GRACE)
+    return previous_calendar_month(now)
+
+
 def rolling_last_n_days(now: datetime, n: int) -> Window:
     """Rolling N-day window ending at `now` (Europe/Copenhagen).
 

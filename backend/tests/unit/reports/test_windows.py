@@ -1,9 +1,10 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from app.reports.windows import (
+    cron_window,
     previous_calendar_month,
     previous_calendar_week,
     rolling_last_n_days,
@@ -89,3 +90,22 @@ def test_window_dataclass_is_frozen() -> None:
     w = previous_calendar_week(now)
     with pytest.raises(AttributeError):
         w.label = "changed"  # type: ignore[misc]
+
+
+def test_weekly_cron_covers_last_week_under_winter_time() -> None:
+    """Sun 22:30 UTC is 23:30 Sunday in CET — still the last full week."""
+    w = cron_window("weekly", datetime(2026, 11, 22, 22, 30, tzinfo=UTC))
+    assert (w.period_start, w.period_end) == (date(2026, 11, 16), date(2026, 11, 22))
+
+
+def test_weekly_cron_covers_last_week_under_summer_time() -> None:
+    w = cron_window("weekly", datetime(2026, 7, 19, 22, 30, tzinfo=UTC))
+    assert (w.period_start, w.period_end) == (date(2026, 7, 13), date(2026, 7, 19))
+
+
+def test_weekly_cron_does_not_skip_the_spring_change_week() -> None:
+    # 28-03-2027 is the last Sunday of March (DST starts that night).
+    before = cron_window("weekly", datetime(2027, 3, 21, 22, 30, tzinfo=UTC))
+    after = cron_window("weekly", datetime(2027, 3, 28, 22, 30, tzinfo=UTC))
+    assert before.period_start == date(2027, 3, 15)
+    assert after.period_start == date(2027, 3, 22)

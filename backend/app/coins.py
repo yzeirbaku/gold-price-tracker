@@ -18,6 +18,7 @@ Sources for weights/purity:
   spec — they're tracked as separate size_labels so per-monarch premiums
   surface independently.
 """
+import re
 from decimal import Decimal
 
 # Single source of truth for how fine_gold_g is computed and quantized.
@@ -225,6 +226,21 @@ def _size_specificity(size_label: str) -> int:
     return len(size_label)  # for "Full"/"Half"/"30 g"/"1 ducat"/etc.
 
 
+def _size_alias_in(alias: str, tl: str) -> bool:
+    """Whole-token match for a size alias in a lowercased title.
+
+    A plain substring test let "1 g" match inside "2021 guld" and "3 g"
+    inside "2023 gold", so a "Panda 2021 ... 1/2 oz" resolved as 1 g — the
+    gram labels rank above "1/2 oz" by specificity and were tried first.
+    The alias must not continue a number on its left (digit, "/", "." or
+    ","), and when it ends in a letter or digit it must not run on into a
+    word on its right ("1 g" in "1 guldmønt").
+    """
+    lead = r"(?<![\d/.,])"
+    trail = r"(?![a-z0-9æøå])" if alias[-1].isalnum() else ""
+    return re.search(lead + re.escape(alias) + trail, tl) is not None
+
+
 def resolve(title: str) -> tuple[str, str, float, float, float] | None:
     """Identify (coin_type, size_label, gross_g, purity, fine_g) from a title.
 
@@ -262,7 +278,7 @@ def resolve(title: str) -> tuple[str, str, float, float, float] | None:
             # Within a single size_label's aliases, longer aliases first
             # (e.g. "tenth ounce" vs "oz") so substring traps don't fire.
             for alias in sorted(syns, key=len, reverse=True):
-                if alias in tl:
+                if _size_alias_in(alias, tl):
                     gross_g, purity = COINS[coin_type][size_label]
                     return (
                         coin_type, size_label, gross_g, purity,

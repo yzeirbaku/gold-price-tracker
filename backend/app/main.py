@@ -39,8 +39,7 @@ from app.reports.storage import (
     upsert_report,
 )
 from app.reports.windows import (
-    previous_calendar_month,
-    previous_calendar_week,
+    cron_window,
     rolling_last_n_days,
 )
 from app.retention import prune_snapshots
@@ -459,7 +458,16 @@ async def snapshot(_: None = Depends(require_api_key)) -> dict[str, object]:
     # its own short-lived connections per write. The fx_stale and outlier
     # guards above already gated us; whatever evaluate_alerts reads from the
     # just-committed bar_rows/coin_rows is data we trust.
-    await evaluate_alerts(pool, fetched_at, bar_rows, coin_rows)
+    #
+    # Best-effort for the same reason as the prune below: the snapshot has
+    # already committed, so a 500 here would only make QStash retry the whole
+    # fan-out — a duplicate tick minutes later, and possibly a repeat email
+    # if the failure hit between the send and the mute UPDATE. Alerts that
+    # didn't fire this tick are re-evaluated on the next one.
+    try:
+        await evaluate_alerts(pool, fetched_at, bar_rows, coin_rows)
+    except Exception:
+        logger.exception("alert evaluation failed after snapshot commit")
 
     # Retention runs last: after the write has committed and after alerts have
     # gone out, so a slow or failing prune can never delay an alert email or
@@ -785,8 +793,7 @@ async def reports_cron(
     if pool is None:
         raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
     now = datetime.now(tz=UTC)
-    window = (previous_calendar_week(now) if type == "weekly"
-              else previous_calendar_month(now))
+    window = cron_window("weekly" if type == "weekly" else "monthly", now)
     async with pool.acquire() as conn:
         html = await build_report(conn, window)
         rid = await upsert_report(

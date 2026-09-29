@@ -138,3 +138,24 @@ def test_sovereign_fraction_fine_weights_are_distinct():
     quarter = resolve("1/4 Sovereign")[4]
     assert half == pytest.approx(full / 2, rel=0.02)
     assert quarter == pytest.approx(full / 4, rel=0.02)
+
+
+@pytest.mark.parametrize(
+    ("title", "size_label"),
+    [
+        # A year followed by a word used to match a gram size as a
+        # substring: "2021 guld" contains "1 g", "2023 gold" contains "3 g".
+        ("Kinesisk Panda 2021 guldmønt 1/2 oz", "1/2 oz"),
+        ("Panda 1 oz 2021 gold", "1 oz"),
+        ("Panda 1 g 2023 guld", "1 g"),
+        ("Panda 1 guldmønt 1/2 oz", "1/2 oz"),
+        ("Kinesisk Panda 30g 2024", "30 g"),
+        ("Panda 8 gram 2025", "8 g"),
+    ],
+)
+def test_resolve_ignores_sizes_inside_years_and_words(
+    title: str, size_label: str,
+) -> None:
+    got = resolve(title)
+    assert got is not None
+    assert got[1] == size_label

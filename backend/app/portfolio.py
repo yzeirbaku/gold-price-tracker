@@ -159,7 +159,9 @@ async def _fetch_historical_spot_dkk_per_g(metal: Metal, purchased_at: datetime)
     on_date = purchased_at.astimezone(UTC).date()
     today = datetime.now(UTC).date()
     if on_date >= today:
-        current = await _current_spot_dkk_per_g()
+        # This value is frozen onto the purchase row, so the same rule as the
+        # historical branch applies: no stale fallback FX rate, ever.
+        current = await _current_spot_dkk_per_g(require_fresh_fx=True)
         return current[metal]
     try:
         usd_per_g = await fetch_historical_usd_per_gram(metal, on_date)
@@ -180,8 +182,15 @@ async def _fetch_historical_spot_dkk_per_g(metal: Metal, purchased_at: datetime)
     return Decimal(str(usd_per_g * dkk_rate)).quantize(Decimal("0.0001"))
 
 
-async def _current_spot_dkk_per_g() -> dict[Metal, Decimal]:
+async def _current_spot_dkk_per_g(
+    *, require_fresh_fx: bool = False,
+) -> dict[Metal, Decimal]:
     """Live spot in DKK/g for both metals. Uses today's FX.
+
+    `require_fresh_fx=True` refuses the stamped fallback rate `fetch_usd_to`
+    returns when Frankfurter is down (502 instead). Display paths accept it —
+    P&L is recomputed on every load — but a value written to `purchases`
+    must not be baked from a rate that can be months old.
 
     Self-protected with LIVE_SPOT_TIMEOUT_S — every portfolio endpoint depends
     on this and the two upstream calls' httpx defaults compound. Surfaces
@@ -191,9 +200,12 @@ async def _current_spot_dkk_per_g() -> dict[Metal, Decimal]:
     async def _inner() -> dict[Metal, Decimal]:
         async with httpx.AsyncClient() as client:
             usd_per_g = await fetch_spot_usd_per_gram(client)
-            rates, _ = await fetch_usd_to(client)
+            rates, fx_stale = await fetch_usd_to(client)
         if usd_per_g is None:
             raise HTTPException(status_code=502, detail="live spot unavailable")
+        if require_fresh_fx and fx_stale:
+            logger.warning("live_fx_stale: refusing to freeze fallback FX onto a purchase")
+            raise HTTPException(status_code=502, detail="live_fx_unavailable")
         dkk = rates["DKK"]
         return {
             "gold": Decimal(str(usd_per_g["gold"] * dkk)).quantize(Decimal("0.0001")),

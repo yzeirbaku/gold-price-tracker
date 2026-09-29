@@ -818,3 +818,39 @@ async def test_current_spot_raises_502_on_timeout(monkeypatch) -> None:
     with pytest.raises(HTTPException) as ei:
         await _current_spot_dkk_per_g()
     assert ei.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_same_day_purchase_refuses_stale_fallback_fx(monkeypatch) -> None:
+    """Frankfurter down → fetch_usd_to hands back the stamped fallback with
+    stale=True. The same-day branch freezes that value onto the purchase row,
+    so it must 502 rather than bake a months-old rate into cost basis."""
+    from fastapi import HTTPException
+
+    _freeze_portfolio_now(monkeypatch, datetime(2026, 5, 29, 9, 0, tzinfo=UTC))
+    with (
+        patch("app.portfolio.fetch_spot_usd_per_gram",
+              AsyncMock(return_value={"gold": 100.0, "silver": 1.2})),
+        patch("app.portfolio.fetch_usd_to",
+              AsyncMock(return_value=({"EUR": 0.92, "DKK": 6.85}, True))),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await _fetch_historical_spot_dkk_per_g(
+            "gold", datetime(2026, 5, 29, 12, 0, tzinfo=UTC),
+        )
+    assert exc.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_current_spot_accepts_stale_fx_for_display() -> None:
+    """Display paths (list/P&L) keep working on the fallback rate."""
+    from app.portfolio import _current_spot_dkk_per_g
+
+    with (
+        patch("app.portfolio.fetch_spot_usd_per_gram",
+              AsyncMock(return_value={"gold": 100.0, "silver": 1.0})),
+        patch("app.portfolio.fetch_usd_to",
+              AsyncMock(return_value=({"EUR": 0.92, "DKK": 6.85}, True))),
+    ):
+        got = await _current_spot_dkk_per_g()
+    assert got["gold"] == Decimal("685.0000")

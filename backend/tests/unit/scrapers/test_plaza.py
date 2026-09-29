@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from app.scrapers.plaza import PlazaScraper
@@ -22,3 +23,26 @@ def test_plaza_returns_none_for_unknown_size() -> None:
     html = FIXTURE.read_text(encoding="utf-8")
     listing = PlazaScraper().parse(html, size_g=1234.0)
     assert listing is None
+
+
+def _mark_5g_sold_out(html: str) -> str:
+    """Inject the theme's sold-out badge into the 5 g card's label slot."""
+    idx = html.index("Guldbarre 5 gram Valcambi Suisse</a>")
+    labels = list(re.finditer(r'<div\s+class="product-page-labels"[^>]*>', html[:idx]))[-1]
+    badge = '<span class="badge out-of-stock">Udsolgt</span>'
+    return html[:labels.end()] + badge + html[labels.end():]
+
+
+def test_plaza_marks_sold_out_bar_out_of_stock() -> None:
+    html = _mark_5g_sold_out(FIXTURE.read_text(encoding="utf-8"))
+    listing = PlazaScraper().parse(html, size_g=5.0)
+    assert listing is not None
+    assert listing.status == "out_of_stock"
+    assert listing.in_stock is False
+
+
+def test_plaza_other_sizes_unaffected_by_sold_out_badge() -> None:
+    html = _mark_5g_sold_out(FIXTURE.read_text(encoding="utf-8"))
+    listing = PlazaScraper().parse(html, size_g=10.0)
+    assert listing is not None
+    assert listing.status == "ok"
