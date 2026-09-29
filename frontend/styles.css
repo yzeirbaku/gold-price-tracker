@@ -898,7 +898,10 @@ tr.history-row > td {
 @media (hover: hover) and (pointer: fine) {
   .dd-list li:hover { background: rgba(255, 245, 0, 0.22); }
 }
-.dd-list li.selected,
+/* The selected option's highlight. This rule was missing its body — a bare
+   `.dd-list li.selected,` ran straight into the @media below, which made the
+   whole selector invalid, so the current choice was never highlighted. */
+.dd-list li.selected { background: rgba(255, 245, 0, 0.22); }
 @media (hover: hover) and (pointer: fine) {
   .dd-list li.selected:hover { background: rgba(255, 245, 0, 0.36); }
 }
@@ -1481,3 +1484,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .toast.show { opacity: 0.95; }
 .toast[data-kind="error"] { background: #c0392b; color: #fff; }
 
+
+/* Alert edit mode: the target is shown but can't be changed (see
+   setAlertTargetLocked in app.js). */
+.dd-trigger:disabled { opacity: 0.6; cursor: not-allowed; }
+.theme-option:has(input:disabled) { opacity: 0.6; cursor: not-allowed; }
+.alert-target-hint { margin: -0.2rem 0 0.8rem; }

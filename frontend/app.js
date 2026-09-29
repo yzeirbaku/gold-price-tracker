@@ -334,11 +334,20 @@ async function fetchSpot() {
       $('#spot-content').textContent = 'Bad API key — open Settings.';
       return;
     }
-    if (!resp.ok) return;
+    if (!resp.ok) { markSpotUnavailable(); return; }
     renderSpot(await resp.json());
   } catch {
-    /* silent — likely cold start or offline; next tick will retry */
+    // Likely a cold start or offline; the next 30s tick retries.
+    markSpotUnavailable();
   }
+}
+
+// Only before the first successful render: afterwards the last good value
+// stays on screen and the next tick refreshes it. Before it, the card sat
+// on "Fetching spot…" forever with no hint anything had gone wrong.
+function markSpotUnavailable() {
+  if (hasRenderedSpot) return;
+  $('#spot-content').textContent = 'Spot price unavailable right now — retrying…';
 }
 
 // ── Snapshot-cron freshness indicator ────────────────────────────────────
@@ -382,12 +391,19 @@ async function fetchSnapshotAge() {
   }
 }
 
+// Bumped per fetchPrices call. A /prices scrape takes seconds, so tapping
+// 5 g then 10 g can leave both in flight; only the newest may render, or a
+// slow 5 g response lands last and shows 5 g prices under the 10 g pill.
+let pricesReqSeq = 0;
+
 async function fetchPrices(size) {
   const apiKey = loadApiKey();
   if (!apiKey) {
     showMessage('Open Settings to configure your API key.');
     return;
   }
+  const seq = ++pricesReqSeq;
+  const isStale = () => seq !== pricesReqSeq;
   lastSize = size;
   showSpinner();
   $('#listings').hidden = true;
@@ -401,12 +417,19 @@ async function fetchPrices(size) {
       headers: { 'X-API-Key': apiKey },
     });
   } catch (e) {
-    showMessage(await userFacingError({ err: e, fallback: 'Could not load prices.' }));
+    const msg = await userFacingError({ err: e, fallback: 'Could not load prices.' });
+    if (!isStale()) showRetryableMessage(msg);
     return;
   }
+  if (isStale()) return;
   if (resp.status === 401) { showMessage('Bad API key — open Settings.'); return; }
-  if (!resp.ok) { showMessage(await userFacingError({ res: resp, fallback: 'Could not load prices.' })); return; }
+  if (!resp.ok) {
+    const msg = await userFacingError({ res: resp, fallback: 'Could not load prices.' });
+    if (!isStale()) showRetryableMessage(msg);
+    return;
+  }
   const data = await resp.json();
+  if (isStale()) return;
   renderPrices(data);
   // Reuse the spot block from the prices response — it's fresher than the cached one.
   renderSpot(data);
@@ -492,6 +515,13 @@ function showSpinner() {
 function showMessage(msg) {
   $('#loading').textContent = msg;
   $('#loading').hidden = false;
+}
+// Failures a retry can fix (network, 5xx) keep the refresh button visible —
+// it was hidden at the start of the fetch and only came back on success, so
+// an error left no way to try again short of re-tapping a size pill.
+function showRetryableMessage(msg) {
+  showMessage(msg);
+  $('#refresh').hidden = false;
 }
 function setActiveSize(size) {
   document.querySelectorAll('#size-picker button').forEach(b => {
@@ -581,11 +611,14 @@ function expandHistory(rowEl, config) {
   fetchBuyContext();
 }
 
+let buyContextReqSeq = 0;
+
 async function fetchBuyContext() {
   const el = document.getElementById('buy-context');
   if (!el || !historyState.contextUrl) return;
   const apiKey = loadApiKey();
   if (!apiKey) return;
+  const seq = ++buyContextReqSeq;
   el.innerHTML = '';
   try {
     const resp = await fetch(historyState.contextUrl, {
@@ -593,7 +626,11 @@ async function fetchBuyContext() {
     });
     if (!resp.ok) return;  // silent — chart still works without context
     const data = await resp.json();
-    renderBuyContext(el, data);
+    // Re-query: the row this was fetched for may have closed, or another
+    // row's panel replaced it, while the request was in flight.
+    const current = document.getElementById('buy-context');
+    if (seq !== buyContextReqSeq || !current) return;
+    renderBuyContext(current, data);
   } catch (e) {
     // Network error — silently skip. Chart already loaded fine.
   }
@@ -644,10 +681,17 @@ function relativeTimeFrom(iso) {
   return `${day}d ago`;
 }
 
+// Same newest-wins guard as fetchPrices: expanding row A then row B, or
+// flipping range pills quickly, must not draw A's (or the old range's)
+// series into the panel that is open now.
+let historyReqSeq = 0;
+
 async function fetchHistory() {
   const apiKey = loadApiKey();
   if (!apiKey) { setHistoryStatus('Open Settings to configure your API key.'); return; }
   if (!historyState.historyUrlBuilder) return;
+  const seq = ++historyReqSeq;
+  const isStale = () => seq !== historyReqSeq;
   setHistoryStatus('Loading…');
   let resp;
   try {
@@ -655,12 +699,20 @@ async function fetchHistory() {
       headers: { 'X-API-Key': apiKey },
     });
   } catch (e) {
-    setHistoryStatus(await userFacingError({ err: e, fallback: 'Could not load history.' }));
+    const msg = await userFacingError({ err: e, fallback: 'Could not load history.' });
+    if (!isStale()) setHistoryStatus(msg);
     return;
   }
+  if (isStale()) return;
   if (resp.status === 503) { setHistoryStatus('History not configured on the server yet.'); return; }
-  if (!resp.ok) { setHistoryStatus(await userFacingError({ res: resp, fallback: 'Could not load history.' })); return; }
-  renderHistory(await resp.json());
+  if (!resp.ok) {
+    const msg = await userFacingError({ res: resp, fallback: 'Could not load history.' });
+    if (!isStale()) setHistoryStatus(msg);
+    return;
+  }
+  const data = await resp.json();
+  if (isStale()) return;
+  renderHistory(data);
 }
 
 function setHistoryStatus(msg) {
@@ -813,11 +865,15 @@ async function fetchCoins() {
     resp = await fetch(`${BACKEND_URL}/coins`, { headers: { 'X-API-Key': apiKey } });
   } catch (e) {
     showCoinsMessage(await userFacingError({ err: e, fallback: 'Could not load coin prices.' }));
+    $('#coins-refresh').hidden = false;
     return;
   }
   if (resp.status === 401) { showCoinsMessage('Bad API key — open Settings.'); return; }
-  if (resp.status === 503) { showCoinsMessage('History not configured on the server yet.'); return; }
-  if (!resp.ok) { showCoinsMessage(await userFacingError({ res: resp, fallback: 'Could not load coin prices.' })); return; }
+  if (!resp.ok) {
+    showCoinsMessage(await userFacingError({ res: resp, fallback: 'Could not load coin prices.' }));
+    $('#coins-refresh').hidden = false;
+    return;
+  }
   renderCoins(await resp.json());
 }
 
@@ -1142,6 +1198,10 @@ $('#settings-dialog').addEventListener('close', () => {
     applyTheme(theme);
     fetchSpot();   // immediately try with the new key
     fetchSnapshotAge();
+    // The lists were left saying "Open Settings to configure your API key."
+    // after the user had just done exactly that.
+    fetchPrices(lastSize ?? 10);
+    if (currentTab === 'coins') fetchCoins();
   }
 });
 
@@ -1425,18 +1485,26 @@ function monthLabel(periodStart) {
   return `${names[parseInt(m, 10) - 1]} ${y}`;
 }
 
-async function downloadReport(id) {
-  const res = await fetch(`${BACKEND_URL}/reports/${id}`, {
-    headers: { 'X-API-Key': loadApiKey() },
-  });
-  if (!res.ok) {
-    await infoDialog({
-      title: 'Download failed',
-      message: await userFacingError({ res, fallback: 'Could not download this report.' }),
-    });
-    return;
-  }
-  await streamToFileFromResponse(res);
+async function downloadReport(id, button) {
+  // The whole row is the tap target, so without a busy state a double-tap
+  // downloaded the report twice; and a network failure used to reject
+  // unhandled, so nothing at all was shown offline.
+  await withBusy(button, async () => {
+    let message = null;
+    try {
+      const res = await fetch(`${BACKEND_URL}/reports/${id}`, {
+        headers: { 'X-API-Key': loadApiKey() },
+      });
+      if (res.ok) {
+        await streamToFileFromResponse(res);
+        return;
+      }
+      message = await userFacingError({ res, fallback: 'Could not download this report.' });
+    } catch (err) {
+      message = await userFacingError({ err, fallback: 'Could not download this report.' });
+    }
+    await infoDialog({ title: 'Download failed', message });
+  }, '…');
 }
 
 async function generateOnDemand(range, button) {
@@ -1446,7 +1514,10 @@ async function generateOnDemand(range, button) {
       <div class="spinner"><span></span><span></span><span></span></div>
       <div class="loading-text">Generating report…</div>
     </div>`;
-  await withBusy(button, async () => {
+  // Both generate buttons are locked while either runs — each call is a full
+  // report build on the server, and they share the one status line.
+  const other = button?.id === 'reports-gen-week' ? $('#reports-gen-month') : $('#reports-gen-week');
+  await withBusy(other, () => withBusy(button, async () => {
     try {
       const res = await fetch(
         `${BACKEND_URL}/reports/generate?range=${range}`,
@@ -1461,7 +1532,7 @@ async function generateOnDemand(range, button) {
     } catch (err) {
       status.textContent = await userFacingError({ err, fallback: 'Could not generate report.' });
     }
-  });
+  }, 'Generating…'));
 }
 
 async function streamToFileFromResponse(res) {
@@ -1488,7 +1559,9 @@ $('#reports-gen-month').addEventListener('click', (e) => {
 $('#reports-view').addEventListener('click', (e) => {
   const item = e.target.closest('.archive-item');
   if (!item) return;
-  downloadReport(parseInt(item.dataset.id, 10));
+  const button = item.querySelector('.archive-download');
+  if (button?.disabled) return;  // already downloading
+  downloadReport(parseInt(item.dataset.id, 10), button);
 });
 
 // Auth + portfolio ——————————————————————————————————————————————————————————
@@ -2813,6 +2886,11 @@ function openAlertDialog(mode, existing = null) {
   const opts = alertsOptions || { bar_sizes: [2.5, 5, 10, 20], coin_options: [] };
   populateAlertDialogOptions(opts);
   const enabledField = $('#alert-enabled-field');
+  // Editing can only change threshold and enabled (the PATCH diff carries
+  // nothing else), so the target is shown but locked. It used to stay
+  // editable: switching 10 g to 20 g closed the dialog as if saved while the
+  // alert kept watching 10 g.
+  setAlertTargetLocked(mode.kind === 'edit' && !!existing);
   if (mode.kind === 'edit' && existing) {
     titleEl.textContent = 'Edit alert';
     enabledField.hidden = false;
@@ -2836,6 +2914,15 @@ function openAlertDialog(mode, existing = null) {
   $('#alert-error').hidden = true;
   refreshAlertPreview();
   openDialog($('#alert-dialog'));
+}
+
+function setAlertTargetLocked(locked) {
+  document.querySelectorAll('input[name="alert-kind"]').forEach((r) => { r.disabled = locked; });
+  ['#alert-bar-size', '#alert-coin-type', '#alert-coin-size'].forEach((sel) => {
+    const trigger = $(sel).querySelector('.dd-trigger');
+    trigger.disabled = locked;
+  });
+  $('#alert-target-hint').hidden = !locked;
 }
 
 // Render items into a .dd container's <ul>. `items` is [{value, label}] and
