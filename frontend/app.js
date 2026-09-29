@@ -9,9 +9,14 @@ function saveApiKey(k) { localStorage.setItem(API_KEY_STORAGE, k); }
 
 function loadTheme() { return localStorage.getItem(THEME_STORAGE) || 'dark'; }
 function saveTheme(t) { localStorage.setItem(THEME_STORAGE, t); }
+// Browser chrome colour (Android status bar, iOS Safari toolbar tint) follows
+// the page's `--bg`, so the light theme doesn't sit under a near-black bar.
+const THEME_COLOR = { light: '#f7f6f2', dark: '#0f0f10' };
 function applyTheme(t) {
   if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
   else document.documentElement.removeAttribute('data-theme');
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', THEME_COLOR[t === 'light' ? 'light' : 'dark']);
 }
 // Apply persisted theme before first paint to avoid a flash of dark on light.
 applyTheme(loadTheme());

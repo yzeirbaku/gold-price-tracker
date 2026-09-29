@@ -65,6 +65,17 @@ html, body { overscroll-behavior: none; }
  * blocked by the viewport meta's maximum-scale/user-scalable in index.html.
  * Together they stop page zoom on mobile. */
 html { touch-action: manipulation; }
+/* Stop iOS inflating text when the phone rotates to landscape. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+/* No visible scrollbars anywhere — an installed PWA should read as an app,
+ * not a document. Scrolling itself is untouched (wheel, touch, keyboard and
+ * programmatic scrolling all still work); only the bar is hidden. Affordance
+ * comes from content peeking past the fold instead. Mirrors formicarium. */
+* {
+  scrollbar-width: none;      /* Firefox */
+  -ms-overflow-style: none;   /* legacy Edge */
+}
+*::-webkit-scrollbar { width: 0; height: 0; display: none; }
 body {
   margin: 0; padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
