@@ -28,3 +28,16 @@ def test_vitusguld_coins_returns_recognized_listings(html: str) -> None:
 def test_vitusguld_coins_skips_unrecognized(html: str) -> None:
     results = VitusGuldCoinsScraper().parse(html)
     assert all(r.coin_type is not None for r in results)
+
+
+def test_vitusguld_coins_keeps_gram_pandas() -> None:
+    """Vitus spells grams "15 gr." — whole-token size matching once dropped
+    the 3/8/15 g Pandas from this listing."""
+    from pathlib import Path
+
+    from app.scrapers.vitusguld_coins import VitusGuldCoinsScraper
+
+    fixture = Path(__file__).parents[2] / "fixtures" / "vitusguld_coins.html"
+    html = fixture.read_text(encoding="utf-8")
+    sizes = {r.size_label for r in VitusGuldCoinsScraper().parse(html) if r.coin_type == "Panda"}
+    assert {"3 g", "8 g", "15 g"} <= sizes

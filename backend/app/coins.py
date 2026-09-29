@@ -234,11 +234,17 @@ def _size_alias_in(alias: str, tl: str) -> bool:
     gram labels rank above "1/2 oz" by specificity and were tried first.
     The alias must not continue a number on its left (digit, "/", "." or
     ","), and when it ends in a letter or digit it must not run on into a
-    word on its right ("1 g" in "1 guldmønt").
+    word on its right ("1 g" in "1 guldmønt"). Dealer spellings that extend
+    an alias are let through first: Vitus writes "15 gr.", plurals such as
+    "4 dukater" / "1/2 sovereigns" / "30 grams" — rejecting those dropped
+    real listings, and "1/2 sovereigns" fell back to a Full sovereign.
     """
     lead = r"(?<![\d/.,])"
-    trail = r"(?![a-z0-9æøå])" if alias[-1].isalnum() else ""
-    return re.search(lead + re.escape(alias) + trail, tl) is not None
+    if alias[-1].isalnum():
+        tail = r"(?:r\.?|rams?|s|er)?(?![a-z0-9æøå])"
+    else:
+        tail = ""
+    return re.search(lead + re.escape(alias) + tail, tl) is not None
 
 
 def resolve(title: str) -> tuple[str, str, float, float, float] | None:

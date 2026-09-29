@@ -17,6 +17,7 @@ from app.scrapers.base import (
     make_html_parser,
     now_utc,
 )
+from app.scrapers.plaza import is_sold_out
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,8 @@ class PlazaCoinsScraper:
                     price = float(raw)
                 except ValueError:
                     pass
-            in_stock = card.css_first(".price ins") is not None
+            # Same theme as the bar listing; see plaza.is_sold_out.
+            in_stock = not is_sold_out(card)
             href = title_node.attributes.get("href") or ""
             url = absolute_url(href, self.base_url)
             out.append(CoinListing(

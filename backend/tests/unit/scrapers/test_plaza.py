@@ -46,3 +46,29 @@ def test_plaza_other_sizes_unaffected_by_sold_out_badge() -> None:
     listing = PlazaScraper().parse(html, size_g=10.0)
     assert listing is not None
     assert listing.status == "ok"
+
+
+def _card(labels_inner: str):  # noqa: ANN202
+    from selectolax.parser import HTMLParser
+
+    html = (
+        '<product-card class="product-card"><div class="product-page-labels">'
+        f"{labels_inner}</div></product-card>"
+    )
+    return HTMLParser(html).css_first(".product-card")
+
+
+def test_is_sold_out_reads_badge_not_price_markup() -> None:
+    from app.scrapers.plaza import is_sold_out
+
+    assert is_sold_out(_card("")) is False
+    assert is_sold_out(_card('<span class="badge out-of-stock">Udsolgt</span>')) is True
+    assert is_sold_out(_card("<span>Sold out</span>")) is True
+    # A sale badge alone must not hide an in-stock bar.
+    assert is_sold_out(_card('<span class="badge sale">Tilbud</span>')) is False
+
+
+def test_almost_sold_out_label_is_still_in_stock() -> None:
+    from app.scrapers.plaza import is_sold_out
+
+    assert is_sold_out(_card("<span>Næsten udsolgt</span>")) is False

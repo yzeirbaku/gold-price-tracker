@@ -151,6 +151,11 @@ def test_sovereign_fraction_fine_weights_are_distinct():
         ("Panda 1 guldmønt 1/2 oz", "1/2 oz"),
         ("Kinesisk Panda 30g 2024", "30 g"),
         ("Panda 8 gram 2025", "8 g"),
+        # Dealer spellings that extend an alias must still match.
+        ("15 gr. Kinesisk Guld Panda Guldmønt, 24 karat 999", "15 g"),
+        ("Panda 30gr", "30 g"),
+        ("Østrigsk 4 dukater", "4 ducat"),
+        ("1/2 sovereigns 2020", "Half"),
     ],
 )
 def test_resolve_ignores_sizes_inside_years_and_words(

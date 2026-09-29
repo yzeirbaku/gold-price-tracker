@@ -19,11 +19,11 @@ from app.scrapers.base import (
 logger = logging.getLogger(__name__)
 
 
-def _is_sold_out(card: Node) -> bool:
+def is_sold_out(card: Node) -> bool:
     """True when the card carries the theme's sold-out badge.
 
     Stock used to be read as `.price ins is not None`, but the price lookup
-    above already requires `.price ins`, so every priced card counted as in
+    in `parse` already requires `.price ins`, so every priced card counted as in
     stock and a sold-out bar could win "cheapest" and fire alerts. The
     theme renders its badges (Udsolgt / Sold out / Tilbud) inside
     `.product-page-labels`, empty for a buyable card. Only sold-out wording
@@ -32,7 +32,7 @@ def _is_sold_out(card: Node) -> bool:
     labels = card.css_first(".product-page-labels")
     if labels is None:
         return False
-    text = labels.text(strip=True).lower()
+    text = labels.text(strip=True).lower().replace("næsten udsolgt", "")
     classes = " ".join(n.attributes.get("class") or "" for n in labels.css("[class]")).lower()
     return (
         "udsolgt" in text or "sold out" in text
@@ -102,7 +102,7 @@ class PlazaScraper:
             price = parse_dkk_price(price_node.text(strip=True))
             if price is None:
                 continue
-            in_stock = not _is_sold_out(card)
+            in_stock = not is_sold_out(card)
             raw_brand = title.split(needle, 1)[1] if needle in title else ""
             candidates.append((price, in_stock, normalize_brand(raw_brand), card))
 

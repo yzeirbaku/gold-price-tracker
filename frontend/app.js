@@ -397,12 +397,14 @@ async function fetchSnapshotAge() {
 let pricesReqSeq = 0;
 
 async function fetchPrices(size) {
+  // Bumped before the key check too, so clearing the key supersedes a
+  // request already in flight instead of letting it paint over the prompt.
+  const seq = ++pricesReqSeq;
   const apiKey = loadApiKey();
   if (!apiKey) {
     showMessage('Open Settings to configure your API key.');
     return;
   }
-  const seq = ++pricesReqSeq;
   const isStale = () => seq !== pricesReqSeq;
   lastSize = size;
   showSpinner();
@@ -1504,7 +1506,7 @@ async function downloadReport(id, button) {
       message = await userFacingError({ err, fallback: 'Could not download this report.' });
     }
     await infoDialog({ title: 'Download failed', message });
-  }, '…');
+  });
 }
 
 async function generateOnDemand(range, button) {
