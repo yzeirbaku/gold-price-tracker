@@ -436,6 +436,32 @@ MetalFilter = Literal["all", "gold", "silver"]
 # decimation to ≤ HISTORY_MAX_POINTS keeps everything snappy.
 HISTORY_MAX_POINTS = 500
 
+# Decimation happens in SQL, not after the fact: shipping ~26k rows from Neon
+# and running Decimal math over each one only to keep 500 was what made the
+# 1Y / ALL pills slow. Picking spot rows first is exactly equivalent to
+# picking reconstructed points, because the value at time t depends only on
+# purchases <= t — never on the spot rows in between.
+#
+# One row per time bucket (the *first* in each, so points[0] is the true
+# period start that _period_change opens from), plus the newest row so the
+# tail stays within 20 min even when the live-spot fetch fails.
+_SPOT_BUCKETED_SQL = """
+    SELECT fetched_at, gold_dkk_per_g, silver_dkk_per_g FROM (
+        SELECT DISTINCT ON (date_bin($2::interval, fetched_at, $1))
+               fetched_at, gold_dkk_per_g, silver_dkk_per_g
+        FROM spot_snapshots
+        WHERE fetched_at >= $1
+        ORDER BY date_bin($2::interval, fetched_at, $1), fetched_at ASC
+    ) bucketed
+    UNION
+    (SELECT fetched_at, gold_dkk_per_g, silver_dkk_per_g
+     FROM spot_snapshots
+     WHERE fetched_at >= $1
+     ORDER BY fetched_at DESC LIMIT 1)
+    ORDER BY fetched_at ASC
+"""
+_MIN_BUCKET = timedelta(minutes=1)
+
 
 def _reconstruct_value_series(
     purchases: list[dict[str, Any]],
@@ -531,6 +557,20 @@ def _period_change(
     }
 
 
+async def _live_spot_or_none() -> dict[Metal, Decimal] | None:
+    """_current_spot_dkk_per_g self-protects with LIVE_SPOT_TIMEOUT_S and
+    raises HTTPException(502) on either upstream failure or timeout. Caught
+    here so the chart degrades to "snapshot tail only" instead of failing the
+    whole endpoint — for the other portfolio endpoints (list/create/update)
+    the 502 propagates, since they can't produce a useful response without
+    live spot."""
+    try:
+        return await _current_spot_dkk_per_g()
+    except HTTPException:
+        logger.warning("portfolio_history: live spot unavailable; using snapshot tail")
+        return None
+
+
 @router.get("/history")
 async def portfolio_history(
     range: str = "1m",
@@ -602,12 +642,21 @@ async def portfolio_history(
             clamped = first_purchase_at > window_start
             range_start = max(window_start, first_purchase_at)
 
-        spot_rows_raw = await conn.fetch(
-            "SELECT fetched_at, gold_dkk_per_g, silver_dkk_per_g "
-            "FROM spot_snapshots WHERE fetched_at >= $1 "
-            "ORDER BY fetched_at ASC",
-            range_start,
+        # Live spot is fetched concurrently with the snapshot query rather
+        # than after it — it's an upstream round-trip (up to
+        # LIVE_SPOT_TIMEOUT_S) that has no reason to wait on the DB.
+        live_spot = asyncio.create_task(_live_spot_or_none())
+        bucket = max(
+            (datetime.now(tz=UTC) - range_start) / HISTORY_MAX_POINTS,
+            _MIN_BUCKET,
         )
+        try:
+            spot_rows_raw = await conn.fetch(
+                _SPOT_BUCKETED_SQL, range_start, bucket,
+            )
+        except BaseException:
+            live_spot.cancel()
+            raise
 
     spot_rows = [dict(r) for r in spot_rows_raw]
 
@@ -619,31 +668,21 @@ async def portfolio_history(
     # lone synthetic point produces a single-dot chart and confuses the
     # frontend's "not enough snapshot history" empty state. Letting points
     # stay empty lets that empty state render correctly.
-    if spot_rows_raw:
-        try:
-            # _current_spot_dkk_per_g self-protects with LIVE_SPOT_TIMEOUT_S
-            # and raises HTTPException(502) on either upstream failure or
-            # timeout. Caught here so the chart degrades to "snapshot tail
-            # only" instead of failing the whole endpoint — for the other
-            # portfolio endpoints (list/create/update) the 502 propagates,
-            # since they can't produce a useful response without live spot.
-            current = await _current_spot_dkk_per_g()
-            now_t = datetime.now(tz=UTC)
-            spot_rows.append({
-                "fetched_at": now_t,
-                "gold_dkk_per_g": current["gold"],
-                "silver_dkk_per_g": current["silver"],
-            })
-            # Defensive sort: in pathological cases (clock skew, test seed
-            # data with future fetched_at) the synthetic point may not be
-            # strictly latest. The two-pointer walk in
-            # _reconstruct_value_series assumes ascending order — one
-            # cheap sort here keeps it bulletproof.
-            spot_rows.sort(key=lambda r: r["fetched_at"])
-        except HTTPException:
-            # Live spot temporarily unavailable / slow — chart tail will
-            # lag by ≤ 20 min but the endpoint still returns promptly.
-            logger.warning("portfolio_history: live spot unavailable; using snapshot tail")
+    if not spot_rows_raw:
+        live_spot.cancel()
+    elif (current := await live_spot) is not None:
+        now_t = datetime.now(tz=UTC)
+        spot_rows.append({
+            "fetched_at": now_t,
+            "gold_dkk_per_g": current["gold"],
+            "silver_dkk_per_g": current["silver"],
+        })
+        # Defensive sort: in pathological cases (clock skew, test seed
+        # data with future fetched_at) the synthetic point may not be
+        # strictly latest. The two-pointer walk in
+        # _reconstruct_value_series assumes ascending order — one
+        # cheap sort here keeps it bulletproof.
+        spot_rows.sort(key=lambda r: r["fetched_at"])
 
     points = _reconstruct_value_series(purchases, spot_rows)
     points = _downsample(points)

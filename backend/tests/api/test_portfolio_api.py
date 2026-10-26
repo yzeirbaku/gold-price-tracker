@@ -3,10 +3,11 @@
 Historical spot is stubbed in conftest.mock_external so writes don't depend
 on yfinance / frankfurter.
 """
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 
 from tests.api.conftest import auth_headers, make_session, sample_purchase_payload
 
@@ -251,3 +252,54 @@ async def test_patch_null_handling(client, pool, payload, expect):
         f"/portfolio/{created['id']}", json=payload, headers=auth_headers(token),
     )
     assert r.status_code == expect, r.text
+
+
+async def test_history_1y_decimates_in_sql_and_keeps_both_ends(client, pool):
+    """A year of 20-min snapshots is ~26k rows. Decimation now happens in SQL
+    (one row per time bucket) so 1Y / ALL stop shipping and reconstructing
+    every row. What must survive the bucketing: the first point is the true
+    period start (_period_change opens from it), the newest DB row is still
+    there when live spot fails, and the point count stays capped."""
+    _, token = await make_session(pool)
+    created = (await client.post(
+        "/portfolio",
+        json={
+            "metal": "gold", "gross_weight_g": "10", "purity": "1",
+            "price_paid_dkk": "6000", "purchased_at": "2025-01-01T12:00:00Z",
+            "label": "Old bar",
+        },
+        headers=auth_headers(token),
+    ))
+    assert created.status_code == 201, created.text
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO spot_snapshots (fetched_at, gold_dkk_per_g, silver_dkk_per_g) "
+            "SELECT t, 600 + extract(epoch FROM t - NOW()) / 1e6, 8 "
+            "FROM generate_series(NOW() - interval '400 days', NOW() - interval '5 minutes', "
+            "                     interval '20 minutes') AS t",
+        )
+        newest = await conn.fetchval("SELECT MAX(fetched_at) FROM spot_snapshots")
+
+    r = await client.get("/portfolio/history?range=1y", headers=auth_headers(token))
+    assert r.status_code == 200, r.text
+    points = r.json()["points"]
+    assert 400 <= len(points) <= 500
+    first = datetime.fromisoformat(points[0]["t"])
+    window_start = datetime.now(UTC) - timedelta(days=365)
+    assert timedelta(0) <= first - window_start < timedelta(minutes=21)
+    # Synthetic "now" point from the stubbed live spot (650 × 10 g).
+    assert points[-1]["value_dkk"] == 6500.0
+
+    from app import portfolio as portfolio_module
+
+    async def _down() -> None:
+        raise HTTPException(status_code=502, detail="down")
+
+    original = portfolio_module._current_spot_dkk_per_g
+    portfolio_module._current_spot_dkk_per_g = _down
+    try:
+        r = await client.get("/portfolio/history?range=1y", headers=auth_headers(token))
+    finally:
+        portfolio_module._current_spot_dkk_per_g = original
+    assert r.status_code == 200, r.text
+    assert datetime.fromisoformat(r.json()["points"][-1]["t"]) == newest
